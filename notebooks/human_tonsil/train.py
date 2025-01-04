@@ -1,14 +1,17 @@
 import sys
-sys.path.append('../src')
+sys.path.append('../../src')
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 import scanpy as sc
 from spaceoracle import SpaceTravLR
 
+from spaceoracle.tools.network import HumanTonsilRegulatoryNetwork
+co_grn = HumanTonsilRegulatoryNetwork()
 
 adata_train = sc.read_h5ad(
     '/ix/djishnu/shared/djishnu_kor11/training_data/snrna_human_tonsil.h5ad')
 
+print(adata_train)
 
 star = SpaceTravLR(
     adata=adata_train,
@@ -19,7 +22,9 @@ star = SpaceTravLR(
     batch_size=512,
     threshold_lambda=1e-8,
     test_mode=False,
-    save_dir='/ix/djishnu/shared/djishnu_kor11/models_v2'
+    grn=co_grn,
+    species='human',
+    save_dir='/ix/djishnu/shared/djishnu_kor11/models_snrna_human_tonsil_v2'
 )
 
 star.run()
