@@ -168,10 +168,23 @@ class Prophet(BaseTravLR):
     
     def plot_contour_shift(self, seed=1334, savepath=False):
         assert self.adata.layers.get('delta_X') is not None
-        contour_shift(self.adata, gene=self.goi, annot=self.annot_labels, seed=seed, savepath=savepath)
+
+        fig, axs = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [2, 1]})
+        axs.flatten()
+        axs[0] = contour_shift(self.adata, gene=self.goi, annot=self.annot_labels, seed=seed, ax=axs[0])
+        axs[1] = distance_shift(self.adata, ax=axs[1], annot=self.annot_labels)
+        plt.tight_layout()
+
+        if savepath:
+            plt.savefig(savepath)
+        plt.show()
+
 
     def plot_betas_goi(self, goi=None, save_dir=False, use_simulated=False, clusters=[], blur=False):
-        '''use_simulated: if True, compute rw_ligands from simulated_count, else from imputed_count'''
+        '''
+        use_simulated: if True, compute rw_ligands from simulated_count, else from imputed_count
+        blur: if True, plot the average color of the space, but doesn't work well right now
+        '''
         if goi is None:
             goi = self.goi
         betas_goi_all = get_modulator_betas(self, goi, save_dir=save_dir, use_simulated=use_simulated, clusters=clusters, blur=blur)
@@ -191,7 +204,7 @@ class Prophet(BaseTravLR):
             if betas is None:
                 self.plot_betas_goi()
                 betas = self.betas_cache[f'betas_{goi}']
-        
+                
         labels = show_beta_neighborhoods(
             self, goi, betas, 
             annot=self.annot_labels, 

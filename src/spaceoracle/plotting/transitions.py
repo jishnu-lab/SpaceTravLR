@@ -264,9 +264,25 @@ def estimate_celltype_transitions(adata, delta_X, embedding, annot='rctd_cluster
     plt.tight_layout()
     plt.show()
 
+def distance_shift(adata, annot, ax=None):
 
+    celltypes = sorted(adata.obs[annot].unique())
+    ct_idxs = {ct: np.where(adata.obs[annot] == ct)[0] for ct in celltypes}
+    delta_X = adata.layers['delta_X']
 
-def contour_shift(adata_train, gene, annot, seed=1334, savepath=False):
+    ct_deltas = {ct: np.mean(delta_X[idx]) for ct, idx in ct_idxs.items()}
+
+    # Plot distance shift
+    sns.barplot(
+        y=list(ct_deltas.keys()), x=list(ct_deltas.values()), ax=ax, 
+        hue=celltypes, hue_order=celltypes)
+    ax.set_title('Average Change in Count per Cell Type')
+    ax.set_xlabel('Average Change in Count')
+    ax.set_ylabel('Cell Type')
+    
+    return ax
+
+def contour_shift(adata_train, gene, annot, seed=1334, ax=None):
 
     # Load data
     perturbed = adata_train.layers['simulated_count']
@@ -282,8 +298,9 @@ def contour_shift(adata_train, gene, annot, seed=1334, savepath=False):
     wt_umap = umap_coords[:n_wt]
     ko_umap = umap_coords[n_wt:]
 
-    # Create elegant UMAP visualization
-    fig, ax = plt.subplots(figsize=(8, 8))
+    # Create UMAP visualization
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
 
     # Plot cell type scatter points with custom styling
     sns.scatterplot(
@@ -327,7 +344,4 @@ def contour_shift(adata_train, gene, annot, seed=1334, savepath=False):
     ax.set_xticks([])
     ax.set_yticks([])
 
-    plt.tight_layout()
-    if savepath:
-        plt.savefig(savepath, dpi=200, transparent=True)
-    plt.show()
+    return ax
