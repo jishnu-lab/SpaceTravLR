@@ -24,6 +24,12 @@ def expand_paired_interactions(df):
     
     return df
 
+def encode_labels(labels):
+    unique_labels = sorted(list(set(labels)))
+    return {i: label for i, label in enumerate(unique_labels)}
+
+
+
 class GeneRegulatoryNetwork:
     def __init__(self, organism='mouse'):
         if organism == 'mouse':
@@ -93,6 +99,49 @@ class CellOracleLinks:
             train_genes.extend(genes)
         
         return np.unique(train_genes)
+
+
+class RegulatoryFactory(CellOracleLinks):
+    def __init__(self, colink_path, organism='mouse', annot='cell_type_int'):
+        self.colink_path = colink_path
+        self.organism = organism
+        self.annot = annot
+
+        with open(self.colink_path, 'rb') as f:
+            self.links = pickle.load(f)
+
+        self.cluster_labels = encode_labels(self.links.keys())
+
+ 
+    def get_cluster_regulators(self, adata, target_gene, alpha=0.05):
+        adata_clusters = np.unique(adata.obs[self.annot])
+        regulator_dict = {}
+        all_regulators = set()
+
+        for label in adata_clusters:
+            grn_df = self.links[label]
+
+            grn_df = grn_df[(grn_df.target == target_gene) & (grn_df.p <= alpha)]
+            tfs = list(grn_df.source)
+            
+            regulator_dict[label] = tfs
+            all_regulators.update(tfs)
+
+        all_regulators = all_regulators & set(adata.to_df().columns) # only use genes also in adata
+        all_regulators = sorted(list(all_regulators))
+        regulator_masks = {}
+
+        for label, tfs in regulator_dict.items():
+            indices = [all_regulators.index(tf)+1 for tf in tfs if tf in all_regulators]
+            
+            mask = torch.zeros(len(all_regulators) + 1)     # prepend 1 for beta0
+            mask[[0] + indices] = 1 
+            regulator_masks[label] = mask
+
+        self.regulator_dict = regulator_masks
+
+        return all_regulators
+
 
         
 class SurveyRegulatoryNetwork(CellOracleLinks):
@@ -276,6 +325,121 @@ class MouseSpleenRegulatoryNetwork(CellOracleLinks):
 
         for label in adata_clusters:
             cluster = self.cluster_labels[str(label)]
+            # cluster = str(label)
+            grn_df = self.links[cluster]
+
+            grn_df = grn_df[(grn_df.target == target_gene) & (grn_df.p <= alpha)]
+            tfs = list(grn_df.source)
+            
+            regulator_dict[label] = tfs
+            all_regulators.update(tfs)
+
+        all_regulators = all_regulators & set(adata.to_df().columns) # only use genes also in adata
+        all_regulators = sorted(list(all_regulators))
+        regulator_masks = {}
+
+        for label, tfs in regulator_dict.items():
+            indices = [all_regulators.index(tf)+1 for tf in tfs if tf in all_regulators]
+            
+            mask = torch.zeros(len(all_regulators) + 1)     # prepend 1 for beta0
+            mask[[0] + indices] = 1 
+            regulator_masks[label] = mask
+
+        self.regulator_dict = regulator_masks
+
+        return all_regulators
+    
+
+
+class HumanTonsilNetwork(CellOracleLinks):
+    def __init__(self):
+
+        self.base_pth = os.path.join(
+                os.path.dirname(__file__), '..', '..', '..', 'data')
+
+        with open(self.base_pth+'/BaseGRNs/tonsil_celloracle.pkl', 'rb') as f:
+            self.links = pickle.load(f)
+
+        self.annot = 'cluster'
+
+        self.cluster_labels = {
+            0: 'Plasma Cells',
+            1: 'Cycling B Cells',
+            2: 'Follicular Dendritic Cells ',
+            3: 'Dark Zone B Cells',
+            4: 'IFN B Cells',
+            5: 'T Cells',
+            6: 'Light Zone B Cells',
+            7: 'Memory B Cells',
+            8: 'Naive B Cells',
+            9: 'GC-Tfh'
+        }
+
+
+    def get_cluster_regulators(self, adata, target_gene, alpha=0.05):
+        adata_clusters = np.unique(adata.obs[self.annot])
+        regulator_dict = {}
+        all_regulators = set()
+
+        for label in adata_clusters:
+            cluster = self.cluster_labels[int(label)]
+            grn_df = self.links[cluster]
+
+            grn_df = grn_df[(grn_df.target == target_gene) & (grn_df.p <= alpha)]
+            tfs = list(grn_df.source)
+            
+            regulator_dict[label] = tfs
+            all_regulators.update(tfs)
+
+        all_regulators = all_regulators & set(adata.to_df().columns) # only use genes also in adata
+        all_regulators = sorted(list(all_regulators))
+        regulator_masks = {}
+
+        for label, tfs in regulator_dict.items():
+            indices = [all_regulators.index(tf)+1 for tf in tfs if tf in all_regulators]
+            
+            mask = torch.zeros(len(all_regulators) + 1)     # prepend 1 for beta0
+            mask[[0] + indices] = 1 
+            regulator_masks[label] = mask
+
+        self.regulator_dict = regulator_masks
+
+        return all_regulators
+    
+
+class HumanTonsilRegulatoryNetwork(CellOracleLinks):
+    def __init__(self):
+
+        self.base_pth = os.path.join(
+            os.path.dirname(__file__), '..', '..', '..', 'data')
+
+        with open(self.base_pth+'/slidetags/tonsil_colinks.pkl', 'rb') as f:
+            self.links = pickle.load(f)
+
+        self.annot = 'cell_type_int'
+        
+        self.cluster_labels = {0: 'B_germinal_center',
+            1: 'B_memory', 
+            2: 'B_naive',
+            3: 'FDC',
+            4: 'NK',
+            5: 'T_CD4',
+            6: 'T_CD8',
+            7: 'T_double_neg',
+            8: 'T_follicular_helper',
+            9: 'mDC',
+            10: 'myeloid',
+            11: 'pDC',
+            12: 'plasma'
+        }
+
+    def get_cluster_regulators(self, adata, target_gene, alpha=0.05):
+        adata_clusters = np.unique(adata.obs[self.annot])
+        regulator_dict = {}
+        all_regulators = set()
+
+        for label in adata_clusters:
+            cluster = self.cluster_labels[label]
             # cluster = str(label)
             grn_df = self.links[cluster]
 
