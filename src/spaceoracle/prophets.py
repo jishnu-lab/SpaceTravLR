@@ -341,61 +341,6 @@ class Prophet(BaseTravLR):
             )
         return self.sim_adata
 
-    def compute_gsea_scores(self, use_simulated=False, show_spatial=True, savepath=False):
-
-        if use_simulated:
-            adata = self.create_sim_adata()
-            label= f'simulated_{self.goi}'
-        else:
-            adata = self.adata.copy()
-            adata.X = adata.layers['imputed_count']
-            label= 'observed'
-
-        gsea_scores = self.gsea_scores.get(label, None)
-
-        if gsea_scores is None:
-        
-            gsea_scores = {}
-
-            for mod_name, mod_dict in self.gsea_modules.items():
-                gene_list = mod_dict['geneSymbols']
-                gene_list = [g for g in gene_list if g in adata.var_names]
-                score_name = f'{mod_name}'
-
-                sc.tl.score_genes(adata, gene_list, score_name=score_name, use_raw=False)
-
-                gsea_scores[mod_name] = adata.obs[score_name]
-            
-            gsea_scores = pd.DataFrame(gsea_scores, columns=self.gsea_modules.keys()).T
-            gsea_scores['score_var'] = gsea_scores.var(axis=1)
-            self.gsea_scores[label] = gsea_scores.sort_values('score_var', ascending=False)
-
-        if 'observed' in self.gsea_scores.keys():
-            modules = list(self.gsea_scores['observed'].head(4).index)
-        else:
-            modules = list(gsea_scores.head(4).index)
-
-        plot_params = {
-            "color": [self.annot_labels] + modules,
-            "ncols": 5,
-            "show": not savepath,
-        }
-
-        if show_spatial:
-            plot_params["spot_size"] = 50
-            sc.pl.spatial(adata, **plot_params)
-        else:
-            sc.pp.neighbors(adata)
-            sc.tl.umap(adata)
-            sc.pl.umap(adata, **plot_params)
-
-        if savepath:
-            plt.savefig(savepath)
-    
-
-
-
-
 
 # Cannibalized from CellOracle
 @jit(nopython=True)
