@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 from sklearn.linear_model import ARDRegression
 from group_lasso import GroupLasso
 from spaceoracle.models.spatial_map import xyc2spatial_fast
-from spaceoracle.tools.network import DayThreeRegulatoryNetwork, HumanTonsilNetwork, expand_paired_interactions
+from spaceoracle.tools.network import DayThreeRegulatoryNetwork, HumanTonsilNetwork, RegulatoryFactory, expand_paired_interactions
 from .pixel_attention import CellularNicheNetwork
 from ..tools.utils import gaussian_kernel_2d, min_max_df, set_seed
 import commot as ct
@@ -74,8 +74,8 @@ def create_spatial_features(x, y, celltypes, obs_index,radius=200):
         raise ValueError(f"Unexpected result shape: {result.shape}. Expected: {(len(x), len(unique_celltypes))}")
     
     columns = [f'{ct}_within' for ct in unique_celltypes]
-    # df = pd.DataFrame(StandardScaler().fit_transform(result), columns=columns, index=obs_index)
-    df = pd.DataFrame(result, columns=columns, index=obs_index)
+    df = pd.DataFrame(StandardScaler().fit_transform(result), columns=columns, index=obs_index)
+    # df = pd.DataFrame(result, columns=columns, index=obs_index)
     
     return df
 
@@ -119,14 +119,14 @@ class RotatedTensorDataset(Dataset):
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
-            radius=200, tf_ligand_cutoff=0.01, grn=None, 
-            species='mouse'):
+            radius=200, tf_ligand_cutoff=0.01, 
+            species='mouse', regulators=None, grn=None, colinks_path=None):
         
 
         assert isinstance(adata, AnnData), 'adata must be an AnnData object'
-        assert target_gene in adata.var_names, f'{target_gene} must be in adata.var_names'
-        assert layer in adata.layers, f'{layer} must be in adata.layers'
-        assert cluster_annot in adata.obs.columns, f'{cluster_annot} must be in adata.obs.columns'
+        assert target_gene in adata.var_names, 'target_gene must be in adata.var_names'
+        assert layer in adata.layers, 'layer must be in adata.layers'
+        assert cluster_annot in adata.obs.columns, 'cluster_annot must be in adata.obs.columns'
 
         
         self.adata = adata
@@ -137,13 +137,21 @@ class SpatialCellularProgramsEstimator:
         self.radius = radius
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
-        
-        if grn is None:
-            self.grn = DayThreeRegulatoryNetwork() # CellOracle GRN
-        else:
-            self.grn = grn
 
-        self.regulators = self.grn.get_cluster_regulators(self.adata, self.target_gene)
+        if regulators is None:
+            if grn is None:
+                assert colinks_path is not None, 'colinks_path must be provided if grn is None'
+                self.grn = RegulatoryFactory(
+                    colinks_path=colinks_path, organism=species, annot=cluster_annot)
+            else:
+                self.grn = grn
+
+            self.regulators = self.grn.get_cluster_regulators(self.adata, self.target_gene)
+
+        else:
+            self.regulators = regulators
+            self.grn = None
+
 
         self.init_ligands_and_receptors(species=species)
         self.lr_pairs = self.lr['pairs']
@@ -170,12 +178,10 @@ class SpatialCellularProgramsEstimator:
             self.tfl_regulators
         )}
 
-        # Generate word cloud with equal sizing
         wordcloud = WordCloud(
             width=800, height=400, 
             background_color='white').generate_from_frequencies(word_freq)
 
-        # Display the word cloud
         plt.figure(figsize=(16, 8))
         plt.imshow(wordcloud, interpolation='bilinear', aspect='equal')
         plt.axis('off')
@@ -205,7 +211,9 @@ class SpatialCellularProgramsEstimator:
         self.receptors = list(self.lr.receptor.values)
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        data_path = os.path.abspath(os.path.join(current_dir, '..', '..', '..', 'data', f'ligand_target_{species}.parquet'))
+        data_path = os.path.abspath(
+            os.path.join(
+                current_dir, '..', '..', '..', 'data', f'ligand_target_{species}.parquet'))
         nichenet_lt = pd.read_parquet(data_path)
 
         self.nichenet_lt = nichenet_lt.loc[
