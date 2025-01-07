@@ -169,10 +169,16 @@ class Prophet(BaseTravLR):
     def plot_contour_shift(self, seed=1334, savepath=False):
         assert self.adata.layers.get('delta_X') is not None
 
-        fig, axs = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [2, 1]})
+        fig, axs = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 1]})
         axs.flatten()
-        axs[0] = contour_shift(self.adata, gene=self.goi, annot=self.annot_labels, seed=seed, ax=axs[0])
-        axs[1] = distance_shift(self.adata, ax=axs[1], annot=self.annot_labels)
+        contour_shift(self.adata, title=f'Cell Identity Shift from {self.goi} KO', annot=self.annot_labels, seed=seed, ax=axs[0])
+        
+        delta_X_rndm = self.adata.layers['delta_X'].copy()
+        permute_rows_nsign(delta_X_rndm)
+        fake_simulated_count = self.adata.layers['imputed_count'] + delta_X_rndm
+        
+        contour_shift(self.adata, title=f'Randomized Effect of {self.goi} KO Shift', annot=self.annot_labels, seed=seed, ax=axs[1], perturbed=fake_simulated_count)
+        # axs[1] = distance_shift(self.adata, ax=axs[1], annot=self.annot_labels)
         plt.tight_layout()
 
         if savepath:
@@ -280,7 +286,7 @@ class Prophet(BaseTravLR):
     grid_scale=1, annot=None, n_neighbors=200, n_jobs=1, savepath=False):
             
         fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-        axs = axs.flatten()
+        axs.flatten()
 
         if layout_embedding is None:
             layout_embedding = self.adata.obsm['spatial']
