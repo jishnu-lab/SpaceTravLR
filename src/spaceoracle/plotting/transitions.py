@@ -282,10 +282,11 @@ def distance_shift(adata, annot, ax=None):
     
     return ax
 
-def contour_shift(adata_train, gene, annot, seed=1334, ax=None):
+def contour_shift(adata_train, title, annot, seed=1334, ax=None, perturbed=None):
 
     # Load data
-    perturbed = adata_train.layers['simulated_count']
+    if perturbed is None:
+        perturbed = adata_train.layers['simulated_count']
     gex = adata_train.layers['imputed_count']
 
     # Create UMAP embeddings
@@ -330,7 +331,7 @@ def contour_shift(adata_train, gene, annot, seed=1334, ax=None):
         )
 
     # Style the plot
-    ax.set_title(f'Cell Identity Shift from {gene} KO', pad=20, fontsize=12)
+    ax.set_title(title, pad=20, fontsize=12)
     ax.set_xlabel('UMAP 1', labelpad=10)
     ax.set_ylabel('UMAP 2', labelpad=10)
     ax.legend(ncol=1, loc='upper left', frameon=False)
