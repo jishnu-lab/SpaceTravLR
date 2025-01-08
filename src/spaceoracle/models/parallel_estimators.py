@@ -12,12 +12,17 @@ from torch.utils.data import DataLoader, Dataset
 from sklearn.linear_model import ARDRegression
 from group_lasso import GroupLasso
 from spaceoracle.models.spatial_map import xyc2spatial_fast
-from spaceoracle.tools.network import DayThreeRegulatoryNetwork, expand_paired_interactions
+from spaceoracle.tools.network import DayThreeRegulatoryNetwork, HumanTonsilNetwork, RegulatoryFactory, expand_paired_interactions
 from .pixel_attention import CellularNicheNetwork
 from ..tools.utils import gaussian_kernel_2d, min_max_df, set_seed
 import commot as ct
 from scipy.spatial.distance import cdist
 import numba
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+import pickle
+
+tt = torch.tensor
 set_seed(42)
 
 @numba.njit(parallel=True)
@@ -69,8 +74,8 @@ def create_spatial_features(x, y, celltypes, obs_index,radius=200):
         raise ValueError(f"Unexpected result shape: {result.shape}. Expected: {(len(x), len(unique_celltypes))}")
     
     columns = [f'{ct}_within' for ct in unique_celltypes]
-    # df = pd.DataFrame(StandardScaler().fit_transform(result), columns=columns, index=obs_index)
-    df = pd.DataFrame(result, columns=columns, index=obs_index)
+    df = pd.DataFrame(StandardScaler().fit_transform(result), columns=columns, index=obs_index)
+    # df = pd.DataFrame(result, columns=columns, index=obs_index)
     
     return df
 
@@ -114,13 +119,14 @@ class RotatedTensorDataset(Dataset):
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
-            radius=200, tf_ligand_cutoff=0.01, grn=None):
+            radius=200, tf_ligand_cutoff=0.01, 
+            regulators=None, grn=None, colinks_path=None):
         
 
         assert isinstance(adata, AnnData), 'adata must be an AnnData object'
-        assert target_gene in adata.var_names, f'{target_gene} must be in adata.var_names'
-        assert layer in adata.layers, f'{layer} must be in adata.layers'
-        assert cluster_annot in adata.obs.columns, f'{cluster_annot} must be in adata.obs.columns'
+        assert target_gene in adata.var_names, 'target_gene must be in adata.var_names'
+        assert layer in adata.layers, 'layer must be in adata.layers'
+        assert cluster_annot in adata.obs.columns, 'cluster_annot must be in adata.obs.columns'
 
         
         self.adata = adata
@@ -131,13 +137,21 @@ class SpatialCellularProgramsEstimator:
         self.radius = radius
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
-        
-        if grn is None:
-            self.grn = DayThreeRegulatoryNetwork() # CellOracle GRN
-        else:
-            self.grn = grn
 
-        self.regulators = self.grn.get_cluster_regulators(self.adata, self.target_gene)
+        if regulators is None:
+            if grn is None:
+                assert colinks_path is not None, 'colinks_path must be provided if grn is None'
+                self.grn = RegulatoryFactory(
+                    colinks_path=colinks_path, organism=species, annot=cluster_annot)
+            else:
+                self.grn = grn
+
+            self.regulators = self.grn.get_cluster_regulators(self.adata, self.target_gene)
+
+        else:
+            self.regulators = regulators
+            self.grn = None
+
 
         sample_gene = adata.var_names[0]
         if sample_gene.isupper(): 
@@ -159,6 +173,26 @@ class SpatialCellularProgramsEstimator:
         assert np.isin(self.receptors, self.adata.var_names).all(), 'all receptors must be in adata.var_names'
         assert np.isin(self.regulators, self.adata.var_names).all(), 'all regulators must be in adata.var_names'
 
+
+    def plot_modulators(self):
+
+        word_freq = {reg: 1 for reg in set(
+            self.regulators + 
+            self.ligands + 
+            self.tfl_ligands + 
+            self.receptors + 
+            self.tfl_regulators
+        )}
+
+        wordcloud = WordCloud(
+            width=800, height=400, 
+            background_color='white').generate_from_frequencies(word_freq)
+
+        plt.figure(figsize=(16, 8))
+        plt.imshow(wordcloud, interpolation='bilinear', aspect='equal')
+        plt.axis('off')
+        plt.title(self.target_gene)
+        plt.show()
 
     def init_ligands_and_receptors(self, receptor_thresh=0.01, species='mouse'):
         df_ligrec = ct.pp.ligand_receptor_database(
@@ -183,13 +217,9 @@ class SpatialCellularProgramsEstimator:
         self.receptors = list(self.lr.receptor.values)
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        if species == 'mouse':
-            data_path = os.path.abspath(os.path.join(current_dir, '..', '..', '..', 'data', 'ligand_target_mouse.parquet'))
-        elif species == 'human':
-            data_path = os.path.abspath(os.path.join(current_dir, '..', '..', '..', 'data', 'ligand_target.parquet'))
-        else:
-            raise f'no ligand_target.parquet exists for species {species}' 
-
+        data_path = os.path.abspath(
+            os.path.join(
+                current_dir, '..', '..', '..', 'data', f'ligand_target_{species}.parquet'))
         nichenet_lt = pd.read_parquet(data_path)
 
         self.nichenet_lt = nichenet_lt.loc[
@@ -532,4 +562,49 @@ class SpatialCellularProgramsEstimator:
 
             if num_epochs:
                 print(f'{cluster}: {r2_score(all_y_true, all_y_pred):.4f} | {r2_ard:.4f}')
+            self.models[cluster] = model
+
+
+    def export(self, save_dir='./models'):
+        """Export the estimator to disk, handling PyTorch models properly"""
+        # Create a copy of self that we can modify
+        export_obj = copy.copy(self)
+        
+        # Extract state dicts and anchors from models
+        model_states = {}
+        for cluster, model in self.models.items():
+            model_states[cluster] = {
+                'state_dict': model.state_dict(),
+                'anchors': model.anchors
+            }
+        
+        # Replace model objects with None before pickling
+        export_obj.models = model_states
+        
+        # Save the modified object
+        os.makedirs(save_dir, exist_ok=True)
+        with open(os.path.join(save_dir, f'{self.target_gene}_estimator.pkl'), 'wb') as f:
+            pickle.dump(export_obj, f)
+            
+            
+    def load(self, path):
+        """Load an exported estimator from disk"""
+        with open(path, 'rb') as f:
+            loaded = pickle.load(f)
+            
+        # Copy all attributes except models
+        for attr, val in loaded.__dict__.items():
+            if attr != 'models':
+                setattr(self, attr, val)
+                
+        # Reconstruct models from state dicts
+        self.models = {}
+        for cluster, state in loaded.models.items():
+            model = CellularNicheNetwork(
+                n_modulators=len(self.modulators),
+                anchors=state['anchors'],
+                spatial_dim=self.spatial_dim, 
+                n_clusters=self.n_clusters
+            ).to(self.device)
+            model.load_state_dict(state)
             self.models[cluster] = model
