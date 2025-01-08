@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+import json
 
 from .models.parallel_estimators import received_ligands
 from .oracles import OracleQueue, BaseTravLR
@@ -10,12 +11,16 @@ from .beta import Betabase
 from .plotting.layout import *
 from .plotting.transitions import * 
 from .plotting.niche import *
+from .plotting.beta_maps import *
 
 from numba import jit
 
 
 class Prophet(BaseTravLR):
     def __init__(self, adata, models_dir, annot, annot_labels=None, radius=200):
+
+        if annot_labels == None:
+            annot_labels = annot
         
         super().__init__(adata, fields_to_keep=[annot, annot_labels])
         
@@ -97,6 +102,7 @@ class Prophet(BaseTravLR):
         for key in ['transition_probabilities', 'grid_points', 'vector_field']:
             self.adata.uns.pop(key, None)
 
+
         assert target in self.adata.var_names
         
         if gene_mtx is None: 
@@ -151,16 +157,36 @@ class Prophet(BaseTravLR):
         self.adata.layers['simulated_count'] = gem_simulated
         self.adata.layers['delta_X'] = gem_simulated - imputed_count
 
-        return gem_simulated
+        # return gem_simulated
     
-
     def plot_contour_shift(self, seed=1334, savepath=False):
         assert self.adata.layers.get('delta_X') is not None
-        contour_shift(self.adata, annot=self.annot_labels, seed=seed, savepath=savepath)
 
-    def plot_betas_goi(self, save_dir=False):
-        betas_goi_all = get_modulator_betas(self, self.goi, save_dir=save_dir)
-        self.betas_cache[f'betas_{self.goi}'] = betas_goi_all
+        fig, axs = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 1]})
+        axs.flatten()
+        contour_shift(self.adata, title=f'Cell Identity Shift from {self.goi} KO', annot=self.annot_labels, seed=seed, ax=axs[0])
+        
+        delta_X_rndm = self.adata.layers['delta_X'].copy()
+        permute_rows_nsign(delta_X_rndm)
+        fake_simulated_count = self.adata.layers['imputed_count'] + delta_X_rndm
+        
+        contour_shift(self.adata, title=f'Randomized Effect of {self.goi} KO Shift', annot=self.annot_labels, seed=seed, ax=axs[1], perturbed=fake_simulated_count)
+        # axs[1] = distance_shift(self.adata, ax=axs[1], annot=self.annot_labels)
+        plt.tight_layout()
+
+        if savepath:
+            plt.savefig(savepath)
+        plt.show()
+
+
+    def plot_betas_goi(self, goi=None, save_dir=False, use_simulated=False, clusters=[]):
+        '''
+        use_simulated: if True, compute rw_ligands from simulated_count, else from imputed_count
+        '''
+        if goi is None:
+            goi = self.goi
+        betas_goi_all = get_modulator_betas(self, goi, save_dir=save_dir, use_simulated=use_simulated, clusters=clusters)
+        self.betas_cache[f'betas_{goi}'] = betas_goi_all
     
     def plot_beta_neighborhoods(self, goi=None, use_modulators=False, score_thresh=0.3, savepath=False, seed=1334):
         
@@ -169,14 +195,15 @@ class Prophet(BaseTravLR):
 
         if use_modulators:
             # Remove coords and cluster labels
+            assert goi in self.beta_dict.data.keys(), f'{goi} does not have modulators'
             betas = self.beta_dict.data[goi].iloc[:, :-4].values
         else:
             betas = self.betas_cache.get(f'betas_{goi}')
             if betas is None:
                 self.plot_betas_goi()
                 betas = self.betas_cache[f'betas_{goi}']
-        
-        show_beta_neighborhoods(
+                
+        labels = show_beta_neighborhoods(
             self, goi, betas, 
             annot=self.annot_labels, 
             score_thresh=score_thresh,
@@ -184,17 +211,74 @@ class Prophet(BaseTravLR):
             savepath=savepath
         )
 
-    def show_cluster_gex(self, goi=None, embedding='spatial'):
+        self.adata.obs['beta_neighborhood'] = labels
+        self.adata.obs['beta_neighborhood'] = self.adata.obs['beta_neighborhood'].astype('category')
+
+    def plot_beta_map(self, regulator, target_gene, clusters=None, save_dir=False):
+
+        if clusters is None:
+            clusters = self.adata.obs[self.annot].value_counts().head(3).index
+
+        beta_data = self.beta_dict.data[target_gene]
+        beta_data[self.annot_labels] = self.adata.obs[self.annot_labels]
+
+        ax = plot_spatial(
+            df=beta_data,
+            plot_for=f'beta_{regulator}',
+            target_gene=target_gene,
+            clusters=clusters,
+            annot=self.annot,
+            annot_labels=self.annot_labels,
+            with_expr=False
+        )
+        plt.tight_layout()
+
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
+            savepath = os.path.join(save_dir, f'{target_gene}_beta_{regulator}_map.png')
+            plt.savefig(savepath)
+
+
+    def plot_beta_umap(self, use_modulators=False, seed=1334, n_neighbors=50):
+
+        assert 'beta_neighborhood' in self.adata.obs.columns, f'Run plot_beta_neighborhood() first'
+
+        reducer = umap.UMAP(random_state=seed, n_neighbors=n_neighbors, min_dist=1.0, spread=5.0)
+        
+        if use_modulators is True:
+            X = self.beta_dict.data[self.goi].iloc[:, :-4].values
+        else:
+            X = self.betas_cache[f'betas_{self.goi}']
+        
+        umap_coords = reducer.fit_transform(X)
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+        sns.scatterplot(
+            x=umap_coords[:,0], 
+            y=umap_coords[:,1],
+            hue=self.adata.obs['beta_neighborhood'].values,
+            alpha=0.5,
+            s=20,
+            ax=ax,
+        )
+        plt.title(f'Beta UMAP for {self.goi}')
+
+        self.adata.obsm['beta_umap'] = umap_coords
+
+    def show_cluster_gex(self, goi=None, embedding='spatial', annot=None):
         if goi is None:
             goi = self.goi
         
-        compare_gex(self.adata, annot=self.annot_labels, goi=goi, embedding=embedding)
+        if annot is None:
+            annot = self.annot_labels
+        
+        compare_gex(self.adata, annot=annot, goi=goi, embedding=embedding)
 
     def show_transitions(self, layout_embedding=None, nn_embedding=None, vector_scale=1,
-    n_neighbors=200, n_jobs=1, savepath=False):
+    grid_scale=1, annot=None, n_neighbors=200, n_jobs=1, savepath=False):
             
         fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-        axs = axs.flatten()
+        axs.flatten()
 
         if layout_embedding is None:
             layout_embedding = self.adata.obsm['spatial']
@@ -202,12 +286,16 @@ class Prophet(BaseTravLR):
         if nn_embedding is None:
             nn_embedding = self.adata.obsm['X_draw_graph_fr']
         
+        if annot is None:
+            annot = self.annot_labels
+        
         estimate_transitions_2D(
             adata=self.adata,
             delta_X=self.adata.layers['delta_X'],
             embedding=nn_embedding,
             layout_embedding=layout_embedding,
-            annot=self.annot_labels,
+            annot=annot,
+            grid_scale=grid_scale,
             vector_scale=vector_scale,
             n_neighbors=n_neighbors, 
             n_jobs=n_jobs, ax=axs[0]
@@ -218,10 +306,11 @@ class Prophet(BaseTravLR):
 
         estimate_transitions_2D(
             adata=self.adata,
-            delta_X=self.adata.layers['delta_X'],
+            delta_X=delta_X_rndm,
             embedding=nn_embedding,
             layout_embedding=layout_embedding,
-            annot=self.annot_labels,
+            annot=annot,
+            grid_scale=grid_scale,
             vector_scale=vector_scale,
             n_neighbors=n_neighbors, 
             n_jobs=n_jobs, ax=axs[1]
@@ -236,8 +325,6 @@ class Prophet(BaseTravLR):
             plt.savefig(savepath)
 
         plt.show()
-
-
 
 
 # Cannibalized from CellOracle
