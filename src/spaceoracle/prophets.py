@@ -164,7 +164,7 @@ class Prophet(BaseTravLR):
         self.adata.layers['simulated_count'] = gem_simulated
         self.adata.layers['delta_X'] = gem_simulated - imputed_count
 
-        # return gem_simulated
+        return gem_simulated
     
     def plot_contour_shift(self, seed=1334, savepath=False):
         assert self.adata.layers.get('delta_X') is not None

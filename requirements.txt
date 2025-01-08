@@ -29,4 +29,5 @@ commot
 group-lasso
 pqdm
 magic-impute
+wordcloud
 # velocyto==0.17.17
