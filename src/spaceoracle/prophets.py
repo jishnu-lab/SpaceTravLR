@@ -37,13 +37,6 @@ class Prophet(BaseTravLR):
         self.betas_cache = {}
         
         self.goi = None
-        self.gsea_scores = {}
-        self.sim_adata = None
-
-        with open('../../data/GSEA_human/h.all.v2024.1.Hs.json', 'r') as f:
-            self.gsea_modules = json.load(f)
-        # with open('../../data/GSEA_human/c7.immunesigdb.v2024.1.Hs.json', 'r') as f:
-        #     gsea_immune = json.load(f)
 
     def compute_betas(self):
         self.beta_dict = self._get_spatial_betas_dict()
@@ -164,7 +157,7 @@ class Prophet(BaseTravLR):
         self.adata.layers['simulated_count'] = gem_simulated
         self.adata.layers['delta_X'] = gem_simulated - imputed_count
 
-        return gem_simulated
+        # return gem_simulated
     
     def plot_contour_shift(self, seed=1334, savepath=False):
         assert self.adata.layers.get('delta_X') is not None
@@ -186,14 +179,13 @@ class Prophet(BaseTravLR):
         plt.show()
 
 
-    def plot_betas_goi(self, goi=None, save_dir=False, use_simulated=False, clusters=[], blur=False):
+    def plot_betas_goi(self, goi=None, save_dir=False, use_simulated=False, clusters=[]):
         '''
         use_simulated: if True, compute rw_ligands from simulated_count, else from imputed_count
-        blur: if True, plot the average color of the space, but doesn't work well right now
         '''
         if goi is None:
             goi = self.goi
-        betas_goi_all = get_modulator_betas(self, goi, save_dir=save_dir, use_simulated=use_simulated, clusters=clusters, blur=blur)
+        betas_goi_all = get_modulator_betas(self, goi, save_dir=save_dir, use_simulated=use_simulated, clusters=clusters)
         self.betas_cache[f'betas_{goi}'] = betas_goi_all
     
     def plot_beta_neighborhoods(self, goi=None, use_modulators=False, score_thresh=0.3, savepath=False, seed=1334):
@@ -333,74 +325,6 @@ class Prophet(BaseTravLR):
             plt.savefig(savepath)
 
         plt.show()
-    
-    
-    def create_sim_adata(self):
-
-        assert 'simulated_count' in self.adata.layers.keys(), 'Run perturb first'
-        
-        self.sim_adata = sc.AnnData(
-                X=self.adata.layers['simulated_count'],
-                obs=self.adata.obs,
-                var=self.adata.var,
-                obsm=self.adata.obsm
-            )
-        return self.sim_adata
-
-    def compute_gsea_scores(self, use_simulated=False, show_spatial=True, savepath=False):
-
-        if use_simulated:
-            adata = self.create_sim_adata()
-            label= f'simulated_{self.goi}'
-        else:
-            adata = self.adata.copy()
-            adata.X = adata.layers['imputed_count']
-            label= 'observed'
-
-        gsea_scores = self.gsea_scores.get(label, None)
-
-        if gsea_scores is None:
-        
-            gsea_scores = {}
-
-            for mod_name, mod_dict in self.gsea_modules.items():
-                gene_list = mod_dict['geneSymbols']
-                gene_list = [g for g in gene_list if g in adata.var_names]
-                score_name = f'{mod_name}'
-
-                sc.tl.score_genes(adata, gene_list, score_name=score_name, use_raw=False)
-
-                gsea_scores[mod_name] = adata.obs[score_name]
-            
-            gsea_scores = pd.DataFrame(gsea_scores, columns=self.gsea_modules.keys()).T
-            gsea_scores['score_var'] = gsea_scores.var(axis=1)
-            self.gsea_scores[label] = gsea_scores.sort_values('score_var', ascending=False)
-
-        if 'observed' in self.gsea_scores.keys():
-            modules = list(self.gsea_scores['observed'].head(4).index)
-        else:
-            modules = list(gsea_scores.head(4).index)
-
-        plot_params = {
-            "color": [self.annot_labels] + modules,
-            "ncols": 5,
-            "show": not savepath,
-        }
-
-        if show_spatial:
-            plot_params["spot_size"] = 50
-            sc.pl.spatial(adata, **plot_params)
-        else:
-            sc.pp.neighbors(adata)
-            sc.tl.umap(adata)
-            sc.pl.umap(adata, **plot_params)
-
-        if savepath:
-            plt.savefig(savepath)
-    
-
-
-
 
 
 # Cannibalized from CellOracle
