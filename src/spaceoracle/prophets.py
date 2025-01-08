@@ -162,13 +162,13 @@ class Prophet(BaseTravLR):
 
         fig, axs = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 1]})
         axs.flatten()
-        contour_shift(self.adata.copy(), title=f'Cell Identity Shift from {self.goi} KO', annot=self.annot_labels, seed=seed, ax=axs[0])
+        contour_shift(self.adata, title=f'Cell Identity Shift from {self.goi} KO', annot=self.annot_labels, seed=seed, ax=axs[0])
         
         delta_X_rndm = self.adata.layers['delta_X'].copy()
         permute_rows_nsign(delta_X_rndm)
         fake_simulated_count = self.adata.layers['imputed_count'] + delta_X_rndm
         
-        contour_shift(self.adata.copy(), title=f'Randomized Effect of {self.goi} KO Shift', annot=self.annot_labels, seed=seed, ax=axs[1], perturbed=fake_simulated_count)
+        contour_shift(self.adata, title=f'Randomized Effect of {self.goi} KO Shift', annot=self.annot_labels, seed=seed, ax=axs[1], perturbed=fake_simulated_count)
         # axs[1] = distance_shift(self.adata, ax=axs[1], annot=self.annot_labels)
         plt.tight_layout()
 
@@ -176,9 +176,23 @@ class Prophet(BaseTravLR):
             plt.savefig(savepath)
         plt.show()
     
-    def plot_delta_scores(self, n_show=5, compare_ct=True, ct_interest=None):
-        '''ct_interest: name of cell type in annot_labels that you want to compare against all others'''
-        distance_shift(self.adata, self.annot_labels, n_show=n_show, ct_interest=ct_interest, compare_ct=compare_ct)
+    def plot_delta_scores(self, n_show=5, compare_ct=True, ct_interest=None, alt_annot=None, include=None):
+        '''
+        ct_interest: name of cell type in annot_labels that you want to compare against/ over all others
+        alt_annot: group by this annotation instead of cell type
+        include: remove all other cell types from consideration
+        '''
+        if alt_annot is None:
+            alt_annot = self.annot_labels
+        else:
+            assert alt_annot in self.adata.obs.columns, f'{alt_annot} not found in adata.obs'
+        
+        if include is not None:
+            adata = self.adata[self.adata.obs[alt_annot].isin(include)]
+        else:
+            adata = self.adata
+
+        distance_shift(adata, alt_annot, n_show=n_show, ct_interest=ct_interest, compare_ct=compare_ct)
 
 
     def plot_betas_goi(self, goi=None, save_dir=False, use_simulated=False, clusters=[]):

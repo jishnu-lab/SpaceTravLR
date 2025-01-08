@@ -98,8 +98,6 @@ def show_beta_neighborhoods(so, goi, betas=None, annot=None, clusters=None, scor
                     best_score = score
                     best_n_clusters = n_clusters
 
-        print(cell_type, best_score)
-
         best_kmeans = KMeans(n_clusters=best_n_clusters, random_state=seed)
         best_labels = best_kmeans.fit_predict(subset)
 
@@ -109,6 +107,7 @@ def show_beta_neighborhoods(so, goi, betas=None, annot=None, clusters=None, scor
     fig, axes = plt.subplots(rows, cols, figsize=(cols*4, rows*4))
     axes = axes.flatten()
 
+    label2ct = {}
     for i in np.unique(labels):
         cluster_mask = labels == i
         celltype = cell_types[cluster_mask][0]
@@ -123,7 +122,8 @@ def show_beta_neighborhoods(so, goi, betas=None, annot=None, clusters=None, scor
             c='blue', s=3, edgecolors='black', linewidth=0.1
         )
         
-        axes[i].set_title(f'Cluster {i} ({celltype})')
+        label2ct[i] = f'{celltype}_{i}'
+        axes[i].set_title(label2ct[i])
         axes[i].set_xticks([])  
         axes[i].set_yticks([])  
     
@@ -134,6 +134,8 @@ def show_beta_neighborhoods(so, goi, betas=None, annot=None, clusters=None, scor
     if savepath:
         plt.savefig(savepath)
     plt.show()
+
+    labels = [label2ct[label] for label in labels]
 
     return labels
 
