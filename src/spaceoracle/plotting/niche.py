@@ -2,8 +2,6 @@ import os
 import numpy as np 
 import pandas as pd 
 import matplotlib.pyplot as plt
-
-from sklearn.preprocessing import MinMaxScaler
 from spaceoracle.models.parallel_estimators import received_ligands
 
 import math
@@ -11,16 +9,24 @@ from tqdm import tqdm
 
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+from scipy.interpolate import griddata
 
 
-def get_modulator_betas(so_obj, goi, save_dir=None):
+def get_modulator_betas(so_obj, goi, save_dir=None, use_simulated=False, clusters=[]):
     if so_obj.beta_dict is None:
         so_obj.beta_dict = so_obj._get_spatial_betas_dict() 
         
     beta_dict = so_obj.beta_dict.data
-    
-    gene_mtx = so_obj.adata.layers['imputed_count']
-    gene_mtx = MinMaxScaler().fit_transform(gene_mtx)
+
+    if len(clusters) > 0:
+        cell_idxs = np.where(so_obj.adata.obs[so_obj.annot_labels].isin(clusters))[0]
+    else:
+        cell_idxs = np.arange(len(so_obj.adata.obs))
+
+    if use_simulated:
+        gene_mtx = so_obj.adata.layers['simulated_count']
+    else:
+        gene_mtx = so_obj.adata.layers['imputed_count']
 
     gex_df = pd.DataFrame(gene_mtx, index=so_obj.adata.obs_names, columns=so_obj.adata.var_names)
 
@@ -32,24 +38,30 @@ def get_modulator_betas(so_obj, goi, save_dir=None):
 
     bois = []
     for gene, betaoutput in tqdm(beta_dict.items(), total=len(beta_dict), desc='Ligand interactions'):
-        betas_df= so_obj._combine_gene_wbetas(gene, weighted_ligands, gex_df, betaoutput)
+        betas_df= so_obj._combine_gene_wbetas(gene, weighted_ligands, gex_df, betaoutput)        
         if f'beta_{goi}' in betas_df.columns:
             bois.append(betas_df[f'beta_{goi}'].rename(f'{gene}_beta_{goi}'))
+    
+    if len(bois) == 0:
+        print(f'{goi} is not a modulator of any gene')
+        return None
+    
     df = pd.concat(bois, axis=1)
 
-    beta_mean = df.mean(axis = 1) # average across all genes with beta_Il2ra
-    plt.scatter(
-        so_obj.adata.obsm['spatial'][:, 0], 
-        so_obj.adata.obsm['spatial'][:, 1], 
-        c=beta_mean, cmap='viridis', s=0.5
-    )
+    beta_mean = df.mean(axis = 1) # average across all genes with beta_goi
+    x = so_obj.adata.obsm['spatial'][:, 0][cell_idxs]
+    y = so_obj.adata.obsm['spatial'][:, 1][cell_idxs]
+    beta_mean = beta_mean.iloc[cell_idxs].to_numpy()
+    
+    plt.scatter(x, y, c=beta_mean, cmap='viridis', s = 0.5)
     plt.colorbar()
     plt.title(f'beta_{goi}')
 
     if save_dir:
         df.to_csv(os.path.join(save_dir, f'beta_{goi}_all.csv'))
         plt.savefig(os.path.join(save_dir, f'{goi}_heatmap.png'))
-
+    
+    plt.show()
     return df
 
 
@@ -74,8 +86,8 @@ def show_beta_neighborhoods(so, goi, betas=None, annot=None, clusters=None, scor
         subset_idxs = np.where(cell_types == cell_type)[0]
         subset = betas[subset_idxs]
 
-        best_score = -1
-        best_n_clusters = 2
+        best_score = score_thresh
+        best_n_clusters = 1
 
         for n_clusters in range_n_clusters:
             kmeans = KMeans(n_clusters=n_clusters, random_state=seed)
@@ -85,9 +97,6 @@ def show_beta_neighborhoods(so, goi, betas=None, annot=None, clusters=None, scor
                 if score > best_score:
                     best_score = score
                     best_n_clusters = n_clusters
-        
-        if best_score < score_thresh:  
-            best_n_clusters = 1
 
         print(cell_type, best_score)
 
