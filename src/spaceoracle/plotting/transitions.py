@@ -18,7 +18,7 @@ n_neighbors=200, grid_scale=1, vector_scale=1, n_jobs=1, ax=None):
     V_simulated = project_probabilities(P, layout_embedding, normalize=normalize)
 
     grid_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))
-    print(grid_scale)
+    # print(grid_scale)
     get_grid_points = lambda min_val, max_val: np.linspace(min_val, max_val, 
                                                            int((max_val - min_val + 1) * grid_scale))
 
@@ -90,7 +90,10 @@ def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest
         assert ct_interest in celltypes, f'{ct_interest} not found in cell types'
         
         if compare_ct:
-            gene_diffs = np.array(ct_means[ct_interest] - ct_means.drop(columns=ct_interest).max(axis=1))
+            minus_max = np.array(ct_means[ct_interest] - ct_means.drop(columns=ct_interest).max(axis=1))
+            minus_min = np.array(ct_means[ct_interest] - ct_means.drop(columns=ct_interest).min(axis=1))
+            gene_diffs = np.maximum(abs(minus_max), abs(minus_min))
+
         else:
             gene_diffs = np.array(abs(ct_means[ct_interest]))
 
