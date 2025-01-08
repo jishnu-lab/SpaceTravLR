@@ -72,30 +72,77 @@ n_neighbors=200, grid_scale=1, vector_scale=1, n_jobs=1, ax=None):
     plot_quiver(grid_points, vector_field, background=background, ax=ax)
 
 
-def distance_shift(adata, annot, ax=None):
+def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest=None):
+    '''
+    compare_ct: if True, show the genes with the greatest delta difference between cell types
+    ct_interest: cell type of interest to compare against all other cell types
+    '''
 
     celltypes = sorted(adata.obs[annot].unique())
     ct_idxs = {ct: np.where(adata.obs[annot] == ct)[0] for ct in celltypes}
+
     delta_X = adata.layers['delta_X']
+    ct_deltas = {ct: delta_X[idx] for ct, idx in ct_idxs.items()}
+    ct_means = pd.DataFrame({ct: np.mean(vals, axis=0) for ct, vals in ct_deltas.items()})
 
-    ct_deltas = {ct: np.mean(delta_X[idx]) for ct, idx in ct_idxs.items()}
+    # Identify genes with the greatest difference in change between cell types
+    if ct_interest is not None:
+        assert ct_interest in celltypes, f'{ct_interest} not found in cell types'
+        
+        if compare_ct:
+            gene_diffs = np.array(ct_means[ct_interest] - ct_means.drop(columns=ct_interest).max(axis=1))
+        else:
+            gene_diffs = np.array(abs(ct_means[ct_interest]))
 
-    # Plot distance shift
-    sns.barplot(
-        y=list(ct_deltas.keys()), x=list(ct_deltas.values()), ax=ax, 
-        hue=celltypes, hue_order=celltypes)
-    ax.set_title('Average Change in Count per Cell Type')
-    ax.set_xlabel('Average Change in Count')
-    ax.set_ylabel('Cell Type')
-    
-    return ax
+    elif compare_ct:
+        gene_diffs = np.array(ct_means.max(axis=1) - ct_means.min(axis=1))
+
+    else:
+        gene_diffs = np.array(abs(ct_means).max(axis=1))
+
+    top_gene_idxs = np.argsort(gene_diffs)[-n_show:]
+    top_gene_labels = list(adata.var_names[top_gene_idxs])
+
+    # Extract deltas for top genes
+    top_ct_deltas = {ct: deltas[:, top_gene_idxs] for ct, deltas in ct_deltas.items()}
+
+    # Prepare data for plotting
+    plot_data = []
+    for ct, deltas in top_ct_deltas.items():
+        for gene_idx, gene_label in zip(range(deltas.shape[1]), top_gene_labels):
+            plot_data.append(pd.DataFrame({
+                'delta': deltas[:, gene_idx],
+                'gene': gene_label,
+                'ct': ct
+            }))
+
+    df = pd.concat(plot_data, ignore_index=True)
+
+    # Plotting
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 4))
+
+    ax = sns.boxplot(
+        x='gene', y='delta', hue='ct', 
+        ax=ax, hue_order=celltypes,
+        data=df
+    )
+
+    sns.move_legend(ax, "upper left", bbox_to_anchor=(1, 1))
+
+    ax.set_title('Average Gene Count Change per Cell Type')
+    ax.set_ylabel('Average Change in Count')
+    ax.set_xlabel('Gene')
+
+    return gene_diffs
+
 
 def contour_shift(adata_train, title, annot, seed=1334, ax=None, perturbed=None):
 
     # Load data
     if perturbed is None:
         perturbed = adata_train.layers['simulated_count']
-    gex = adata_train.layers['imputed_count'].copy()
+    gex = adata_train.layers['imputed_count']
 
     # Create UMAP embeddings
     reducer = umap.UMAP(random_state=seed, n_neighbors=50, min_dist=1.0, spread=5.0)
