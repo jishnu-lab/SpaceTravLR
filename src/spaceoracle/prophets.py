@@ -134,6 +134,7 @@ class Prophet(BaseTravLR):
             self.beta_dict = self._get_spatial_betas_dict() # compute betas for all genes for all cells
 
         weighted_ligands_0 = self._compute_weighted_ligands(gene_mtx)
+        weighted_ligands_0 = weighted_ligands_0.reindex(columns=self.adata.var_names, fill_value=0)
 
         for n in range(n_propagation):
 
@@ -145,7 +146,8 @@ class Prophet(BaseTravLR):
 
             # update deltas to reflect change in received ligands 
             weighted_ligands_1 = weighted_ligands_1.reindex(columns=self.adata.var_names, fill_value=0)
-            delta_simulated = delta_simulated + weighted_ligands_1.values
+            delta_weighted_ligands = weighted_ligands_1.values - weighted_ligands_0.values
+            delta_simulated = delta_simulated - delta_weighted_ligands
 
             _simulated = np.array(
                 [self._perturb_single_cell(delta_simulated, i, beta_dict) 
@@ -228,7 +230,7 @@ class Prophet(BaseTravLR):
             plt.savefig(savepath)
         plt.show()
     
-    def plot_delta_scores(self, n_show=5, compare_ct=True, ct_interest=None, alt_annot=None, include=None, ko_gene=None, perturbed_cells=None, min_ncells=10):
+    def plot_delta_scores(self, n_show=10, compare_ct=True, ct_interest=None, alt_annot=None, include=None, ko_gene=None, perturbed_cells=None, min_ncells=10):
         '''
         ct_interest: name of cell type in annot_labels that you want to compare against/ over all others
         alt_annot: group by this annotation instead of cell type
