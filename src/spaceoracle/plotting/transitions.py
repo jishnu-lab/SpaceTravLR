@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import seaborn as sns 
 import umap
+import os
 
 from .layout import plot_quiver, get_grid_layout
 from .shift import *
@@ -74,7 +75,7 @@ n_neighbors=200, grid_scale=1, vector_scale=1, n_jobs=1, ax=None):
     plot_quiver(grid_points, vector_field, background=background, ax=ax)
 
 
-def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest=None):
+def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest=None, save_dir=False):
     '''
     compare_ct: if True, show the genes with the greatest delta difference between cell types
     ct_interest: cell type of interest to compare against all other cell types
@@ -144,6 +145,12 @@ def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest
     ax.set_title('Average Gene Count Change per Cell Type')
     ax.set_ylabel('Average Change in Count')
     ax.set_xlabel('Gene')
+
+    if save_dir:
+        names = '_'.join(sorted(top_ct_deltas.keys()))
+        joint_name = f'delta_{names}.png'
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, joint_name), bbox_inches='tight')
 
     return top_gene_labels
 
