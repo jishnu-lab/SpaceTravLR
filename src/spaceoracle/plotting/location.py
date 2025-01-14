@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import os 
 
 
 def get_cells_in_radius(point_coords, adata, annot=None, radius=100, cell_type=[], show=True):
@@ -27,7 +28,7 @@ def show_chosen_cells(adata, cell_idxs):
     plt.show()
 
 
-def show_effect_distance(adata, annot, top_genes, point_coord, cutoff=1000):
+def show_effect_distance(adata, annot, top_genes, point_coord, cutoff=1000, save_dir=False):
     fig, axs = plt.subplots(len(top_genes), 1, figsize=(10, 6 * len(top_genes)))
     if len(top_genes) == 1:
         axs = np.array([axs])
@@ -52,5 +53,10 @@ def show_effect_distance(adata, annot, top_genes, point_coord, cutoff=1000):
         axs[axs_idx].grid(True)
 
     plt.tight_layout()
+    if save_dir:
+        names = '_'.join(sorted(top_genes.keys()))
+        joint_name = f'delta_distance_{names}.png'
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, joint_name), bbox_inches='tight')
     plt.show()
 
