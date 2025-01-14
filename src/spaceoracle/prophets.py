@@ -36,11 +36,12 @@ class Prophet(BaseTravLR):
         self.radius = radius
 
         self.queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
-        self.ligands = set()
+        self.ligands = []
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
         self.betas_cache = {}
-        
+
+        self.beta_dict = None
         self.goi = None
 
     def compute_betas(self):
@@ -56,7 +57,7 @@ class Prophet(BaseTravLR):
         if len(self.ligands) > 0:
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
-                lig_df=gex_df[list(self.ligands)],
+                lig_df=gex_df[self.ligands],
                 radius=self.radius
             )
         else:
@@ -83,7 +84,7 @@ class Prophet(BaseTravLR):
         
     def _get_spatial_betas_dict(self):
         bdb = Betabase(self.adata, self.save_dir)
-        self.ligands = bdb.ligands_set
+        self.ligands = list(bdb.ligands_set)
         return bdb
     
     def _perturb_single_cell(self, gex_delta, cell_index, betas_dict):
@@ -144,10 +145,15 @@ class Prophet(BaseTravLR):
 
             beta_dict = self._get_wbetas_dict(self.beta_dict, weighted_ligands_1, gene_mtx_1)
 
-            # update deltas to reflect change in received ligands 
+            # update deltas to reflect change in received ligands
+            # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
             weighted_ligands_1 = weighted_ligands_1.reindex(columns=self.adata.var_names, fill_value=0)
             delta_weighted_ligands = weighted_ligands_1.values - weighted_ligands_0.values
-            delta_simulated = delta_simulated - delta_weighted_ligands
+
+            delta_df = pd.DataFrame(delta_simulated, columns=self.adata.var_names, index=self.adata.obs_names)
+            delta_ligands = delta_df[self.ligands].reindex(columns=self.adata.var_names, fill_value=0).values
+            
+            delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
 
             _simulated = np.array(
                 [self._perturb_single_cell(delta_simulated, i, beta_dict) 
@@ -179,7 +185,7 @@ class Prophet(BaseTravLR):
         self.adata.layers['simulated_count'] = gem_simulated
         self.adata.layers['delta_X'] = gem_simulated - imputed_count
     
-    def perturb_location(self, coords, goi, n_propagation=3, gene_expr=0, cell_type=[], radius_ko=100):
+    def perturb_location(self, coords, goi, n_propagation=3, gene_expr=0, cell_type=[], radius_ko=100, save_dir=None):
         '''perturb a gene in a specific location'''
 
         cell_idxs = get_cells_in_radius(coords, self.adata, self.annot_labels, radius=radius_ko, cell_type=cell_type)
@@ -188,12 +194,12 @@ class Prophet(BaseTravLR):
         # show the effect for each cell type
         top_genes = {}
         for ct in self.adata.obs[self.annot_labels].unique():
-            top_gene_labels = self.plot_delta_scores(compare_ct=False, include=[ct], ko_gene=goi)
+            top_gene_labels = self.plot_delta_scores(compare_ct=False, include=[ct], ko_gene=goi, save_dir=save_dir)
             if top_gene_labels is not None:
                 top_genes[ct] = top_gene_labels
         
         # show the effect as a wrt distance for each cell type
-        show_effect_distance(self.adata, self.annot_labels, top_genes, coords)
+        show_effect_distance(self.adata, self.annot_labels, top_genes, coords, save_dir=save_dir)
 
     def show_ct_gex(self, goi):
         df = show_expression_plot(self.adata, goi, self.annot_labels)
@@ -202,10 +208,7 @@ class Prophet(BaseTravLR):
     def evaluate(self, frac_genes=0.1, n_propogation=3, n_jobs=1):
         '''for each cell type, identify the top genes with greatest spatial variation'''
 
-        if 'grid_labels' not in self.adata.obs.columns:
-            self.plot_gridmap()
-
-        # identify top genes
+        # identify top highly variable genes within each cell type
         # perturb genes
         # score them
 
@@ -230,7 +233,8 @@ class Prophet(BaseTravLR):
             plt.savefig(savepath)
         plt.show()
     
-    def plot_delta_scores(self, n_show=10, compare_ct=True, ct_interest=None, alt_annot=None, include=None, ko_gene=None, perturbed_cells=None, min_ncells=10):
+    def plot_delta_scores(self, n_show=10, compare_ct=True, ct_interest=None, alt_annot=None, include=None, 
+                            ko_gene=None, perturbed_cells=None, min_ncells=10, save_dir=False):
         '''
         ct_interest: name of cell type in annot_labels that you want to compare against/ over all others
         alt_annot: group by this annotation instead of cell type
@@ -257,15 +261,9 @@ class Prophet(BaseTravLR):
         valid_clusters = cluster_counts[cluster_counts >= min_ncells].index
         adata = adata[adata.obs[alt_annot].isin(valid_clusters)]
 
-        top_gene_labels = distance_shift(adata, alt_annot, n_show=n_show, ct_interest=ct_interest, compare_ct=compare_ct)
+        top_gene_labels = distance_shift(adata, alt_annot, n_show=n_show, ct_interest=ct_interest, compare_ct=compare_ct, save_dir=save_dir)
         return top_gene_labels
 
-    def plot_gridmap(self, grid_scale=0.005, show=True):
-
-        grid_labels = get_grid_layout(self.adata.obsm['spatial'], grid_scale=grid_scale, create_annot=True, show=show)
-        grid_ct_labels = [f'{grid_idx}_{ct}' for ct, grid_idx in zip(self.adata.obs[self.annot_labels], grid_labels)]
-        
-        self.adata.obs['grid_labels'] = grid_ct_labels
 
     def plot_beta_neighborhoods(self, goi=None, use_modulators=False, score_thresh=0.3, savepath=False, seed=1334):
         
