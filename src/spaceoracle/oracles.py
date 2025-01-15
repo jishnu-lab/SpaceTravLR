@@ -367,7 +367,7 @@ class SpaceTravLR(BaseTravLR):
 
             else:
                 gene_bar.count = len(self.queue.all_genes) - len(self.queue.remaining_genes)
-                gene_bar.desc = f'{self.queue.num_orphans} orphans'
+                gene_bar.desc = f'🕵️️  {self.queue.agents+1} agents'
                 gene_bar.refresh()
 
                 if os.path.exists(f'{self.queue.model_dir}/{gene}.lock'):
