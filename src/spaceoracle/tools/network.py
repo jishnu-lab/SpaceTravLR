@@ -102,45 +102,15 @@ class CellOracleLinks:
 
 
 class RegulatoryFactory(CellOracleLinks):
-    def __init__(self, colink_path, organism='mouse', annot='cell_type_int'):
-        self.colink_path = colink_path
+    def __init__(self, colinks_path, organism='mouse', annot='cell_type_int'):
+        self.colinks_path = colinks_path
         self.organism = organism
         self.annot = annot
 
-        with open(self.colink_path, 'rb') as f:
+        with open(self.colinks_path, 'rb') as f:
             self.links = pickle.load(f)
 
         self.cluster_labels = encode_labels(self.links.keys())
-
- 
-    def get_cluster_regulators(self, adata, target_gene, alpha=0.05):
-        adata_clusters = np.unique(adata.obs[self.annot])
-        regulator_dict = {}
-        all_regulators = set()
-
-        for label in adata_clusters:
-            grn_df = self.links[label]
-
-            grn_df = grn_df[(grn_df.target == target_gene) & (grn_df.p <= alpha)]
-            tfs = list(grn_df.source)
-            
-            regulator_dict[label] = tfs
-            all_regulators.update(tfs)
-
-        all_regulators = all_regulators & set(adata.to_df().columns) # only use genes also in adata
-        all_regulators = sorted(list(all_regulators))
-        regulator_masks = {}
-
-        for label, tfs in regulator_dict.items():
-            indices = [all_regulators.index(tf)+1 for tf in tfs if tf in all_regulators]
-            
-            mask = torch.zeros(len(all_regulators) + 1)     # prepend 1 for beta0
-            mask[[0] + indices] = 1 
-            regulator_masks[label] = mask
-
-        self.regulator_dict = regulator_masks
-
-        return all_regulators
 
 
         

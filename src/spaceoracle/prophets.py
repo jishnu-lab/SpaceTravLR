@@ -12,6 +12,8 @@ from .plotting.transitions import *
 from .plotting.niche import *
 
 from numba import jit
+import enlighten
+import time
 
 
 class Prophet(BaseTravLR):
@@ -40,8 +42,7 @@ class Prophet(BaseTravLR):
     def load_betadata(gene, save_dir):
         return pd.read_parquet(f'{save_dir}/{gene}_betadata.parquet')
     
-    def _get_wbetas_dict(self, betas_dict, gene_mtx):
-        
+    def _compute_weighted_ligands(self, gene_mtx):
         gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
 
         if len(self.ligands) > 0:
@@ -53,9 +54,26 @@ class Prophet(BaseTravLR):
         else:
             weighted_ligands = []
 
-        self.weighted_ligands = weighted_ligands
+        return weighted_ligands
+    
+    
+    def _get_wbetas_dict(self, betas_dict, weighted_ligands, gene_mtx, disable_tqdm=False):
+        
+        gex_df = pd.DataFrame(
+            gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
 
-        for gene, betadata in tqdm(betas_dict.data.items(), total=len(betas_dict), desc='Interactions', disable=len(betas_dict) == 1):
+        # if len(self.ligands) > 0:
+        #     weighted_ligands = received_ligands(
+        #         xy=self.adata.obsm['spatial'], 
+        #         lig_df=gex_df[list(self.ligands)],
+        #         radius=self.radius
+        #     )
+        # else:
+        #     weighted_ligands = []
+
+        # self.weighted_ligands = weighted_ligands
+
+        for gene, betadata in tqdm(betas_dict.data.items(), total=len(betas_dict), desc='Interactions', disable=disable_tqdm):
             betas_dict.data[gene].wbetas = self._combine_gene_wbetas(gene, weighted_ligands, gex_df, betadata)
 
         # for gene, betaoutput in tqdm(betas_dict.items(), total=len(betas_dict), desc='Ligand interactions', disable=len(betas_dict) == 1):
@@ -70,15 +88,15 @@ class Prophet(BaseTravLR):
         
 
     def _get_spatial_betas_dict(self):
-        bdb = Betabase(self.adata, self.save_dir)
-        self.ligands = bdb.ligands_set
+        bdb = Betabase(self.adata, self.save_dir, cell_index=self.adata.obs_names)
+        self.ligands = list(bdb.ligands_set)
         return bdb
     
     def _perturb_single_cell(self, gex_delta, cell_index, betas_dict):
 
         genes = self.adata.var_names
         
-        gene_gene_matrix = np.zeros((len(genes), len(genes))) # columns are target genes, rows are regulators
+        gene_gene_matrix = np.zeros((len(genes), len(genes))) # columns are target genes, rows are modulators
 
         for i, gene in enumerate(genes):
             _beta_out = betas_dict.data.get(gene, None)
@@ -90,7 +108,7 @@ class Prophet(BaseTravLR):
         return gex_delta[cell_index, :].dot(gene_gene_matrix)
     
 
-    def perturb(self, target, gene_mtx=None, n_propagation=3, gene_expr=0, cells=None):
+    def perturb(self, target, gene_mtx=None, n_propagation=3, gene_expr=0, cells=None, retain_propagations=False):
 
         self.goi = target
         
@@ -122,22 +140,74 @@ class Prophet(BaseTravLR):
             print('Computing beta_dict')
             self.beta_dict = self._get_spatial_betas_dict() # compute betas for all genes for all cells
 
+        weighted_ligands_0 = self._compute_weighted_ligands(gene_mtx)
+        weighted_ligands_0 = weighted_ligands_0.reindex(columns=self.adata.var_names, fill_value=0)
+
+        self.propagations = []
+
+        manager = enlighten.get_manager(width=80)
+        
+        propagation_bar = manager.counter(
+            total=n_propagation, 
+            desc='Propagations',
+            unit='P',
+            color='green',
+            auto_refresh=True,
+        )
+        
+        cells_bar = manager.counter(
+            total=self.adata.n_obs,
+            desc=f'{target}',
+            unit='cells',
+            color='salmon',
+            auto_refresh=True,
+        )
+
         for n in range(n_propagation):
+            
+            cells_bar.count = 0
+            cells_bar.start = time.time()
 
-            beta_dict = self._get_wbetas_dict(self.beta_dict, gene_mtx + delta_simulated)
+            gene_mtx_1 = gene_mtx + delta_simulated
+            weighted_ligands_1 = self._compute_weighted_ligands(gene_mtx_1)
+            self.weighted_ligands = weighted_ligands_1
 
-            _simulated = np.array(
-                [self._perturb_single_cell(delta_simulated, i, beta_dict) 
-                    for i in tqdm(
-                        range(self.adata.n_obs), 
-                        desc=f'Running simulation {n+1}/{n_propagation}')])
+            beta_dict = self._get_wbetas_dict(
+                self.beta_dict, weighted_ligands_1, gene_mtx_1, disable_tqdm=False)
+            
+            # update deltas to reflect change in received ligands
+            # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
+            weighted_ligands_1 = weighted_ligands_1.reindex(columns=self.adata.var_names, fill_value=0)
+            delta_weighted_ligands = weighted_ligands_1.values - weighted_ligands_0.values
+
+            delta_df = pd.DataFrame(delta_simulated, columns=self.adata.var_names, index=self.adata.obs_names)
+            delta_ligands = delta_df[self.ligands].reindex(columns=self.adata.var_names, fill_value=0).values
+            
+            delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
+
+
+            _simulated = []
+            for i in range(self.adata.n_obs):
+                _simulated.append(
+                    self._perturb_single_cell(delta_simulated, i, beta_dict)
+                )
+                cells_bar.update()
+
             delta_simulated = np.array(_simulated)
+            
+            # ensure values in delta_simulated match our desired KO / input
             delta_simulated = np.where(delta_input != 0, delta_input, delta_simulated)
-
             gem_tmp = gene_mtx + delta_simulated
             gem_tmp[gem_tmp<0] = 0
-            delta_simulated = gem_tmp - gene_mtx
 
+            # update start point weighted ligands
+            weighted_ligands_0 = weighted_ligands_1.copy()
+
+            if retain_propagations:
+                self.propagations.append(gem_tmp.copy())
+
+            propagation_bar.update()
+        
         gem_simulated = gene_mtx + delta_simulated
         
         assert gem_simulated.shape == gene_mtx.shape
@@ -151,7 +221,7 @@ class Prophet(BaseTravLR):
         self.adata.layers['simulated_count'] = gem_simulated
         self.adata.layers['delta_X'] = gem_simulated - imputed_count
 
-        return gem_simulated
+        # return gem_simulated
     
 
     def plot_contour_shift(self, seed=1334, savepath=False):
