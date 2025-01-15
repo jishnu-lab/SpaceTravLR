@@ -74,8 +74,7 @@ def create_spatial_features(x, y, celltypes, obs_index,radius=200):
         raise ValueError(f"Unexpected result shape: {result.shape}. Expected: {(len(x), len(unique_celltypes))}")
     
     columns = [f'{ct}_within' for ct in unique_celltypes]
-    df = pd.DataFrame(StandardScaler().fit_transform(result), columns=columns, index=obs_index)
-    # df = pd.DataFrame(result, columns=columns, index=obs_index)
+    df = pd.DataFrame(result, columns=columns, index=obs_index)
     
     return df
 
@@ -146,7 +145,7 @@ class SpatialCellularProgramsEstimator:
             else:
                 self.grn = grn
 
-            self.regulators = self.grn.get_cluster_regulators(self.adata, self.target_gene)
+            self.regulators = self.grn.get_regulators(self.adata, self.target_gene)
 
         else:
             self.regulators = regulators
@@ -224,8 +223,12 @@ class SpatialCellularProgramsEstimator:
         self.tfl_regulators = []
         self.tfl_ligands = []
 
-        self.ligand_regulators = {lig: set(
-            self.grn.get_regulators(self.adata, lig)) for lig in self.nichenet_lt.columns}
+        if self.grn is not None:
+            self.ligand_regulators = {lig: set(
+                self.grn.get_regulators(self.adata, lig)) for lig in self.nichenet_lt.columns}
+        else:
+            from collections import defaultdict
+            self.ligand_regulators = defaultdict(list)
 
         for tf_ in self.nichenet_lt.index:
             row = self.nichenet_lt.loc[tf_]
@@ -335,8 +338,6 @@ class SpatialCellularProgramsEstimator:
             .join(self.adata.uns['ligand_receptor']) \
             .join(self.adata.uns['ligand_regulator'])
         
-
-        # self.train_df = min_max_df(self.train_df)
 
         self.spatial_features = create_spatial_features(
             self.adata.obsm['spatial'][:, 0], 
