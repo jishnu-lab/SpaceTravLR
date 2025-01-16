@@ -1,27 +1,38 @@
 import matplotlib.pyplot as plt 
+import seaborn as sns
 import plotly.express as px
-import plotly.graph_objects as go
+
+from sklearn.neighbors import KDTree
 
 import numpy as np 
 import pandas as pd 
 import scanpy as sc 
 
 
+def show_locations(adata, annot):
+    data = adata.obsm['spatial']
+    df = pd.DataFrame(data, columns=['x', 'y'])
+    df['cell_type'] = adata.obs[annot].values
+
+    
+    fig = px.scatter(df, x="x", y="y", hover_data=["x", "y"], color='cell_type', opacity=0.7)
+    fig.update_traces(
+        hovertemplate='%{x:.6f}, %{y:.6f}<extra></extra>', 
+        marker=dict(line=dict(width=1, color='DarkSlateGrey'))
+    )
+    fig.update_layout(
+        width=700,
+        height=600,
+        autosize=False
+    )
+    fig.show()
+
+
 def compare_gex(adata, annot, goi, embedding='FR', n_neighbors=15, n_pcs=20, seed=123):
 
     assert embedding in ['FR', 'PCA', 'UMAP', 'spatial'], f'{embedding} is not a valid embedding choice'
     
-    sc.tl.pca(adata, svd_solver='arpack')
-    sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
-
-    if embedding == 'PCA':
-        sc.pl.pca(adata, color=[goi, annot], layer='imputed_count', use_raw=False, cmap='viridis')
-    
-    elif embedding == 'UMAP':
-        sc.tl.umap(adata)
-        sc.pl.umap(adata, color=[goi, annot], layer='imputed_count', use_raw=False, cmap='viridis')
-
-    elif embedding == 'spatial':
+    if embedding == 'spatial':
         x = adata.obsm['spatial'][:, 0]
         y = adata.obsm['spatial'][:, 1] * -1
 
@@ -29,15 +40,26 @@ def compare_gex(adata, annot, goi, embedding='FR', n_neighbors=15, n_pcs=20, see
         adata.obsm['spatial'] = np.vstack([x, y]).T
         sc.pl.spatial(adata, color=[goi, annot], layer='imputed_count', use_raw=False, cmap='viridis', spot_size=50)
 
-    elif embedding == 'FR': 
+    else:
+        sc.tl.pca(adata, svd_solver='arpack')
+        sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
 
-        sc.tl.diffmap(adata)
-        sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep='X_diffmap')
-        sc.tl.paga(adata, groups=annot)
-        sc.pl.paga(adata)
+        if embedding == 'PCA':
+            sc.pl.pca(adata, color=[goi, annot], layer='imputed_count', use_raw=False, cmap='viridis')
+        
+        elif embedding == 'UMAP':
+            sc.tl.umap(adata)
+            sc.pl.umap(adata, color=[goi, annot], layer='imputed_count', use_raw=False, cmap='viridis')
 
-        sc.tl.draw_graph(adata, init_pos='paga', random_state=seed)
-        sc.pl.draw_graph(adata, color=[goi, annot], layer="imputed_count", use_raw=False, cmap="viridis", legend_loc='on data')
+        elif embedding == 'FR': 
+
+            sc.tl.diffmap(adata)
+            sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep='X_diffmap')
+            sc.tl.paga(adata, groups=annot)
+            sc.pl.paga(adata)
+
+            sc.tl.draw_graph(adata, init_pos='paga', random_state=seed)
+            sc.pl.draw_graph(adata, color=[goi, annot], layer="imputed_count", use_raw=False, cmap="viridis", legend_loc='on data')
 
 
 
@@ -76,39 +98,63 @@ def plot_quiver(grid_points, vector_field, background=None, ax=None):
     
     plt.show()
 
-def plot_vectorfield(grid_points, vector_field, background=None):
-    x, y, z = grid_points[:, 0], grid_points[:, 1], grid_points[:, 2]
-    u, v, w = vector_field[..., 0].flatten(), vector_field[..., 1].flatten(), vector_field[..., 2].flatten()
-    zrange = [np.min(z) - 0.1, np.max(z) + 0.1]
-    # zrange = [np.min(z) - 0.6, np.max(z) + 0.6]
 
-    fig = go.Figure(data=go.Cone(
-        x=x, y=y, z=z,
-        u=u, v=v, w=w,
-        colorscale='solar',
-        showscale=True,
-        colorbar=dict(title="Vector Intensity", len=0.5, x=1.1),
-        sizemode="scaled",
-        sizeref=1.5,
-        anchor="tail",
-        lighting=dict(diffuse=0.9, specular=0.1) 
-    ))
+def get_grid_layout(layout_embedding, grid_scale=1, create_annot=False, show=False):
+    get_grid_points = lambda min_val, max_val: np.linspace(min_val, max_val, 
+                                                           int((max_val - min_val + 1) * grid_scale))
 
-    if background is not None:
-        scatter_fig = px.scatter_3d(background, x='X', y='Y', z='Z', color='annot')
-        scatter_fig.update_traces(marker=dict(size=1), line=dict(width=2, color='black'))
+    grid_x = get_grid_points(np.min(layout_embedding[:, 0]), np.max(layout_embedding[:, 0]))
+    grid_y = get_grid_points(np.min(layout_embedding[:, 1]), np.max(layout_embedding[:, 1]))
 
-        for trace in scatter_fig.data:
-            fig.add_trace(trace)
+    if create_annot:
 
-    fig.update_layout(
-        scene=dict(
-            xaxis=dict(title='X'),
-            yaxis=dict(title='Y'),
-            zaxis=dict(title='Z', range=zrange),
-        ),
-        title='3D Estimated Transition Visualization',
-        margin=dict(l=0, r=0, b=0, t=50), 
-        scene_camera=dict(eye=dict(x=1.5, y=1.5, z=0.8)) 
-    )
-    fig.show()
+        # Create a grid layout (2D meshgrid)
+        grid_xx, grid_yy = np.meshgrid(grid_x, grid_y)
+        grid_points = np.vstack([grid_xx.flatten(), grid_yy.flatten()]).T
+
+        # Create a KDTree for fast nearest-neighbor lookup
+        tree = KDTree(grid_points)
+        sample_labels = tree.query(layout_embedding, k=1)[1].flatten()
+
+        if show:
+            scatter = plt.scatter(layout_embedding[:, 0], layout_embedding[:, 1], c=sample_labels, s=10, 
+                                  cmap='flag', alpha=0.7, edgecolors='k', linewidth=0.5)
+            
+            # Draw grid
+            for x in grid_x:
+                plt.axvline(x=x, color='grey', linestyle='--', alpha=0.7, linewidth=0.5)
+            for y in grid_y:
+                plt.axhline(y=y, color='grey', linestyle='--', alpha=0.7, linewidth=0.5)
+
+            plt.gca().set_aspect('equal', adjustable='box')
+
+            plt.title('Grid Plot Cell Assignment', fontsize=10)
+
+        return sample_labels
+
+    else:
+        return grid_x, grid_y
+
+
+def show_expression_plot(adata, goi, annot_labels):
+
+    gene_idx = adata.var_names.get_loc(goi)
+    expression_data = pd.DataFrame({
+        'cluster': adata.obs[annot_labels],
+        'expression': adata.layers['imputed_count'][:, gene_idx]
+    })
+
+    df = expression_data.groupby('cluster')['expression'].agg(['mean', 'var']).reset_index()
+    df.sort_values(by='mean', inplace=True)
+
+    plt.figure(figsize=(8, 4))
+    sns.barplot(x='cluster', y='mean', data=df, palette='viridis', order=df['cluster'])
+    plt.errorbar(x=df['cluster'], y=df['mean'], yerr=df['var'], fmt='none', c='black', capsize=5)
+    plt.title(f'Expression of {goi} across clusters')
+    plt.xlabel('Cluster')
+    plt.ylabel('Mean Expression')
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.show()
+
+    return df
