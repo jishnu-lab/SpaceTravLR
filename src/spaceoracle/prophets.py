@@ -137,16 +137,17 @@ class Prophet(BaseTravLR):
         weighted_ligands_0 = self._compute_weighted_ligands(gene_mtx)
         weighted_ligands_0 = weighted_ligands_0.reindex(columns=self.adata.var_names, fill_value=0)
 
-        gene_mtx_0 = gene_mtx.copy()
+        gene_mtx_1 = gene_mtx.copy()
 
         for n in range(n_propagation):
 
+            # weight betas by the gene expression from the previous iteration
+            beta_dict = self._get_wbetas_dict(self.beta_dict, weighted_ligands_0, gene_mtx_1)
+
+            # get updated gene expressions
             gene_mtx_1 = gene_mtx + delta_simulated
             weighted_ligands_1 = self._compute_weighted_ligands(gene_mtx_1)
             self.weighted_ligands = weighted_ligands_1
-
-            # weight betas by gene expression
-            beta_dict = self._get_wbetas_dict(self.beta_dict, weighted_ligands_0, gene_mtx_0)
 
             # update deltas to reflect change in received ligands
             # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
@@ -172,9 +173,9 @@ class Prophet(BaseTravLR):
             gem_tmp[gem_tmp<0] = 0
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
-            # update start point weighted ligands
+            # save weighted ligand values to weight betas of next iteration
             weighted_ligands_0 = weighted_ligands_1.copy()
-            gene_mtx_0 = gene_mtx_1.copy()
+
 
         gem_simulated = gene_mtx + delta_simulated
         
