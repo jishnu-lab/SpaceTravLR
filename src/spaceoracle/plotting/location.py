@@ -28,7 +28,7 @@ def show_chosen_cells(adata, cell_idxs):
     plt.show()
 
 
-def show_effect_distance(adata, annot, top_genes, point_coord, cutoff=1000, save_dir=False):
+def show_effect_distance(adata, annot, top_genes, point_coord, cutoff=700, save_dir=False):
     fig, axs = plt.subplots(len(top_genes), 1, figsize=(10, 6 * len(top_genes)))
     if len(top_genes) == 1:
         axs = np.array([axs])
