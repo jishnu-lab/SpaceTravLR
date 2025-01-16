@@ -3,12 +3,13 @@ import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from sklearn.preprocessing import MinMaxScaler
 import seaborn as sns 
 import umap
+import os
 
-from .layout import plot_quiver, plot_vectorfield
+from .layout import plot_quiver, get_grid_layout
 from .shift import *
+
 
 
 def estimate_transitions_2D(adata, delta_X, embedding, layout_embedding, annot=None, normalize=True, 
@@ -19,11 +20,13 @@ n_neighbors=200, grid_scale=1, vector_scale=1, n_jobs=1, ax=None):
 
     grid_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))
     # print(grid_scale)
-    get_grid_points = lambda min_val, max_val: np.linspace(min_val, max_val, 
-                                                           int((max_val - min_val + 1) * grid_scale))
 
-    grid_x = get_grid_points(np.min(layout_embedding[:, 0]), np.max(layout_embedding[:, 0]))
-    grid_y = get_grid_points(np.min(layout_embedding[:, 1]), np.max(layout_embedding[:, 1]))
+    # get_grid_points = lambda min_val, max_val: np.linspace(min_val, max_val, 
+    #                                                        int((max_val - min_val + 1) * grid_scale))
+    # grid_x = get_grid_points(np.min(layout_embedding[:, 0]), np.max(layout_embedding[:, 0]))
+    # grid_y = get_grid_points(np.min(layout_embedding[:, 1]), np.max(layout_embedding[:, 1]))
+    grid_x, grid_y = get_grid_layout(layout_embedding, grid_scale=grid_scale)
+    
     grid_points = np.array(np.meshgrid(grid_x, grid_y)).T.reshape(-1, 2)
     size_x, size_y = len(grid_x), len(grid_y)
     
@@ -72,7 +75,7 @@ n_neighbors=200, grid_scale=1, vector_scale=1, n_jobs=1, ax=None):
     plot_quiver(grid_points, vector_field, background=background, ax=ax)
 
 
-def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest=None):
+def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest=None, save_dir=False):
     '''
     compare_ct: if True, show the genes with the greatest delta difference between cell types
     ct_interest: cell type of interest to compare against all other cell types
@@ -103,6 +106,12 @@ def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest
     else:
         gene_diffs = np.array(abs(ct_means).max(axis=1))
 
+    non_zero_count = np.count_nonzero(gene_diffs)
+    if non_zero_count == 0:
+        print(f'No change detected in {celltypes} gene expression')
+        return None
+    
+    n_show = min(n_show, non_zero_count)
     top_gene_idxs = np.argsort(gene_diffs)[-n_show:]
     top_gene_labels = list(adata.var_names[top_gene_idxs])
 
@@ -123,7 +132,7 @@ def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest
 
     # Plotting
     if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 4))
+        fig, ax = plt.subplots(figsize=(10, 6))
 
     ax = sns.boxplot(
         x='gene', y='delta', hue='ct', 
@@ -137,7 +146,13 @@ def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest
     ax.set_ylabel('Average Change in Count')
     ax.set_xlabel('Gene')
 
-    return gene_diffs
+    if save_dir:
+        names = '_'.join(sorted(top_ct_deltas.keys()))
+        joint_name = f'delta_{names}.png'
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, joint_name), bbox_inches='tight')
+
+    return top_gene_labels
 
 
 def contour_shift(adata_train, title, annot, seed=1334, ax=None, perturbed=None):
