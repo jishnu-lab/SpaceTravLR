@@ -119,7 +119,7 @@ class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
             radius=200, tf_ligand_cutoff=0.01, 
-            species='mouse', regulators=None, grn=None, colinks_path=None):
+            regulators=None, grn=None, colinks_path=None):
         
 
         assert isinstance(adata, AnnData), 'adata must be an AnnData object'
@@ -137,6 +137,12 @@ class SpatialCellularProgramsEstimator:
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
 
+        sample_gene = adata.var_names[0]
+        if sample_gene.isupper(): 
+            species = 'human'
+        else:
+            species = 'mouse'
+
         if regulators is None:
             if grn is None:
                 assert colinks_path is not None, 'colinks_path must be provided if grn is None'
@@ -150,7 +156,6 @@ class SpatialCellularProgramsEstimator:
         else:
             self.regulators = regulators
             self.grn = None
-
 
         self.init_ligands_and_receptors(species=species)
         self.lr_pairs = self.lr['pairs']
