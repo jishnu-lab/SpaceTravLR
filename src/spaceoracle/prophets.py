@@ -173,7 +173,11 @@ class Prophet(BaseTravLR):
             self.weighted_ligands = weighted_ligands_1
 
             beta_dict = self._get_wbetas_dict(
-                self.beta_dict, weighted_ligands_1, gene_mtx_1, disable_tqdm=False)
+                self.beta_dict, 
+                weighted_ligands_0, 
+                gene_mtx_1, 
+                disable_tqdm=False
+            )
             
             # update deltas to reflect change in received ligands
             # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
@@ -199,6 +203,7 @@ class Prophet(BaseTravLR):
             delta_simulated = np.where(delta_input != 0, delta_input, delta_simulated)
             gem_tmp = gene_mtx + delta_simulated
             gem_tmp[gem_tmp<0] = 0
+            delta_simulated = gem_tmp - gene_mtx
 
             # update start point weighted ligands
             weighted_ligands_0 = weighted_ligands_1.copy()
@@ -217,6 +222,11 @@ class Prophet(BaseTravLR):
         min_ = imputed_count.min(axis=0)
         max_ = imputed_count.max(axis=0)
         gem_simulated = pd.DataFrame(gem_simulated).clip(lower=min_, upper=max_, axis=1).values
+
+        if cells is not None:
+            gem_simulated[cells, target_index] = gene_expr
+        else:
+            gem_simulated[:, target_index] = gene_expr
 
         self.adata.layers['simulated_count'] = gem_simulated
         self.adata.layers['delta_X'] = gem_simulated - imputed_count
