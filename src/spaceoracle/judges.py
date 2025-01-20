@@ -1,13 +1,12 @@
 import numpy as np 
 import pandas as pd 
 import scanpy as sc 
-from collections import defaultdict
-import seaborn as sns
 import matplotlib.pyplot as plt
-import plotly.graph_objects as go
+from numba import jit
 
 from .plotting.degs import get_degs, plot_corr
-from .plotting.metacells import get_SEACells_assigns
+from .plotting.sankey import plot_pysankey, get_macrostates
+from .plotting.niche import get_demographics
 
 class Judge():
     def __init__(self, adata, annot):
@@ -65,63 +64,76 @@ class Judge():
             self.adata, nt_st=nt, nt_co=nt, co=co, pred=pred,
             ko=ko, genes=genes, title=title, save_path=save_path
         )
-
-    @staticmethod
-    def get_macrostates(sim_adata, ko_col='status', n_SEACells=90, build_kernel_on = 'X_pca', n_waypoint_eigs = 10, show=False):
-        '''Get SEACEll soft assignments'''
-        print('Getting macrostates...')
-        wt_adata = sim_adata[sim_adata.obs[ko_col] == 'wt']
-        wt_labels, wt_weights = get_SEACells_assigns(
-            wt_adata, n_SEACells=n_SEACells, build_kernel_on=build_kernel_on, n_waypoint_eigs=n_waypoint_eigs, show=show)
-
-        print('Getting KO macrostates...')
-        ko_adata = sim_adata[sim_adata.obs[ko_col] == 'ko']
-        ko_labels, ko_weights = get_SEACells_assigns(
-            ko_adata, n_SEACells=n_SEACells, build_kernel_on=build_kernel_on, n_waypoint_eigs=n_waypoint_eigs, show=show)
-
-        data = {
-            'wt': {
-                'labels': wt_labels,
-                'weights': wt_weights
-            },
-            'ko': {
-                'labels': ko_labels,
-                'weights': ko_weights
-            }
-        }
-        return data
     
     @staticmethod
-    def get_macrostate_change(sim_adata, seacells_data, annot):
-        cell2ct = {cell : ct for cell, ct in zip(sim_adata.obs_names, list(sim_adata.obs[annot]) * 2)}
+    def plot_demographic_change(adata, delta_X, annot, celltype, radius=150, n_neighbors=10, nn_transitions=10, save_path=False):
+        demo_df = get_demographics(adata, annot, radius=radius)
+
+        ct_idxs = np.where(adata.obs[annot] == celltype)[0]
+        demo_df = demo_df.iloc[ct_idxs]
+        adata_ct = adata[ct_idxs, :]
+        delta_X_ct = delta_X[ct_idxs]
+
+        demo_annot = demo_df.idxmax(axis=1)
+        embedding = demo_df.values
+
+        adata_ct.obs['demographic'] = demo_annot
+
+        Judge.plot_macrostate_change(
+            adata_ct, delta_X_ct, 'demographic', embedding, 
+            n_neighbors=n_neighbors, nn_transitions=nn_transitions, save_path=save_path
+        )
         
-        seacells_data['wt']['labels'].replace(cell2ct, inplace=True)
-        seacells_data['ko']['labels'].replace(cell2ct, inplace=True)
 
-        celltypes = sim_adata.obs[annot].unique()
+    @staticmethod
+    def plot_macrostate_change(adata, delta_X, annot, embedding, n_neighbors=200, nn_transitions=10, save_path=False):
+        '''nn_transitions: number of cells to consider the transitions to'''
+        sankey_df = get_macrostates(
+            adata, 
+            delta_X, 
+            embedding, 
+            annot, 
+            n_neighbors=n_neighbors,
+            nn_transitions=nn_transitions
+        )
 
-        sankey_data = {'source': [], 'target': [], 'value': []}
+        delta_X_rndm = delta_X.copy()
+        permute_rows_nsign(delta_X_rndm)
 
-        for wt_ct in celltypes:
-            mask_wt = (seacells_data['wt']['labels'] == wt_ct).values
+        sankey_df_rndm = get_macrostates(
+            adata, 
+            delta_X_rndm, 
+            embedding, 
+            annot, 
+            n_neighbors=n_neighbors,
+            nn_transitions=nn_transitions
+        )
 
-            for ko_ct in celltypes:
-                mask_ko = (seacells_data['ko']['labels'] == ko_ct).values
+        sankey_df_rndm = sankey_df_rndm
 
-                # Compute how much of the wt cell type goes to ko cell type
-                shifted_val = np.maximum( 
-                    0, seacells_data['ko']['weights'][mask_wt & mask_ko] - seacells_data['wt']['weights'][mask_wt & mask_ko]
-                ).sum()
+        fig, axs = plt.subplots(1, 2, figsize=(20, 10))
+        plot_pysankey(sankey_df, ax=axs[0])
+        plot_pysankey(sankey_df_rndm, ax=axs[1])
 
-                sankey_data['source'].append(wt_ct)
-                sankey_data['target'].append(ko_ct)
-                sankey_data['value'].append(shifted_val)
+        axs[0].set_title('Celltype Transitions')
+        axs[1].set_title('Randomized Control')
 
-        # Convert to DataFrame
-        sankey_df = pd.DataFrame(sankey_data)
-        return sankey_df
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=200)
 
+        plt.show()
 
+    
 
-            
+# Cannibalized from CellOracle
+@jit(nopython=True)
+def permute_rows_nsign(A: np.ndarray) -> None:
+    """Permute in place the entries and randomly switch the sign for each row of a matrix independently.
+    """
+    plmi = np.array([+1, -1])
+    for i in range(A.shape[0]):
+        np.random.shuffle(A[i, :])
+        A[i, :] = A[i, :] * np.random.choice(plmi, size=A.shape[1])
+
 

@@ -10,6 +10,7 @@ from tqdm import tqdm
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from scipy.interpolate import griddata
+from sklearn.neighbors import KDTree
 
 
 def get_modulator_betas(so_obj, goi, save_dir=None, use_simulated=False, clusters=[]):
@@ -148,3 +149,32 @@ def get_grid_layout(n_items, preferred_cols=None):
         
     n_rows = int(math.ceil(n_items / n_cols))
     return n_rows, n_cols
+
+
+def get_demographics(adata, annot, radius=100):
+
+    spatial_coords = adata.obsm['spatial']
+    tree = KDTree(spatial_coords)
+    neighbors = tree.query_radius(spatial_coords, r=radius)
+
+    demographic = {}
+    for idx, cell in enumerate(adata.obs_names):
+        neighbor_cells = adata.obs_names[neighbors[idx]]
+        demographic[cell] = neighbor_cells
+
+    cell_types = adata.obs[annot]
+
+    demographic_df = pd.DataFrame(
+        index=adata.obs_names, 
+        columns=np.unique(cell_types)
+    )
+
+    for cell, neighbors in demographic.items():
+        neighbor_types = cell_types.loc[neighbors]
+        type_counts = neighbor_types.value_counts()
+        demographic_df.loc[cell, type_counts.index] = type_counts.values
+
+    return demographic_df.fillna(0)
+
+
+

@@ -30,4 +30,5 @@ group-lasso
 pqdm
 magic-impute
 wordcloud
+pysankeybeta
 # velocyto==0.17.17
