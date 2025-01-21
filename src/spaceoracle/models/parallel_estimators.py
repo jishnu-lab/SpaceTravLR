@@ -172,7 +172,7 @@ class SpatialCellularProgramsEstimator:
         assert np.isin(self.regulators, self.adata.var_names).all(), 'all regulators must be in adata.var_names'
 
 
-    def plot_modulators(self, use_expression=False, cmap='viridis'):
+    def plot_modulators(self, use_expression=True, cmap='viridis'):
         
         if use_expression:
             # Get mean expression values for each gene
@@ -183,7 +183,7 @@ class SpatialCellularProgramsEstimator:
                 self.receptors + 
                 self.tfl_regulators
             ))
-            expr_values = self.adata[:, genes].X.mean(axis=0)
+            expr_values = self.adata.to_df(layer=self.layer)[genes].mean(axis=0)
             word_freq = {gene: float(expr) for gene, expr in zip(genes, expr_values)}
         else:
             word_freq = {reg: 1 for reg in set(
@@ -197,7 +197,8 @@ class SpatialCellularProgramsEstimator:
         # print(word_freq)
 
         wordcloud = WordCloud(
-            width=800, height=400, 
+            width=800, height=400, colormap=cmap,
+            contour_width=1, contour_color='black',
             background_color='white').generate_from_frequencies(word_freq)
 
         plt.figure(figsize=(16, 8))
@@ -571,7 +572,7 @@ class SpatialCellularProgramsEstimator:
                     optimizer.zero_grad()
                     outputs = model(spatial_maps, inputs, spatial_features)
                     loss = criterion(outputs, targets)
-                    loss += torch.mean(outputs.mean(0) - model.anchors) * 1e-4
+                    loss += torch.mean(outputs.mean(0) - model.anchors) * 1e-3
                     loss.backward()
 
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, norm_type=2)
