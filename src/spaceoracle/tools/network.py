@@ -7,6 +7,13 @@ import json
 import torch
 import networkx as nx 
 
+def get_human_housekeeping_genes():
+    return pd.read_csv('https://housekeeping.unicamp.br/Housekeeping_GenesHuman.csv', sep=';')
+
+def get_mouse_housekeeping_genes():
+    return pd.read_csv('https://housekeeping.unicamp.br/Housekeeping_GenesMouse.csv', sep=';')
+
+
 def expand_paired_interactions(df):
     expanded_rows = []
     for _, row in df.iterrows():
@@ -24,8 +31,10 @@ def expand_paired_interactions(df):
     
     return df
 
-def encode_labels(labels):
+def encode_labels(labels, reverse_dict=False):
     unique_labels = sorted(list(set(labels)))
+    if reverse_dict:
+        return {label: i for i, label in enumerate(unique_labels)}
     return {i: label for i, label in enumerate(unique_labels)}
 
 
@@ -102,12 +111,12 @@ class CellOracleLinks:
 
 
 class RegulatoryFactory(CellOracleLinks):
-    def __init__(self, colink_path, organism='mouse', annot='cell_type_int'):
-        self.colink_path = colink_path
+    def __init__(self, colinks_path, organism='mouse', annot='cell_type_int'):
+        self.colinks_path = colinks_path
         self.organism = organism
         self.annot = annot
 
-        with open(self.colink_path, 'rb') as f:
+        with open(self.colinks_path, 'rb') as f:
             self.links = pickle.load(f)
 
         self.cluster_labels = encode_labels(self.links.keys())
