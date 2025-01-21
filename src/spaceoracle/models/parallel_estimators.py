@@ -194,6 +194,8 @@ class SpatialCellularProgramsEstimator:
                 self.tfl_regulators
             )}
 
+        # print(word_freq)
+
         wordcloud = WordCloud(
             width=800, height=400, 
             background_color='white').generate_from_frequencies(word_freq)
