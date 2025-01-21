@@ -7,6 +7,13 @@ import json
 import torch
 import networkx as nx 
 
+def get_human_housekeeping_genes():
+    return pd.read_csv('https://housekeeping.unicamp.br/Housekeeping_GenesHuman.csv', sep=';')
+
+def get_mouse_housekeeping_genes():
+    return pd.read_csv('https://housekeeping.unicamp.br/Housekeeping_GenesMouse.csv', sep=';')
+
+
 def expand_paired_interactions(df):
     expanded_rows = []
     for _, row in df.iterrows():
@@ -24,8 +31,10 @@ def expand_paired_interactions(df):
     
     return df
 
-def encode_labels(labels):
+def encode_labels(labels, reverse_dict=False):
     unique_labels = sorted(list(set(labels)))
+    if reverse_dict:
+        return {label: i for i, label in enumerate(unique_labels)}
     return {i: label for i, label in enumerate(unique_labels)}
 
 
@@ -111,6 +120,79 @@ class RegulatoryFactory(CellOracleLinks):
             self.links = pickle.load(f)
 
         self.cluster_labels = encode_labels(self.links.keys())
+
+ 
+    def get_cluster_regulators(self, adata, target_gene, alpha=0.05):
+        adata_clusters = np.unique(adata.obs[self.annot])
+        regulator_dict = {}
+        all_regulators = set()
+
+        for label in adata_clusters:
+            grn_df = self.links[label]
+
+            grn_df = grn_df[(grn_df.target == target_gene) & (grn_df.p <= alpha)]
+            tfs = list(grn_df.source)
+            
+            regulator_dict[label] = tfs
+            all_regulators.update(tfs)
+
+        all_regulators = all_regulators & set(adata.to_df().columns) # only use genes also in adata
+        all_regulators = sorted(list(all_regulators))
+        regulator_masks = {}
+
+        for label, tfs in regulator_dict.items():
+            indices = [all_regulators.index(tf)+1 for tf in tfs if tf in all_regulators]
+            
+            mask = torch.zeros(len(all_regulators) + 1)     # prepend 1 for beta0
+            mask[[0] + indices] = 1 
+            regulator_masks[label] = mask
+
+        self.regulator_dict = regulator_masks
+
+        return all_regulators
+    
+class GeneralRegulatoryNetwork(CellOracleLinks):
+    def __init__(self, colinks_path, annot):
+        '''
+        A general class for loading CellOracle GRNs
+        Assumes lexicographical order for cluster labels
+        '''
+
+        assert colinks_path.endswith('.pkl'), 'colinks_path should be a pickle file'
+        with open(colinks_path, 'rb') as f:
+            self.links = pickle.load(f)
+        
+        self.annot = annot
+    
+    def get_cluster_regulators(self, adata, target_gene, alpha=0.05):
+
+        adata_clusters = np.unique(adata.obs[self.annot])
+        regulator_dict = {}
+        all_regulators = set()
+
+        for cluster, label in enumerate(adata_clusters):
+            grn_df = self.links[cluster]
+
+            grn_df = grn_df[(grn_df.target == target_gene) & (grn_df.p <= alpha)]
+            tfs = list(grn_df.source)
+            
+            regulator_dict[label] = tfs
+            all_regulators.update(tfs)
+
+        all_regulators = all_regulators & set(adata.to_df().columns) # only use genes also in adata
+        all_regulators = sorted(list(all_regulators))
+        regulator_masks = {}
+
+        for label, tfs in regulator_dict.items():
+            indices = [all_regulators.index(tf)+1 for tf in tfs if tf in all_regulators]
+            
+            mask = torch.zeros(len(all_regulators) + 1)     # prepend 1 for beta0
+            mask[[0] + indices] = 1 
+            regulator_masks[label] = mask
+
+        self.regulator_dict = regulator_masks
+
+        return all_regulators
 
 
         
@@ -232,7 +314,7 @@ class MouseKidneyRegulatoryNetwork(CellOracleLinks):
         with open(self.base_pth+'/kidney/celloracle_links.pkl', 'rb') as f:
             self.links = pickle.load(f)
 
-        self.annot = 'cluster'
+        self.annot = 'cluster_cat'
 
         with open(os.path.join(self.base_pth, 'kidney/celltype_assign.json'), 'r') as f:
             self.cluster_labels = json.load(f)
@@ -244,8 +326,7 @@ class MouseKidneyRegulatoryNetwork(CellOracleLinks):
         all_regulators = set()
 
         for label in adata_clusters:
-            # cluster = self.cluster_labels[str(label)]
-            cluster = label
+            cluster = self.cluster_labels[str(label)]
             grn_df = self.links[cluster]
 
             grn_df = grn_df[(grn_df.target == target_gene) & (grn_df.p <= alpha)]
@@ -318,6 +399,65 @@ class MouseSpleenRegulatoryNetwork(CellOracleLinks):
         self.regulator_dict = regulator_masks
 
         return all_regulators
+
+
+
+class HumanMelanomaRegulatoryNetwork(CellOracleLinks):
+    def __init__(self):
+
+        self.base_pth = '/ix/djishnu/alw399/SpaceOracle/data'
+
+        with open(self.base_pth+'/melanoma/celloracle_links.pkl', 'rb') as f:
+            self.links = pickle.load(f)
+
+        self.annot = 'cluster_cat'
+
+        self.cluster_labels = {
+            '2': 'CD8_T',
+            '10': 'tumour_1',
+            '3': 'T_reg',
+            '1': 'CD4_T',
+            '7': 'mono-mac',
+            '9': 'plasma',
+            '8': 'pDC',
+            '6': 'mDC',
+            '5': 'fibroblast',
+            '11': 'tumour_2',
+            '0': 'B_cell',
+            '4': 'endothelial'
+        }
+    
+    def get_cluster_regulators(self, adata, target_gene, alpha=0.05):
+        adata_clusters = np.unique(adata.obs[self.annot])
+        regulator_dict = {}
+        all_regulators = set()
+
+        for label in adata_clusters:
+            cluster = self.cluster_labels[str(label)]
+            # cluster = str(label)
+            grn_df = self.links[cluster]
+
+            grn_df = grn_df[(grn_df.target == target_gene) & (grn_df.p <= alpha)]
+            tfs = list(grn_df.source)
+            
+            regulator_dict[label] = tfs
+            all_regulators.update(tfs)
+
+        all_regulators = all_regulators & set(adata.to_df().columns) # only use genes also in adata
+        all_regulators = sorted(list(all_regulators))
+        regulator_masks = {}
+
+        for label, tfs in regulator_dict.items():
+            indices = [all_regulators.index(tf)+1 for tf in tfs if tf in all_regulators]
+            
+            mask = torch.zeros(len(all_regulators) + 1)     # prepend 1 for beta0
+            mask[[0] + indices] = 1 
+            regulator_masks[label] = mask
+
+        self.regulator_dict = regulator_masks
+
+        return all_regulators
+    
     
 
 
