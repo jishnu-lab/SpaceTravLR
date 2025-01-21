@@ -9,7 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from torch.utils.data import DataLoader, Dataset
-from sklearn.linear_model import ARDRegression
+from sklearn.linear_model import ARDRegression, BayesianRidge
 from group_lasso import GroupLasso
 from spaceoracle.models.spatial_map import xyc2spatial_fast
 from spaceoracle.tools.network import DayThreeRegulatoryNetwork, HumanTonsilNetwork, RegulatoryFactory, expand_paired_interactions
@@ -119,7 +119,7 @@ class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
             radius=200, tf_ligand_cutoff=0.01, 
-            species='mouse', regulators=None, grn=None, colinks_path=None):
+            regulators=None, grn=None, colinks_path=None):
         
 
         assert isinstance(adata, AnnData), 'adata must be an AnnData object'
@@ -137,6 +137,12 @@ class SpatialCellularProgramsEstimator:
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
 
+        sample_gene = adata.var_names[0]
+        if sample_gene.isupper(): 
+            species = 'human'
+        else:
+            species = 'mouse'
+
         if regulators is None:
             if grn is None:
                 assert colinks_path is not None, 'colinks_path must be provided if grn is None'
@@ -150,7 +156,6 @@ class SpatialCellularProgramsEstimator:
         else:
             self.regulators = regulators
             self.grn = None
-
 
         self.init_ligands_and_receptors(species=species)
         self.lr_pairs = self.lr['pairs']
@@ -167,15 +172,27 @@ class SpatialCellularProgramsEstimator:
         assert np.isin(self.regulators, self.adata.var_names).all(), 'all regulators must be in adata.var_names'
 
 
-    def plot_modulators(self):
-
-        word_freq = {reg: 1 for reg in set(
-            self.regulators + 
-            self.ligands + 
-            self.tfl_ligands + 
-            self.receptors + 
-            self.tfl_regulators
-        )}
+    def plot_modulators(self, use_expression=False, cmap='viridis'):
+        
+        if use_expression:
+            # Get mean expression values for each gene
+            genes = list(set(
+                self.regulators + 
+                self.ligands + 
+                self.tfl_ligands + 
+                self.receptors + 
+                self.tfl_regulators
+            ))
+            expr_values = self.adata[:, genes].X.mean(axis=0)
+            word_freq = {gene: float(expr) for gene, expr in zip(genes, expr_values)}
+        else:
+            word_freq = {reg: 1 for reg in set(
+                self.regulators + 
+                self.ligands + 
+                self.tfl_ligands + 
+                self.receptors + 
+                self.tfl_regulators
+            )}
 
         wordcloud = WordCloud(
             width=800, height=400, 
@@ -184,7 +201,9 @@ class SpatialCellularProgramsEstimator:
         plt.figure(figsize=(16, 8))
         plt.imshow(wordcloud, interpolation='bilinear', aspect='equal')
         plt.axis('off')
-        plt.title(self.target_gene)
+        plt.title(
+            f'{self.target_gene} modulators', fontsize=20)
+        plt.tight_layout()
         plt.show()
 
     def init_ligands_and_receptors(self, receptor_thresh=0.01, species='mouse'):
@@ -406,7 +425,7 @@ class SpatialCellularProgramsEstimator:
 
 
     def fit(self, num_epochs=10, threshold_lambda=1e-4, learning_rate=2e-4, batch_size=512, 
-            use_ARD=False, pbar=None, discard=50):
+            use_ARD=False, pbar=None, discard=50, use_bayesian=True):
         sp_maps, X, y, cluster_labels = self.init_data()
 
         self.models = {}
@@ -437,35 +456,43 @@ class SpatialCellularProgramsEstimator:
 
             if use_ARD: 
 
-                X_tf = X_cell[:, :len(self.regulators)]
-                X_lr = X_cell[:, len(self.regulators):len(self.regulators)+len(self.ligands)]
-                X_tfl = X_cell[:, -len(self.tfl_pairs):]
+                # X_tf = X_cell[:, :len(self.regulators)]
+                # X_lr = X_cell[:, len(self.regulators):len(self.regulators)+len(self.ligands)]
+                # X_tfl = X_cell[:, -len(self.tfl_pairs):]
 
-                m1 = ARDRegression(threshold_lambda=threshold_lambda)
-                m1.fit(X_tf, y_cell)
+                # m1 = ARDRegression(threshold_lambda=threshold_lambda)
+                # m1.fit(X_tf, y_cell)
 
-                m2 = ARDRegression(threshold_lambda=threshold_lambda, fit_intercept=True)
-                m2.fit(X_lr, y_cell)
+                # m2 = ARDRegression(threshold_lambda=threshold_lambda, fit_intercept=True)
+                # m2.fit(X_lr, y_cell)
 
-                m3 = ARDRegression(threshold_lambda=threshold_lambda, fit_intercept=True)
-                m3.fit(X_tfl, y_cell)
+                # m3 = ARDRegression(threshold_lambda=threshold_lambda, fit_intercept=True)
+                # m3.fit(X_tfl, y_cell)
 
-                y_pred = (m1.predict(X_tf) + m2.predict(X_lr) + m3.predict(X_tfl)) / 3
-                r2_ard = r2_score(y_cell, y_pred)
+                # y_pred = (m1.predict(X_tf) + m2.predict(X_lr) + m3.predict(X_tfl)) / 3
+                # r2_ard = r2_score(y_cell, y_pred)
 
-                intercept = (m1.intercept_ + m2.intercept_ + m3.intercept_) / 3
-                coefs = np.hstack[m1.coef_, m2.coef_, m3.coef_]
-                _betas = np.hstack([intercept, coefs])
+                # intercept = (m1.intercept_ + m2.intercept_ + m3.intercept_) / 3
+                # coefs = np.hstack([m1.coef_, m2.coef_, m3.coef_])
+                # _betas = np.hstack([intercept, coefs])
                 # _betas = np.hstack([intercept, m1.coef_, m2.coef_, m3.coef_])
 
-                # m = ARDRegression(threshold_lambda=threshold_lambda)
-                # m.fit(X_cell, y_cell)
-                # y_pred = m.predict(X_cell)
-                # r2_ard = r2_score(y_cell, y_pred)
-                # _betas = np.hstack([m.intercept_, m.coef_])
+                m = ARDRegression(threshold_lambda=threshold_lambda)
+                m.fit(X_cell, y_cell)
+                y_pred = m.predict(X_cell)
+                r2 = r2_score(y_cell, y_pred)
+                _betas = np.hstack([m.intercept_, m.coef_])
 
                 coefs = None
-            
+
+
+            elif use_bayesian:
+                m = BayesianRidge()
+                m.fit(X_cell, y_cell)
+                y_pred = m.predict(X_cell)
+                r2 = r2_score(y_cell, y_pred)
+                _betas = np.hstack([m.intercept_, m.coef_])
+
             else:
 
                 groups = [1]*len(self.regulators) + [2]*len(self.ligands) + [3]*len(self.tfl_pairs)
@@ -502,7 +529,7 @@ class SpatialCellularProgramsEstimator:
 
                 _betas = np.hstack([gl.intercept_, tf_coefs, lr_coefs, tfl_coefs])
 
-                r2_ard = r2_score(y_cell, y_pred)
+                r2 = r2_score(y_cell, y_pred)
             
 
             loader = DataLoader(
@@ -556,7 +583,7 @@ class SpatialCellularProgramsEstimator:
                     pbar.update(len(targets))
 
             if num_epochs:
-                print(f'{cluster}: {r2_score(all_y_true, all_y_pred):.4f} | {r2_ard:.4f}')
+                print(f'{cluster}: {r2_score(all_y_true, all_y_pred):.4f} | {r2:.4f}')
             self.models[cluster] = model
 
 
