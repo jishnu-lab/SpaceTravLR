@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from tqdm import tqdm
-
+import warnings
+warnings.filterwarnings('ignore')
 
 @dataclass
 class BetaOutput:
@@ -25,8 +26,10 @@ class BetaOutput:
 class BetaFrame(pd.DataFrame):
 
     @classmethod
-    def from_path(cls, path):
+    def from_path(cls, path, cell_index=None):
         df = pd.read_parquet(path)
+        if cell_index is not None:
+            df = df.loc[cell_index]
         return cls(df)
 
     def __init__(self, *args, **kwargs):
@@ -78,6 +81,15 @@ class BetaFrame(pd.DataFrame):
     
 
     def splash(self, rw_ligands, gex_df):
+        ## wL is the amount of ligand 'received' at each location
+        ## assuming ligands and receptors expression are independent, dL/dR = 0
+        ## y = b0 + b1*TF1 + b2*wL1R1 + b3*wL1R2
+        ## dy/dTF1 = b1
+        ## dy/dwL1 = b2[wL1*dR1/dwL1 + R1] + b3[wL1*dR2/dwL1 + R2]
+        ##         = b2*R1 + b3*R2
+        ## dy/dR1 = b2*[wL1 + R1*dwL1/dR1] = b2*wL1
+
+        
         _df = pd.DataFrame(
             np.concatenate([
                 self[self.tf_columns].to_numpy(),
@@ -93,7 +105,12 @@ class BetaFrame(pd.DataFrame):
         return _df[self.modulators_genes]
         
     def _repr_html_(self):
-        info = f"BetaFrame with {len(self.modulators_genes)} modulator genes\n"
+        info = f"BetaFrame with {len(self.modulators_genes)} modulator genes<br>"
+        info += f"{len(set(self.tfs))} transcription factors<br>"
+        info += f"{len(set(self.ligands))} ligands <br>"
+        info += f"{len(set(self.receptors))} receptors <br>"
+        info += f"{len(np.unique(self.lr_pairs))} ligand-receptor pairs<br>" 
+        info += f"{len(np.unique(self.tfl_pairs))} tfl pairs<br>"
         df_html = super()._repr_html_()
         return f"<div><p>{info}</p>{df_html}</div>"
 
@@ -102,7 +119,7 @@ class Betabase:
     """
     Holds a collection of BetaFrames for each gene.
     """
-    def __init__(self, adata, folder):
+    def __init__(self, adata, folder, cell_index=None):
         assert os.path.exists(folder), f'Folder {folder} does not exist'
         # self.adata = adata
         self.xydf = pd.DataFrame(
@@ -119,16 +136,16 @@ class Betabase:
         self.data = {}
         self.ligands_set = set()
 
-        self.load_betas_from_disk()
+        self.load_betas_from_disk(cell_index=cell_index)
 
     def __len__(self):
         return len(self.data)
 
 
-    def load_betas_from_disk(self):
+    def load_betas_from_disk(self, cell_index):
         for path in tqdm(self.beta_paths):
             gene_name = path.split('/')[-1].split('_')[0]
-            self.data[gene_name] = BetaFrame.from_path(path)
+            self.data[gene_name] = BetaFrame.from_path(path, cell_index=cell_index)
             self.ligands_set.update(self.data[gene_name]._all_ligands)
         
         for gene_name, betadata in self.data.items():
