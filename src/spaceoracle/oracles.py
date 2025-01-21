@@ -262,7 +262,7 @@ class OracleQueue:
 
 class SpaceTravLR(BaseTravLR):
 
-    def __init__(self, adata, save_dir='./models', annot='rctd_cluster', grn=None,
+    def __init__(self, adata, save_dir='./models', annot='cell_type_int', grn=None,
     max_epochs=15, spatial_dim=64, learning_rate=3e-4, batch_size=256, rotate_maps=True, 
     layer='imputed_count', alpha=0.05, test_mode=False, 
     threshold_lambda=3e3, tf_ligand_cutoff=0.01, radius=200):
@@ -354,7 +354,7 @@ class SpaceTravLR(BaseTravLR):
                 layer=self.layer,
                 cluster_annot=self.annot,
                 spatial_dim=self.spatial_dim,
-                radius=200,
+                radius=self.radius,
                 tf_ligand_cutoff=self.tf_ligand_cutoff,
                 grn=self.grn
             )
