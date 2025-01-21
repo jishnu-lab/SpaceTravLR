@@ -127,6 +127,7 @@ def project_probabilities(P, embedding, normalize=True):
 
         embedding_T = embedding.T # shape (m, n_cells)
         unitary_vectors = embedding_T[:, None, :] - embedding_T[:, :, None]  # shape (m, n_cells, n_cells)
+        unitary_vectors = unitary_vectors.astype(np.float64)
         
         # Normalize the difference vectors (L2 norm)
         with np.errstate(divide='ignore', invalid='ignore'):
