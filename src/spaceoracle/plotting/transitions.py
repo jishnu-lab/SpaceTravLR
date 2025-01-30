@@ -14,8 +14,9 @@ from .shift import *
 
 def estimate_transitions_2D(adata, delta_X, embedding, layout_embedding, annot=None, normalize=True, 
 n_neighbors=200, grid_scale=1, vector_scale=1, n_jobs=1, ax=None):
-
     P = estimate_transition_probabilities(adata, delta_X, embedding, n_neighbors=n_neighbors, n_jobs=n_jobs)
+    P_null = estimate_transition_probabilities(adata, delta_X * 0, embedding, n_neighbors=n_neighbors, n_jobs=n_jobs)
+    P = P - P_null
     V_simulated = project_probabilities(P, layout_embedding, normalize=normalize)
 
     grid_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))
