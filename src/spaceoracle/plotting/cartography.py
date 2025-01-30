@@ -63,29 +63,12 @@ def xy_from_adata(adata):
     )
     
 class Cartography:
-    def __init__(self, adata, base_layer='imputed_count'):
+    def __init__(self, adata, color_dict, base_layer='imputed_count'):
         self.adata = adata
         self.xy = xy_from_adata(adata)
         self.base_layer = base_layer
         self.unperturbed_expression = adata.to_df(layer=base_layer)
-        
-        self.color_dict = {
-            'T_CD4': "#ea7465",
-            'T_follicular_helper': "#b74329", 
-            'T_CD8': "#dd3652",
-            
-            'GC Light Zone': "#bb9cd9",
-            'GC Intermediate Zone': "#5bbbdb",
-            'GC Dark Zone': "#964ac6",
-            
-            'B_memory': "#61c17c",
-            'B_naive': "#4b9131", 
-            'plasma': "#beb637",
-            
-            'mDC/myeloid': "#736f43",
-            'FDC': "#e28723",
-            'pDC': "#995071"
-        }
+        self.color_dict = color_dict
                 
     @staticmethod
     def compute_perturbation_corr(gene_mtx, delta_X):
@@ -199,12 +182,14 @@ class Cartography:
     def plot_umap_quiver(
             self, 
             perturb_target, 
+            hue='banksy_celltypes',
             normalize=False, 
             n_neighbors=200, 
             grid_scale=1, 
             vector_scale=1, 
             figsize=(5, 5),
             dpi=180,
+            alpha=0.9,
             alt_colors=None
         ):
         assert 'X_umap' in self.adata.obsm
@@ -250,9 +235,13 @@ class Cartography:
         vector_scale = vector_scale / np.max(vector_field)
         vector_field *= vector_scale
         
-        
             
         f, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        
+        color_dict = self.color_dict.copy()
+        color_dict['GC Dark Zone'] = 'mediumpurple'
+        color_dict['GC Intermediate Zone'] = 'mediumpurple'
+        color_dict['GC Light Zone'] = 'mediumpurple'
 
         sns.scatterplot(
             data = pd.DataFrame(
@@ -260,13 +249,13 @@ class Cartography:
                 columns=['x', 'y'], 
                 index=self.adata.obs_names).join(self.adata.obs),
             x='x', y='y',
-            hue='banksy_celltypes', 
+            hue=hue, 
             s=15,
             ax=ax,
-            alpha=0.7,
+            alpha=alpha,
             edgecolor='black',
             linewidth=0.1,
-            palette=self.color_dict,
+            palette=color_dict,
             legend=False
         )
 
@@ -285,7 +274,7 @@ class Cartography:
         if 'alt_labels' in self.adata.obs:
             all_cts = self.adata.obs['alt_labels']
         else:
-            all_cts = self.adata.obs['banksy_celltypes']
+            all_cts = self.adata.obs[hue]
 
         for cluster in all_cts.unique():
             cluster_cells = all_cts == cluster
