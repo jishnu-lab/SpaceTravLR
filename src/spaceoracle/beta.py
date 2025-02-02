@@ -119,7 +119,7 @@ class Betabase:
     """
     Holds a collection of BetaFrames for each gene.
     """
-    def __init__(self, adata, folder, cell_index=None):
+    def __init__(self, adata, folder, cell_index=None, subsample=None):
         assert os.path.exists(folder), f'Folder {folder} does not exist'
         # self.adata = adata
         self.xydf = pd.DataFrame(
@@ -132,6 +132,8 @@ class Betabase:
             )
         )
         self.beta_paths = glob.glob(f'{self.folder}/*_betadata.parquet')
+        if subsample is not None:
+            self.beta_paths = self.beta_paths[:subsample]
 
         self.data = {}
         self.ligands_set = set()

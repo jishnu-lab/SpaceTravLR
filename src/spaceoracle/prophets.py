@@ -44,8 +44,8 @@ class Prophet(BaseTravLR):
         self.beta_dict = None
         self.goi = None
 
-    def compute_betas(self):
-        self.beta_dict = self._get_spatial_betas_dict()
+    def compute_betas(self, subsample=None):
+        self.beta_dict = self._get_spatial_betas_dict(subsample=subsample)
     
     @staticmethod
     def load_betadata(gene, save_dir):
@@ -82,8 +82,8 @@ class Prophet(BaseTravLR):
         betas_df = betadata.splash(rw_ligands, gex_df)
         return betas_df
         
-    def _get_spatial_betas_dict(self):
-        bdb = Betabase(self.adata, self.save_dir)
+    def _get_spatial_betas_dict(self, subsample=None):
+        bdb = Betabase(self.adata, self.save_dir, subsample=subsample)
         self.ligands = list(bdb.ligands_set)
         return bdb
     
@@ -102,8 +102,32 @@ class Prophet(BaseTravLR):
 
         return gex_delta[cell_index, :].dot(gene_gene_matrix)
     
+    
+    def _perturb_all_cells(self, gex_delta, betas_dict):
+        """
+        Vectorized version of _perturb_single_cell.
+        For each gene (target), it computes the dot product between the per-cell modulator weights
+        and the corresponding gene perturbations.
+        
+        Returns a matrix of shape (n_obs, n_genes) where each row is the updated perturbation.
+        """
+        n_obs, n_genes = gex_delta.shape
+        result = np.zeros((n_obs, n_genes))
+        
+        # It may be beneficial to cache modulator indices for each gene if this method is called repeatedly.
+        for i, gene in enumerate(self.adata.var_names):
+            _beta_out = betas_dict.data.get(gene, None)
+            if _beta_out is not None:
+                # Precompute modulator indices for the gene
+                mod_idx = np.array(_beta_out.modulator_gene_indices)
+                
+                # Compute the dot product for each cell: multiply the per-cell weights with the corresponding 
+                # perturbations and sum over modulator genes.
+                result[:, i] = np.sum(_beta_out.wbetas.values * gex_delta[:, mod_idx], axis=1)
+        
+        return result
 
-    def perturb(self, target, gene_mtx=None, n_propagation=3, gene_expr=0, cells=None):
+    def perturb(self, target, gene_mtx=None, n_propagation=3, gene_expr=0, cells=None, use_optimized=False):
 
         self.goi = target
         
@@ -159,11 +183,16 @@ class Prophet(BaseTravLR):
             
             delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
 
-            _simulated = np.array(
-                [self._perturb_single_cell(delta_simulated, i, beta_dict) 
-                    for i in tqdm(
-                        range(self.adata.n_obs), 
-                        desc=f'Running simulation {n+1}/{n_propagation}')])
+
+            if not use_optimized:
+                _simulated = np.array(
+                    [self._perturb_single_cell(delta_simulated, i, beta_dict) 
+                        for i in tqdm(
+                            range(self.adata.n_obs), 
+                            desc=f'Running simulation {n+1}/{n_propagation}')])
+            else:
+                _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
+            
             delta_simulated = np.array(_simulated)
             
             # ensure values in delta_simulated match our desired KO / input
