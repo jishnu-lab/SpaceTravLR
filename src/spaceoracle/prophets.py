@@ -19,6 +19,9 @@ from .plotting.beta_maps import plot_spatial
 from .plotting.location import get_cells_in_radius, show_effect_distance
 
 from numba import jit
+import enlighten
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 
 class Prophet(BaseTravLR):
@@ -43,9 +46,10 @@ class Prophet(BaseTravLR):
 
         self.beta_dict = None
         self.goi = None
+        
 
-    def compute_betas(self, subsample=None):
-        self.beta_dict = self._get_spatial_betas_dict(subsample=subsample)
+    def compute_betas(self, subsample=None, float16=False):
+        self.beta_dict = self._get_spatial_betas_dict(subsample=subsample, float16=float16)
     
     @staticmethod
     def load_betadata(gene, save_dir):
@@ -69,21 +73,21 @@ class Prophet(BaseTravLR):
 
         gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
         
-        for gene, betadata in tqdm(betas_dict.data.items(), total=len(betas_dict), desc='Interactions', disable=len(betas_dict) == 1):
-            betas_dict.data[gene].wbetas = self._combine_gene_wbetas(gene, weighted_ligands, gex_df, betadata)
-
-        # for gene, betaoutput in tqdm(betas_dict.items(), total=len(betas_dict), desc='Ligand interactions', disable=len(betas_dict) == 1):
-        #     betas_df = self._combine_gene_wbetas(gene, weighted_ligands, gex_df, betaoutput)
-        #     betas_dict[gene].wbetas = betas_df
+        with ThreadPoolExecutor() as executor:
+            futures = {executor.submit(self._combine_gene_wbetas, weighted_ligands, gex_df, betadata): gene 
+                       for gene, betadata in betas_dict.data.items()}
+            for future in as_completed(futures):
+                gene = futures[future]
+                betas_dict.data[gene].wbetas = future.result()
 
         return betas_dict
 
-    def _combine_gene_wbetas(self, gene, rw_ligands, gex_df, betadata):
+    def _combine_gene_wbetas(self, rw_ligands, gex_df, betadata):
         betas_df = betadata.splash(rw_ligands, gex_df)
         return betas_df
         
-    def _get_spatial_betas_dict(self, subsample=None):
-        bdb = Betabase(self.adata, self.save_dir, subsample=subsample)
+    def _get_spatial_betas_dict(self, subsample=None, float16=False):
+        bdb = Betabase(self.adata, self.save_dir, subsample=subsample, float16=float16)
         self.ligands = list(bdb.ligands_set)
         return bdb
     
@@ -163,7 +167,7 @@ class Prophet(BaseTravLR):
 
         gene_mtx_1 = gene_mtx.copy()
 
-        for n in range(n_propagation):
+        for n in tqdm(range(n_propagation), desc=f'Perturbing {target}'):
 
             # weight betas by the gene expression from the previous iteration
             beta_dict = self._get_wbetas_dict(self.beta_dict, weighted_ligands_0, gene_mtx_1)
@@ -224,6 +228,25 @@ class Prophet(BaseTravLR):
 
         self.adata.layers['simulated_count'] = gem_simulated
         self.adata.layers['delta_X'] = gem_simulated - imputed_count
+    
+    def perturb_batch(self, target_genes, n_propagation=3, gene_expr=0, cells=None):
+        manager = enlighten.get_manager()
+        status = manager.status_bar(
+            '🚀️ SpaceTravLR',
+            color='white_on_grey',
+            justify=enlighten.Justify.CENTER
+        )
+        
+        for target in tqdm(target_genes, total=len(target_genes)):
+            status.update(f'Perturbing {target}')
+            
+            self.perturb(
+                target=target, 
+                n_propagation=n_propagation, 
+                gene_expr=gene_expr, 
+                cells=cells, 
+                use_optimized=True
+            )
     
     def perturb_location(self, coords, goi, n_propagation=3, gene_expr=0, cell_type=[], radius_ko=100, save_dir=None):
         '''perturb a gene in a specific location'''
