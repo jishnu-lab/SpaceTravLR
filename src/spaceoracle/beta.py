@@ -26,8 +26,11 @@ class BetaOutput:
 class BetaFrame(pd.DataFrame):
 
     @classmethod
-    def from_path(cls, path, cell_index=None):
+    def from_path(cls, path, cell_index=None, float16=False):
         df = pd.read_parquet(path)
+        if float16:
+            beta_cols = [col for col in df.columns if col.startswith('beta')]
+            df[beta_cols] = df[beta_cols].astype(np.float16)
         if cell_index is not None:
             df = df.loc[cell_index]
         return cls(df)
@@ -119,7 +122,7 @@ class Betabase:
     """
     Holds a collection of BetaFrames for each gene.
     """
-    def __init__(self, adata, folder, cell_index=None, subsample=None):
+    def __init__(self, adata, folder, cell_index=None, subsample=None, float16=False):
         assert os.path.exists(folder), f'Folder {folder} does not exist'
         # self.adata = adata
         self.xydf = pd.DataFrame(
@@ -137,7 +140,7 @@ class Betabase:
 
         self.data = {}
         self.ligands_set = set()
-
+        self.float16 = float16
         self.load_betas_from_disk(cell_index=cell_index)
 
     def __len__(self):
