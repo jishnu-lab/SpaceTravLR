@@ -233,12 +233,13 @@ class Prophet(BaseTravLR):
         manager = enlighten.get_manager()
         status = manager.status_bar(
             '🚀️ SpaceTravLR',
-            color='white_on_grey',
+            color='white_on_black',
             justify=enlighten.Justify.CENTER
         )
         
         for target in tqdm(target_genes, total=len(target_genes)):
             status.update(f'Perturbing {target}')
+            status.refresh()
             
             self.perturb(
                 target=target, 
