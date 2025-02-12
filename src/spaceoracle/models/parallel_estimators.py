@@ -428,7 +428,7 @@ class SpatialCellularProgramsEstimator:
 
 
     def fit(self, num_epochs=10, threshold_lambda=1e-4, learning_rate=2e-4, batch_size=512, 
-            use_ARD=False, pbar=None, discard=50, use_bayesian=True):
+            use_ARD=False, pbar=None, discard=50, use_bayesian=True, score_threshold=0.1):
         sp_maps, X, y, cluster_labels = self.init_data()
 
         self.models = {}
@@ -458,36 +458,12 @@ class SpatialCellularProgramsEstimator:
             X_cell, y_cell = self.Xn[mask], self.yn[mask]
 
             if use_ARD: 
-
-                # X_tf = X_cell[:, :len(self.regulators)]
-                # X_lr = X_cell[:, len(self.regulators):len(self.regulators)+len(self.ligands)]
-                # X_tfl = X_cell[:, -len(self.tfl_pairs):]
-
-                # m1 = ARDRegression(threshold_lambda=threshold_lambda)
-                # m1.fit(X_tf, y_cell)
-
-                # m2 = ARDRegression(threshold_lambda=threshold_lambda, fit_intercept=True)
-                # m2.fit(X_lr, y_cell)
-
-                # m3 = ARDRegression(threshold_lambda=threshold_lambda, fit_intercept=True)
-                # m3.fit(X_tfl, y_cell)
-
-                # y_pred = (m1.predict(X_tf) + m2.predict(X_lr) + m3.predict(X_tfl)) / 3
-                # r2_ard = r2_score(y_cell, y_pred)
-
-                # intercept = (m1.intercept_ + m2.intercept_ + m3.intercept_) / 3
-                # coefs = np.hstack([m1.coef_, m2.coef_, m3.coef_])
-                # _betas = np.hstack([intercept, coefs])
-                # _betas = np.hstack([intercept, m1.coef_, m2.coef_, m3.coef_])
-
                 m = ARDRegression(threshold_lambda=threshold_lambda)
                 m.fit(X_cell, y_cell)
                 y_pred = m.predict(X_cell)
                 r2 = r2_score(y_cell, y_pred)
                 _betas = np.hstack([m.intercept_, m.coef_])
-
                 coefs = None
-
 
             elif use_bayesian:
                 m = BayesianRidge()
@@ -586,7 +562,12 @@ class SpatialCellularProgramsEstimator:
                     pbar.update(len(targets))
 
             if num_epochs:
-                print(f'{cluster}: {r2_score(all_y_true, all_y_pred):.4f} | {r2:.4f}')
+                score = r2_score(all_y_true, all_y_pred)
+                if score < score_threshold:
+                    model.anchors = model.anchors*0.0
+                    
+                print(f'{cluster}: {score:.4f} | {r2:.4f}')
+            
             self.models[cluster] = model
 
 
