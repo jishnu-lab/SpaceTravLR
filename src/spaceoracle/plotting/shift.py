@@ -28,7 +28,7 @@ def compute_probability(i, d_i, gene_mtx, indices, n_cells, T):
 ## CellOracle uses adapted Velocyto code
 ## This function is coded exactly as described in CellOracle paper
 def estimate_transition_probabilities(adata, delta_X, embedding=None, n_neighbors=200, 
-random_neighbors=False, annot=None, T=0.05, n_jobs=1):
+random_neighbors=False, annot=None, T=0.05, n_jobs=1, return_corr=False):
 
     n_cells, n_genes = adata.shape
     delta_X = np.array(delta_X)
@@ -99,10 +99,11 @@ random_neighbors=False, annot=None, T=0.05, n_jobs=1):
             indices, threads=n_jobs
             )
 
-    np.fill_diagonal(P, 0)
-    
     corr = np.nan_to_num(corr, nan=1)
+    if return_corr:
+        return corr
 
+    np.fill_diagonal(P, 0)
     P *= np.exp(corr / T)   
     P /= P.sum(1)[:, None]
 

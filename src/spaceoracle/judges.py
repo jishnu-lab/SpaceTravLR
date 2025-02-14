@@ -5,8 +5,6 @@ import matplotlib.pyplot as plt
 from numba import jit
 
 from .plotting.degs import get_degs, plot_corr
-from .plotting.sankey import plot_pysankey, get_macrostates
-from .plotting.niche import get_demographics
 
 class Judge():
     def __init__(self, adata, annot):
@@ -64,66 +62,6 @@ class Judge():
             self.adata, nt_st=nt, nt_co=nt, co=co, pred=pred,
             ko=ko, genes=genes, title=title, save_path=save_path
         )
-    
-    @staticmethod
-    def plot_demographic_change(adata, delta_X, annot, celltype, radius=150, n_neighbors=10, nn_transitions=10, save_path=False):
-        demo_df = get_demographics(adata, annot, radius=radius)
-
-        ct_idxs = np.where(adata.obs[annot] == celltype)[0]
-        demo_df = demo_df.iloc[ct_idxs]
-        adata_ct = adata[ct_idxs, :]
-        delta_X_ct = delta_X[ct_idxs]
-
-        demo_annot = demo_df.idxmax(axis=1)
-        embedding = demo_df.values
-
-        adata_ct.obs['demographic'] = demo_annot
-
-        Judge.plot_macrostate_change(
-            adata_ct, delta_X_ct, 'demographic', embedding, 
-            n_neighbors=n_neighbors, nn_transitions=nn_transitions, save_path=save_path
-        )
-        
-
-    @staticmethod
-    def plot_macrostate_change(adata, delta_X, annot, embedding, n_neighbors=200, nn_transitions=10, save_path=False):
-        '''nn_transitions: number of cells to consider the transitions to'''
-        sankey_df = get_macrostates(
-            adata, 
-            delta_X, 
-            embedding, 
-            annot, 
-            n_neighbors=n_neighbors,
-            nn_transitions=nn_transitions
-        )
-
-        delta_X_rndm = delta_X.copy()
-        permute_rows_nsign(delta_X_rndm)
-
-        sankey_df_rndm = get_macrostates(
-            adata, 
-            delta_X_rndm, 
-            embedding, 
-            annot, 
-            n_neighbors=n_neighbors,
-            nn_transitions=nn_transitions
-        )
-
-        sankey_df_rndm = sankey_df_rndm
-
-        fig, axs = plt.subplots(1, 2, figsize=(20, 10))
-        plot_pysankey(sankey_df, ax=axs[0])
-        plot_pysankey(sankey_df_rndm, ax=axs[1])
-
-        axs[0].set_title('Celltype Transitions')
-        axs[1].set_title('Randomized Control')
-
-        plt.tight_layout()
-        if save_path:
-            plt.savefig(save_path, dpi=200)
-
-        plt.show()
-
     
 
 # Cannibalized from CellOracle
