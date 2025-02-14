@@ -17,6 +17,7 @@ from .plotting.transitions import estimate_transitions_2D, distance_shift, conto
 from .plotting.niche import get_modulator_betas, show_beta_neighborhoods
 from .plotting.beta_maps import plot_spatial
 from .plotting.location import get_cells_in_radius, show_effect_distance
+from .plotting.gsea import compute_gsea_scores, show_gsea_scores
 
 from numba import jit
 import enlighten
@@ -46,6 +47,14 @@ class Prophet(BaseTravLR):
 
         self.beta_dict = None
         self.goi = None
+
+        self.gsea_scores = {}
+        self.sim_adata = None
+
+        # with open('../../data/GSEA/GSEA_human/h.all.v2024.1.Hs.json', 'r') as f:
+        #     self.gsea_modules = json.load(f)
+        with open('/ix/djishnu/alw399/SpaceOracle/data/GSEA/m2.all.v2024.1.Mm.json', 'r') as f:
+            self.gsea_modules = json.load(f)
         
 
     def compute_betas(self, subsample=None, float16=False):
@@ -269,14 +278,37 @@ class Prophet(BaseTravLR):
         df = show_expression_plot(self.adata, goi, self.annot_labels)
         return df
 
-    def evaluate(self, frac_genes=0.1, n_propogation=3, n_jobs=1):
+    def evaluate(self, img_dir, perturb_dir, gene_list):
         '''for each cell type, identify the top genes with greatest spatial variation'''
+        os.makedirs(img_dir, exist_ok=True)
 
-        # identify top highly variable genes within each cell type
-        # perturb genes
-        # score them
+        for gene in gene_list:
 
-        return
+            if gene not in self.adata.var_names:
+                print(f'{gene} not found in adata.var_names')
+                continue
+
+            simulated_count = os.path.join(perturb_dir, f'{gene}.parquet')
+            
+            if not os.path.exists(simulated_count):
+                self.perturb(gene)
+                pd.DataFrame(
+                    self.adata.layers['simulated_count'], columns=self.adata.var_names, index=self.adata.obs_names
+                    ).to_parquet(f'{perturb_dir}/{gene}.parquet')
+            else:
+                self.adata.layers['simulated_count'] = pd.read_parquet(simulated_count).values
+                self.adata.layers['delta_X'] = self.adata.layers['simulated_count'] - self.adata.layers['imputed_count']
+            
+            try:
+                self.plot_contour_shift(savepath=f'{img_dir}/{gene}/contour.png')
+            except:
+                print(f'Error in plotting contour for {gene}')
+                
+            self.plot_delta_scores(save_dir=f'{img_dir}/{gene}/delta_scores.png')
+            self.gene_program_change(savepath=f'{img_dir}/{gene}/delta_gsea.png')
+
+            print(f'finished {gene}')
+
     
     def plot_contour_shift(self, seed=1334, savepath=False):
         assert self.adata.layers.get('delta_X') is not None
@@ -484,7 +516,21 @@ class Prophet(BaseTravLR):
             plt.savefig(savepath)
 
         plt.show()
+    
+    def gene_program_change(self, show_spatial=True, savepath=False, keyword='BIOCARTA', n_show=9):
+        gsea_scores = compute_gsea_scores(self.adata, self.gsea_modules)
+        self.gsea_scores = gsea_scores
+        gsea_scores_perturbed = compute_gsea_scores(self.adata, self.gsea_modules, layer='simulated_count')
+        self.gsea_scores_ko = gsea_scores_perturbed
 
+        delta_gsea = gsea_scores_perturbed - gsea_scores
+        delta_gsea_scores.dropna(inplace=True)
+
+        delta_gsea_scores['abs_mean'] = delta_gsea_scores.iloc[:, :-1].apply(lambda row: np.abs(row.mean()), axis=1)
+        delta_gsea_scores.sort_values(by = 'abs_mean', ascending=False, inplace=True)
+        
+        delta_gsea_scores = delta_gsea_scores.loc[delta_gsea_scores.index.str.contains(keyword)]
+        show_gsea_scores(self.adata, delta_gsea_scores, self.annot_labels, n_show=9, show_spatial=True, savepath=savepath)
 
 # Cannibalized from CellOracle
 @jit(nopython=True)
