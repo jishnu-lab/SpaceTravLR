@@ -24,6 +24,7 @@ star = SpaceTravLR(
     learning_rate=5e-4, 
     spatial_dim=64,
     batch_size=512,
+    radius=100,
     grn=co_grn,
     save_dir='/ix/djishnu/shared/djishnu_kor11/super_filtered_runs/mLDN3-1_v4'
 )
