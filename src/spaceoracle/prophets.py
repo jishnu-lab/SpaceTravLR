@@ -145,7 +145,7 @@ class Prophet(BaseTravLR):
 
         gene_mtx_1 = gene_mtx.copy()
 
-        for n in tqdm(range(n_propagation), desc=f'{target} -> {gene_expr}'):
+        for n in tqdm(range(n_propagation), desc=f'{target} -> {gene_expr}', disable=True):
 
             # weight betas by the gene expression from the previous iteration
             beta_dict = self._get_wbetas_dict(self.beta_dict, weighted_ligands_0, gene_mtx_1)
@@ -217,8 +217,15 @@ class Prophet(BaseTravLR):
             color='white_on_black',
             justify=enlighten.Justify.CENTER
         )
+        progress_bar = manager.counter(
+            total=len(target_genes), 
+            desc=f'... perturbing ...', 
+            unit='genes',
+            color='green',
+            autorefresh=True,
+        )
             
-        for i, target in tqdm(enumerate(target_genes), total=len(target_genes)):
+        for target in target_genes:
             status.update(f'Perturbing {target}')
             status.refresh()
             
@@ -230,16 +237,18 @@ class Prophet(BaseTravLR):
                 use_optimized=True
             )
             
+            progress_bar.update()
+            progress_bar.refresh()
+            
             file_name = f'{target}_{n_propagation}n_{gene_expr}x'
             
             if save_to is not None:
                 self.adata.to_df(
                     layer = file_name).to_parquet(
                         f'{save_to}/{file_name}.parquet')
-                
-            else:
-                del self.adata.layers[file_name]
-            
+                    
+                del self.adata.layers[file_name] # save memory
+
         status.update(f'Done!')
         status.refresh()
     
