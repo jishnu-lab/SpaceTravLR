@@ -36,20 +36,42 @@ class Prophet(BaseTravLR):
         self.ligands = []
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
-        self.betas_cache = {}
-
         self.beta_dict = None
-        self.goi = None
+        
+        self.manager = enlighten.get_manager()
+        
+        assert len(self.queue.remaining_genes) == 0
+        
+        self.status = self.manager.status_bar(
+            f'🚀️ SpaceTravLR: [Ready] | {adata.shape[0]} cells / {len(self.genes)} genes',
+            color='black_on_green',
+            justify=enlighten.Justify.CENTER,
+            auto_refresh=True,
+            width=30
+        )
+        
+
         
 
     def compute_betas(self, subsample=None, float16=False):
-        self.beta_dict = self._get_spatial_betas_dict(subsample=subsample, float16=float16)
+        self.status.update('Computing betas - ...')
+        self.status.color = 'black_on_salmon'
+        self.status.refresh()
+
+        self.beta_dict = self._get_spatial_betas_dict(
+            subsample=subsample, float16=float16)
+        
+        self.status.update('Computing betas - Done')
+        self.status.color = 'black_on_green'
+        self.status.refresh()
+        
     
     @staticmethod
     def load_betadata(gene, save_dir):
         return pd.read_parquet(f'{save_dir}/{gene}_betadata.parquet')
     
     def _compute_weighted_ligands(self, gene_mtx):
+        self.update_status('Computing received ligands', color='black_on_cyan')
         gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
 
         if len(self.ligands) > 0:
@@ -63,16 +85,37 @@ class Prophet(BaseTravLR):
         
         return weighted_ligands
     
+    # def _get_wbetas_dict(self, betas_dict, weighted_ligands, gene_mtx):
+
+    #     gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
+        
+    #     with ThreadPoolExecutor() as executor:
+    #         futures = {executor.submit(self._combine_gene_wbetas, weighted_ligands, gex_df, betadata): gene 
+    #                    for gene, betadata in betas_dict.data.items()}
+    #         for future in as_completed(futures):
+    #             gene = futures[future]
+    #             betas_dict.data[gene].wbetas = future.result()
+
+    #     return betas_dict
+    
+    def update_status(self, msg='', color='black_on_green'):
+        self.status.update(msg)
+        self.status.color = color
+        self.status.refresh()
+        
+    
     def _get_wbetas_dict(self, betas_dict, weighted_ligands, gene_mtx):
 
         gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
         
-        with ThreadPoolExecutor() as executor:
-            futures = {executor.submit(self._combine_gene_wbetas, weighted_ligands, gex_df, betadata): gene 
-                       for gene, betadata in betas_dict.data.items()}
-            for future in as_completed(futures):
-                gene = futures[future]
-                betas_dict.data[gene].wbetas = future.result()
+        for i, (gene, betadata) in enumerate(betas_dict.data.items()):
+            betas_dict.data[gene].wbetas = self._combine_gene_wbetas(
+                weighted_ligands, gex_df, betadata)
+            self.update_status(f'[{i}/{len(betas_dict.data)}] Ligand interactions - {gene}', color='black_on_salmon')
+            
+        self.update_status(f'Ligand interactions - Done')
+        
+            
 
         return betas_dict
 
@@ -106,6 +149,8 @@ class Prophet(BaseTravLR):
         n_obs, n_genes = gex_delta.shape
         result = np.zeros((n_obs, n_genes))
         
+        self.update_status('Perturbing cells 🐝️', color='black_on_cyan')
+        
         for i, gene in enumerate(self.adata.var_names):
             _beta_out = betas_dict.data.get(gene, None)
             if _beta_out is not None:
@@ -137,7 +182,6 @@ class Prophet(BaseTravLR):
         delta_simulated = delta_input.copy() 
 
         if self.beta_dict is None:
-            print('Computing beta_dict')
             self.beta_dict = self._get_spatial_betas_dict() # compute betas for all genes for all cells
 
         weighted_ligands_0 = self._compute_weighted_ligands(gene_mtx)
@@ -145,7 +189,8 @@ class Prophet(BaseTravLR):
 
         gene_mtx_1 = gene_mtx.copy()
 
-        for n in tqdm(range(n_propagation), desc=f'{target} -> {gene_expr}', disable=True):
+        for n in range(n_propagation):
+            self.update_status(f'{target} -> {gene_expr} - {n+1}/{n_propagation}', color='black_on_salmon')
 
             # weight betas by the gene expression from the previous iteration
             beta_dict = self._get_wbetas_dict(self.beta_dict, weighted_ligands_0, gene_mtx_1)
@@ -153,7 +198,7 @@ class Prophet(BaseTravLR):
             # get updated gene expressions
             gene_mtx_1 = gene_mtx + delta_simulated
             weighted_ligands_1 = self._compute_weighted_ligands(gene_mtx_1)
-            self.weighted_ligands = weighted_ligands_1
+            # self.weighted_ligands = weighted_ligands_1
 
             # update deltas to reflect change in received ligands
             # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
@@ -211,23 +256,20 @@ class Prophet(BaseTravLR):
         # print(f'Layer added: {target}_{n_propagation}n_{gene_expr}x')
     
     def perturb_batch(self, target_genes, save_to=None, n_propagation=3, gene_expr=0, cells=None):
-        manager = enlighten.get_manager()
-        status = manager.status_bar(
-            '🚀️ SpaceTravLR',
-            color='white_on_black',
-            justify=enlighten.Justify.CENTER
-        )
-        progress_bar = manager.counter(
+        
+        self.update_status(f'Batch Perturbion mode: {len(target_genes)} genes')
+        
+        progress_bar = self.manager.counter(
             total=len(target_genes), 
-            desc=f'... perturbing ...', 
+            desc=f'Batch Perturbions', 
             unit='genes',
-            color='green',
+            color='orange',
             autorefresh=True,
         )
-            
+        
         for target in target_genes:
-            status.update(f'Perturbing {target}')
-            status.refresh()
+            progress_bar.desc = f'Batch Perturbions - {target}'
+            progress_bar.refresh()
             
             self.perturb(
                 target=target, 
@@ -238,7 +280,7 @@ class Prophet(BaseTravLR):
             )
             
             progress_bar.update()
-            progress_bar.refresh()
+            
             
             file_name = f'{target}_{n_propagation}n_{gene_expr}x'
             
@@ -248,7 +290,5 @@ class Prophet(BaseTravLR):
                         f'{save_to}/{file_name}.parquet')
                     
                 del self.adata.layers[file_name] # save memory
-
-        status.update(f'Done!')
-        status.refresh()
-    
+                
+        self.update_status('Batch Perturbions: Done')
