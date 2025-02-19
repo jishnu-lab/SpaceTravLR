@@ -4,7 +4,7 @@
 import scanpy as sc 
 import numpy as np
 import pandas as pd
-import os
+import os, sys
 
 # %%
 import celloracle as co
@@ -20,15 +20,17 @@ oracle = co.load_hdf5("/ix/djishnu/shared/djishnu_kor11/co_objects/mLND3-1_v4.ce
 links = co.load_hdf5(file_path="/ix/djishnu/shared/djishnu_kor11/co_objects/mLND3-1_v4-links.celloracle.links")
 
 # %%
-tfs = []
-for cluster, df in links.links_dict.items():
-    tfs.extend(df["source"].unique())
+# tfs = []
+# for cluster, df in links.links_dict.items():
+#     tfs.extend(df["source"].unique())
 
-tfs = sorted(set(tfs))
-len(tfs)
+# tfs = sorted(set(tfs))
+# len(tfs)
 
 # %%
-tf = 'Runx1'
+tf = sys.argv[1]
+
+os.makedirs(f'/ix/djishnu/shared/djishnu_kor11/co_results/mLDN3-1_v4/{tf}', exist_ok=True)
 oracle.simulate_shift(perturb_condition={tf: 0})
 
 # %%
@@ -45,7 +47,7 @@ gsea_scores = compute_gsea_scores(oracle.adata, gsea_modules)
 gsea_scores_perturbed = compute_gsea_scores(oracle.adata, gsea_modules, layer='simulated_count')
 
 # %%
-delta_gsea_scores = gsea_scores - gsea_scores_perturbed
+delta_gsea_scores = gsea_scores_perturbed - gsea_scores
 delta_gsea_scores.dropna(inplace=True)
 
 delta_gsea_scores['abs_mean'] = delta_gsea_scores.iloc[:, :-1].apply(lambda row: np.abs(row.mean()), axis=1)
@@ -62,6 +64,7 @@ show_gsea_scores(
 # %%
 from spaceoracle.plotting.transitions import contour_shift
 from spaceoracle.judges import Judge, permute_rows_nsign
+import sys
 
 judger = Judge(adata, annot='cell_type')
 
@@ -70,7 +73,7 @@ judger = Judge(adata, annot='cell_type')
 results_dir = '/ix/djishnu/shared/djishnu_kor11/co_results/mLDN3-1_v4'
 st_dir = '/ix/djishnu/shared/djishnu_kor11/perturbations/mLDN3-1_v4'
 
-os.mkdir(f'{results_dir}/{tf}')
+os.makedirs(f'{results_dir}/{tf}', exist_ok=True)
 
 # %%
 seed=1334
@@ -92,6 +95,8 @@ plt.savefig(f'{results_dir}/{tf}/contour.png')
 nt = pd.DataFrame(oracle.adata.layers['imputed_count'], columns=oracle.adata.var_names)
 co = pd.DataFrame(oracle.adata.layers['simulated_count'], columns=oracle.adata.var_names)
 st = pd.read_parquet(f'{st_dir}/{tf}.parquet')
+
+co.to_parquet(f'{results_dir}/{tf}/simulated_count.parquet')
 
 # %%
 co_sim_adata = judger.create_sim_adata(nt.values, co.values)

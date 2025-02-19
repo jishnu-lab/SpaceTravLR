@@ -215,6 +215,9 @@ class Prophet(BaseTravLR):
             gem_tmp[gem_tmp<0] = 0
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
+            if target == 'Pax5':
+                np.save(f'/ix/djishnu/shared/djishnu_kor11/perturbations/mLDN3-1_v4_{target}/iter_{n}.npy', delta_simulated)
+
             # save weighted ligand values to weight betas of next iteration
             weighted_ligands_0 = weighted_ligands_1.copy()
 
@@ -236,7 +239,7 @@ class Prophet(BaseTravLR):
             gem_simulated[cells, target_index] = gene_expr
 
         self.adata.layers['simulated_count'] = gem_simulated
-        self.adata.layers['delta_X'] = gem_simulated - imputed_count
+        self.adata.layers['delta_X'] = gem_simulated - gene_mtx
     
     def perturb_batch(self, target_genes, n_propagation=3, gene_expr=0, cells=None):
         manager = enlighten.get_manager()
@@ -304,7 +307,7 @@ class Prophet(BaseTravLR):
             except:
                 print(f'Error in plotting contour for {gene}')
                 
-            self.plot_delta_scores(save_dir=f'{img_dir}/{gene}/delta_scores.png')
+            self.plot_delta_scores(save_dir=f'{img_dir}/{gene}')
             self.gene_program_change(savepath=f'{img_dir}/{gene}/delta_gsea.png')
 
             print(f'finished {gene}')
@@ -523,7 +526,7 @@ class Prophet(BaseTravLR):
         gsea_scores_perturbed = compute_gsea_scores(self.adata, self.gsea_modules, layer='simulated_count')
         self.gsea_scores_ko = gsea_scores_perturbed
 
-        delta_gsea = gsea_scores_perturbed - gsea_scores
+        delta_gsea_scores = gsea_scores_perturbed - gsea_scores
         delta_gsea_scores.dropna(inplace=True)
 
         delta_gsea_scores['abs_mean'] = delta_gsea_scores.iloc[:, :-1].apply(lambda row: np.abs(row.mean()), axis=1)
