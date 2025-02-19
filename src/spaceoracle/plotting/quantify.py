@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from spaceoracle.plotting.shift import estimate_transition_probabilities
+from scipy.stats import spearmanr
 
-def quantify_correlations(adata, annot='cell_type'):
+def quantify_correlations(adata, annot='cell_type', use_pearson=False):
     celltypes = adata.obs[annot].unique()
 
     corr_mat = np.zeros((len(celltypes), len(celltypes)))
@@ -16,10 +17,18 @@ def quantify_correlations(adata, annot='cell_type'):
         for j, target_ct in enumerate(celltypes):
             target_idxs = adata.obs[annot] == target_ct
             
-            corrs = np.corrcoef(
-                adata.layers['imputed_count'][source_idxs], 
-                adata.layers['simulated_count'][target_idxs]
-            )
+            if use_pearson:
+                corrs = np.corrcoef(
+                    adata.layers['imputed_count'][source_idxs], 
+                    adata.layers['simulated_count'][target_idxs]
+                )
+            else:
+                corrs = spearmanr(
+                    adata.layers['imputed_count'][source_idxs], 
+                    adata.layers['simulated_count'][target_idxs],
+                    axis=1
+                ).statistic
+
             x = source_idxs.sum()
             y = target_idxs.sum()
             cross_corr = corrs[:x, x:]

@@ -43,7 +43,7 @@ class Judge():
         return sim_adata
     
     @staticmethod
-    def get_expected_degs(adata, ko, method=None, show=10, ko_col='status', save_path=False):
+    def get_expected_degs(adata, ko, method=None, show=100, ko_col='status', save_path=False):
         '''
         @param method: method to use for DEG analysis
         @param show: number of DEGs to show in bar chart

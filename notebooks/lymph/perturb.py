@@ -19,7 +19,8 @@ pro = Prophet(
 
 pro.compute_betas()
 
-gene_list = ['Cxcr4', 'Pax5', 'Il2ra', 'Bach2', 'Gata3', 'Foxp3', 'Bcl11B', 'Tcf7', 'Runx1', 'Lag3'] + pro.ligands
+# gene_list = ['Cxcr4', 'Pax5', 'Il2ra', 'Bach2', 'Gata3', 'Foxp3', 'Bcl11B', 'Tcf7', 'Runx1', 'Lag3'] + pro.ligands
+gene_list = ['Bcl6', 'Stat1', 'Stat2', 'Stat4', 'Stat6', 'Tbx21', 'Rorc', 'Il4', 'Il4ra']
 save_dir = '/ix/djishnu/shared/djishnu_kor11/perturbations/mLDN3-1_v4'
 
 # import os 
