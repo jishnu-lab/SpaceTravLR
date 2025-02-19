@@ -288,7 +288,7 @@ class Cartography:
                     color='black',
                     bbox=dict(
                         facecolor=alt_colors[cluster],
-                        alpha=0.8,
+                        alpha=1,
                         edgecolor='black',
                         boxstyle='round'
                     ))
