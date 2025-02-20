@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import json, os 
+import commot as ct
 
 import matplotlib.pyplot as plt
 import seaborn as sns 
@@ -11,6 +12,7 @@ import umap
 from .models.parallel_estimators import received_ligands
 from .oracles import OracleQueue, BaseTravLR
 from .beta import Betabase
+from .tools.network import expand_paired_interactions
 
 from .plotting.layout import compare_gex, show_expression_plot, show_locations
 from .plotting.transitions import estimate_transitions_2D, distance_shift, contour_shift
@@ -26,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class Prophet(BaseTravLR):
-    def __init__(self, adata, models_dir, annot, annot_labels=None, radius=200):
+    def __init__(self, adata, models_dir, annot, annot_labels=None, species='mouse', radius=200, contact_distance=30):
 
         if annot_labels == None:
             annot_labels = annot
@@ -38,6 +40,9 @@ class Prophet(BaseTravLR):
         self.save_dir = models_dir
         self.annot_labels = annot_labels
         self.radius = radius
+        self.contact_distance = contact_distance
+
+        self.init_ligands_and_receptors(species=species)
 
         self.queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
         self.ligands = []
@@ -51,7 +56,7 @@ class Prophet(BaseTravLR):
 
         # with open('../../data/GSEA/GSEA_human/h.all.v2024.1.Hs.json', 'r') as f:
         #     self.gsea_modules = json.load(f)
-        with open('../../data/GSEA/m2.all.v2024.1.Mm.json', 'r') as f:
+        with open('/ix/djishnu/alw399/SpaceOracle/data/GSEA/m2.all.v2024.1.Mm.json', 'r') as f:
             self.gsea_modules = json.load(f)
         
         self.manager = enlighten.get_manager()
@@ -65,7 +70,22 @@ class Prophet(BaseTravLR):
             auto_refresh=True,
             width=30
         )
+    
+    def init_ligands_and_receptors(self, species='mouse'):
+        df_ligrec = ct.pp.ligand_receptor_database(
+                database='CellChat', 
+                species=species, 
+                signaling_type="Secreted Signaling"
+            )
+            
+        df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
         
+        self.lr = expand_paired_interactions(df_ligrec)
+        self.lr = self.lr[self.lr.ligand.isin(self.adata.var_names) & (self.lr.receptor.isin(self.adata.var_names))]
+        self.lr['radius'] = np.where(
+            self.lr['signaling'] == 'Secreted Signaling', 
+            self.radius, self.contact_distance
+        )
 
     def compute_betas(self, subsample=None, float16=False):
         self.status.update('Computing betas - ...')
@@ -92,8 +112,8 @@ class Prophet(BaseTravLR):
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
                 lig_df=gex_df[self.ligands],
-                radius=self.radius
-            )
+                radius=self.lr
+        )
         else:
             weighted_ligands = []
         
