@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class Prophet(BaseTravLR):
-    def __init__(self, adata, models_dir, annot, annot_labels=None, species='mouse', radius=200, contact_distance=30):
+    def __init__(self, adata, models_dir, annot, annot_labels=None, species='mouse', radius=100, contact_distance=30):
 
         if annot_labels == None:
             annot_labels = annot
