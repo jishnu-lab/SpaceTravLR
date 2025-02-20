@@ -1,27 +1,28 @@
-adjustText
-certifi
-genomepy
-goatools
-h5py
-joblib
+adjustText==1.2.0
+certifi==2024.2.2
+genomepy==0.16.1
+goatools==1.4.12
+h5py==3.11.0
+joblib==1.4.2
 # matplotlib==3.6.3
-networkx
-numba
-# numpy==2.0.1
-pandas
+networkx==3.2.1
+numba==0.60.0
+# numpy==1.26.4
+pandas==2.2.2
 # plotly==5.23.0
 # pybedtools==0.10.0
-pysal
-pytest
-python_igraph
-scanpy
-scikit_learn
-scipy
-seaborn
-torch
-torchvision
-tqdm
-pyarrow
+pysal==24.1
+pytest==8.3.2
+python_igraph==0.11.6
+scanpy==1.10.2
+scikit_learn==1.5.1
+# scipy==1.14.0
+scipy==1.12
+# seaborn==0.13.2
+torch==2.4.0
+torchvision==0.19.0
+tqdm==4.66.4
+pyarrow==17.0.0
 enlighten
 pyro-ppl
 commot
