@@ -37,27 +37,45 @@ def calculate_weighted_ligands(gauss_weights, lig_df_values, u_ligands):
     
     return weighted_ligands
 
-def received_ligands(xy, lig_df, radius=200, scale_factor=1e5):
+def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
+
+    def compute_ligands_half(lig_df, radius):
+
+        ligands = lig_df.columns
+        gauss_weights = [
+            scale_factor * gaussian_kernel_2d(
+                xy[i], 
+                xy, 
+                radius=radius) for i in range(len(lig_df))
+        ]
+
+        u_ligands = list(np.unique(ligands))
+        lig_df_values = lig_df[u_ligands].values
+        weighted_ligands = calculate_weighted_ligands(
+            gauss_weights, lig_df_values, u_ligands)
+
+        return pd.DataFrame(
+            weighted_ligands, 
+            index=u_ligands, 
+            columns=lig_df.index
+        ).T
+
+    lr_info = lr_info.copy()
+    lr_info = lr_info[lr_info['ligand'].isin(np.unique(ligands_df.columns))]
+
+    ligand_radii = lr_info[
+            lr_info['ligand'].isin(np.unique(ligands_df.columns))
+        ].drop_duplicates(subset='ligand', keep='first')   
     
-    ligands = lig_df.columns
-    gauss_weights = [
-        scale_factor * gaussian_kernel_2d(
-            xy[i], 
-            xy, 
-            radius=radius) for i in range(len(lig_df))
-    ]
+    full_df = []
 
-    u_ligands = list(np.unique(ligands))
-    lig_df_values = lig_df[u_ligands].values
-    weighted_ligands = calculate_weighted_ligands(
-        gauss_weights, lig_df_values, u_ligands)
+    for radius in ligand_radii['radius'].unique():
+        radius_ligands = lr_info[lr_info['radius'] == radius]['ligand'].values
+        full_df.append(compute_ligands_half(ligands_df[radius_ligands], radius))
 
-    return pd.DataFrame(
-        weighted_ligands, 
-        index=u_ligands, 
-        columns=lig_df.index
-    ).T
-
+    full_df = pd.concat(full_df, axis=0)
+    full_df = full_df.loc[ligands_df.index, ligands_df.columns]
+    return full_df
 
 
 def create_spatial_features(x, y, celltypes, obs_index,radius=200):
@@ -118,7 +136,8 @@ class RotatedTensorDataset(Dataset):
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
-            radius=200, tf_ligand_cutoff=0.01, 
+            radius=200, contact_distance=30, 
+            tf_ligand_cutoff=0.01, 
             regulators=None, grn=None, colinks_path=None):
         
 
@@ -134,6 +153,7 @@ class SpatialCellularProgramsEstimator:
         self.layer = layer
         self.device = device
         self.radius = radius
+        self.contact_distance = contact_distance
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
 
@@ -217,9 +237,13 @@ class SpatialCellularProgramsEstimator:
             )
             
         df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
-
+        
         self.lr = expand_paired_interactions(df_ligrec)
         self.lr = self.lr[self.lr.ligand.isin(self.adata.var_names) & (self.lr.receptor.isin(self.adata.var_names))]
+        self.lr['radius'] = np.where(
+            self.lr['signaling'] == 'Secreted Signaling', 
+            self.radius, self.contact_distance
+        )
 
         # receptors = self.lr['receptor']
         # recex_means = np.mean(self.adata.to_df()[receptors], axis=0)
@@ -306,13 +330,12 @@ class SpatialCellularProgramsEstimator:
 
     def init_data(self):
 
-
         if len(self.lr['pairs']) > 0:
 
             self.adata.uns['received_ligands'] = received_ligands(
                 self.adata.obsm['spatial'], 
                 self.adata.to_df(layer=self.layer)[np.unique(self.ligands)], 
-                radius=self.radius,
+                lr_info=self.lr 
             )
 
             self.adata.uns['ligand_receptor'] = self.ligands_receptors_interactions(
@@ -330,7 +353,7 @@ class SpatialCellularProgramsEstimator:
             self.adata.uns['received_ligands_tfl'] = received_ligands(
                 self.adata.obsm['spatial'], 
                 self.adata.to_df(layer=self.layer)[np.unique(self.tfl_ligands)], 
-                radius=self.radius,
+                lr_info=self.lr      
             )
 
             self.adata.uns['ligand_regulator'] = self.ligand_regulators_interactions(

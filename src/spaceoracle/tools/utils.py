@@ -14,6 +14,8 @@ from scipy import sparse
 from tqdm import tqdm
 import io
 import networkx as nx
+from sklearn.neighbors import NearestNeighbors
+
 
 
 class CPU_Unpickler(pickle.Unpickler):
@@ -26,6 +28,16 @@ class CPU_Unpickler(pickle.Unpickler):
 
 def search(query, string_list):
     return [i for i in string_list if query.lower() in i.lower()]
+
+def scale_adata(adata, cell_size=10):
+    nbrs = NearestNeighbors(n_neighbors=2, algorithm='ball_tree').fit(adata.obsm['spatial'])
+    distances, indices = nbrs.kneighbors(adata.obsm['spatial'])
+
+    # nn_distance = np.percentile(distances[:, 1], 5).min() # maybe 5% cells are squished
+    nn_distance = np.median(distances[:, 1])
+    scale_factor = cell_size / nn_distance
+    adata.obsm['spatial'] *= scale_factor
+    return adata
 
 
 def knn_distance_matrix(data, metric=None, k=40, mode='connectivity', n_jobs=4):
