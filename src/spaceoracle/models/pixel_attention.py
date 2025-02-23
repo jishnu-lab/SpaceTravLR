@@ -172,17 +172,17 @@ class CellularNicheNetwork(nn.Module):
     def make_vision_model(input_channels=1, out_dim=64, kernel_size=3):
 
         return nn.Sequential(
-            weight_norm(nn.Conv2d(input_channels, 32, kernel_size=kernel_size, padding='same')),
-            nn.BatchNorm2d(32),
+            weight_norm(nn.Conv2d(input_channels, 16, kernel_size=kernel_size, padding='same')),
+            nn.BatchNorm2d(16),
             nn.PReLU(init=0.1),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
-            weight_norm(nn.Conv2d(32, 64, kernel_size=kernel_size, padding='same')),
-            nn.BatchNorm2d(64),
+            weight_norm(nn.Conv2d(16, 32, kernel_size=kernel_size, padding='same')),
+            nn.BatchNorm2d(32),
             nn.PReLU(init=0.1),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
-            weight_norm(nn.Conv2d(64, out_dim, kernel_size=kernel_size, padding='same')),
+            weight_norm(nn.Conv2d(32, out_dim, kernel_size=kernel_size, padding='same')),
             nn.BatchNorm2d(out_dim),
             nn.PReLU(init=0.1),
             nn.MaxPool2d(kernel_size=2, stride=2),

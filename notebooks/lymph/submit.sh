@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH -J compare0
-#SBATCH --output=logs/compare-0.txt
-#SBATCH -t 16:00:00
-#SBATCH --mem=100G
+#SBATCH -J evaluate
+#SBATCH --output=evaluate.txt
+#SBATCH -t 3-16:00:00
+#SBATCH --mem=250G
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --account=djishnu
@@ -13,4 +13,4 @@ echo ${SLURM_JOB_NAME} allocated to ${SLURM_NODELIST}
 echo environment $CONDA_DEFAULT_ENV
 which python
 
-python auto_co.py
+python perturb.py
