@@ -99,10 +99,9 @@ random_neighbors=False, annot=None, T=0.05, n_jobs=1):
             indices, threads=n_jobs
             )
 
-    np.fill_diagonal(P, 0)
-    
     corr = np.nan_to_num(corr, nan=1)
 
+    np.fill_diagonal(P, 0)
     P *= np.exp(corr / T)   
     P /= P.sum(1)[:, None]
 
