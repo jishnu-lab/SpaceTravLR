@@ -81,14 +81,14 @@ def plot_corr(adata, nt_co, co, nt_st, pred, ko, genes=None, title='Change in Ge
     neg_genes = pred_gex[pred_gex < 0].index
 
     # Plot
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(10, 6), dpi=300)
     plt.scatter(co_gex[pos_genes], pred_gex[pos_genes], alpha=0.5, color='red', label='Increased')
     plt.scatter(co_gex[neg_genes], pred_gex[neg_genes], alpha=0.5, color='blue', label='Decreased')
     plt.legend()
     
     plt.plot([co_gex.min(), co_gex.max()], [co_gex.min(), co_gex.max()], 'r--')
     spearman_corr, _ = spearmanr(co_gex, pred_gex)
-    plt.title(f'Comparison of Predicted Delta GEX from {ko} KO \nSpearman Corr: {spearman_corr:.2f}')
+    plt.title(f'Comparison of Predicted Delta GEX from {ko} KO \nSpearman Corr: {spearman_corr:.2f} ({len(genes)} genes)')
     plt.xlabel(f"CellOracle")
     plt.ylabel(f"SpaceTravLR")
     plt.grid(alpha=0.3)

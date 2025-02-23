@@ -138,7 +138,8 @@ def distance_shift(adata, annot, ax=None, n_show=5, compare_ct=True, ct_interest
     ax = sns.boxplot(
         x='gene', y='delta', hue='ct', 
         ax=ax, hue_order=celltypes,
-        data=df
+        data=df,
+        showfliers=False
     )
 
     sns.move_legend(ax, "upper left", bbox_to_anchor=(1, 1))
