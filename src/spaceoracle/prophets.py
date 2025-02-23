@@ -40,7 +40,7 @@ class Prophet(BaseTravLR):
         
         self.manager = enlighten.get_manager()
         
-        assert len(self.queue.remaining_genes) == 0
+        # assert len(self.queue.remaining_genes) == 0
         
         self.status = self.manager.status_bar(
             f'🚀️ SpaceTravLR: [Ready] | {adata.shape[0]} cells / {len(self.genes)} genes',

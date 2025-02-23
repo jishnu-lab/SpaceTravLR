@@ -111,9 +111,8 @@ class CellOracleLinks:
 
 
 class RegulatoryFactory(CellOracleLinks):
-    def __init__(self, colinks_path, organism='mouse', annot='cell_type_int'):
+    def __init__(self, colinks_path, annot='cell_type_int'):
         self.colinks_path = colinks_path
-        self.organism = organism
         self.annot = annot
 
         with open(self.colinks_path, 'rb') as f:
