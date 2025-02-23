@@ -21,6 +21,7 @@ import numba
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 import pickle
+from matplotlib.colors import rgb2hex
 
 tt = torch.tensor
 set_seed(42)
@@ -37,27 +38,45 @@ def calculate_weighted_ligands(gauss_weights, lig_df_values, u_ligands):
     
     return weighted_ligands
 
-def received_ligands(xy, lig_df, radius=200, scale_factor=1e5):
+def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
+
+    def compute_ligands_half(lig_df, radius):
+
+        ligands = lig_df.columns
+        gauss_weights = [
+            scale_factor * gaussian_kernel_2d(
+                xy[i], 
+                xy, 
+                radius=radius) for i in range(len(lig_df))
+        ]
+
+        u_ligands = list(np.unique(ligands))
+        lig_df_values = lig_df[u_ligands].values
+        weighted_ligands = calculate_weighted_ligands(
+            gauss_weights, lig_df_values, u_ligands)
+
+        return pd.DataFrame(
+            weighted_ligands, 
+            index=u_ligands, 
+            columns=lig_df.index
+        ).T
+
+    lr_info = lr_info.copy()
+    lr_info = lr_info[lr_info['ligand'].isin(np.unique(ligands_df.columns))]
+
+    ligand_radii = lr_info[
+            lr_info['ligand'].isin(np.unique(ligands_df.columns))
+        ].drop_duplicates(subset='ligand', keep='first')   
     
-    ligands = lig_df.columns
-    gauss_weights = [
-        scale_factor * gaussian_kernel_2d(
-            xy[i], 
-            xy, 
-            radius=radius) for i in range(len(lig_df))
-    ]
+    full_df = []
 
-    u_ligands = list(np.unique(ligands))
-    lig_df_values = lig_df[u_ligands].values
-    weighted_ligands = calculate_weighted_ligands(
-        gauss_weights, lig_df_values, u_ligands)
+    for radius in ligand_radii['radius'].unique():
+        radius_ligands = lr_info[lr_info['radius'] == radius]['ligand'].values
+        full_df.append(compute_ligands_half(ligands_df[radius_ligands], radius))
 
-    return pd.DataFrame(
-        weighted_ligands, 
-        index=u_ligands, 
-        columns=lig_df.index
-    ).T
-
+    full_df = pd.concat(full_df, axis=0)
+    full_df = full_df.loc[ligands_df.index, ligands_df.columns]
+    return full_df
 
 
 def create_spatial_features(x, y, celltypes, obs_index,radius=200):
@@ -118,7 +137,8 @@ class RotatedTensorDataset(Dataset):
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
-            radius=200, tf_ligand_cutoff=0.01, 
+            radius=200, contact_distance=30, 
+            tf_ligand_cutoff=0.01, 
             regulators=None, grn=None, colinks_path=None):
         
 
@@ -126,7 +146,6 @@ class SpatialCellularProgramsEstimator:
         assert target_gene in adata.var_names, 'target_gene must be in adata.var_names'
         assert layer in adata.layers, 'layer must be in adata.layers'
         assert cluster_annot in adata.obs.columns, 'cluster_annot must be in adata.obs.columns'
-
         
         self.adata = adata
         self.target_gene = target_gene
@@ -134,6 +153,7 @@ class SpatialCellularProgramsEstimator:
         self.layer = layer
         self.device = device
         self.radius = radius
+        self.contact_distance = contact_distance
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
 
@@ -146,8 +166,7 @@ class SpatialCellularProgramsEstimator:
         if regulators is None:
             if grn is None:
                 assert colinks_path is not None, 'colinks_path must be provided if grn is None'
-                self.grn = RegulatoryFactory(
-                    colinks_path=colinks_path, organism=species, annot=cluster_annot)
+                self.grn = RegulatoryFactory(colinks_path=colinks_path, annot=cluster_annot)
             else:
                 self.grn = grn
 
@@ -172,7 +191,7 @@ class SpatialCellularProgramsEstimator:
         assert np.isin(self.regulators, self.adata.var_names).all(), 'all regulators must be in adata.var_names'
 
 
-    def plot_modulators(self, use_expression=True, cmap='viridis'):
+    def plot_modulators(self, use_expression=True):
         
         if use_expression:
             # Get mean expression values for each gene
@@ -194,22 +213,43 @@ class SpatialCellularProgramsEstimator:
                 self.tfl_regulators
             )}
 
-        # print(word_freq)
+        # Create colormaps for each gene category
+        ligand_cmap = plt.get_cmap('viridis')
+        receptor_cmap = plt.get_cmap('magma')
+        regulator_cmap = plt.get_cmap('rainbow')
+
+        def my_color_func(word, font_size, position, orientation, font_path, random_state):
+            rnd = random_state.random()  # random float in [0.0, 1.0)
+            if word in set(self.ligands).union(self.tfl_ligands):
+                color = ligand_cmap(rnd)
+                return rgb2hex(color[:3])
+            elif word in set(self.receptors):
+                color = receptor_cmap(rnd)
+                return rgb2hex(color[:3])
+            elif word in set(self.regulators).union(self.tfl_regulators):
+                color = regulator_cmap(rnd)
+                return rgb2hex(color[:3])
+            else:
+                return "grey"
 
         wordcloud = WordCloud(
-            width=800, height=400, colormap=cmap,
-            contour_width=1, contour_color='black',
-            background_color='white').generate_from_frequencies(word_freq)
+            width=800,
+            height=400,
+            contour_width=1,
+            contour_color='black',
+            background_color='white',
+            color_func=my_color_func
+        ).generate_from_frequencies(word_freq)
 
         plt.figure(figsize=(16, 8))
         plt.imshow(wordcloud, interpolation='bilinear', aspect='equal')
         plt.axis('off')
         plt.title(
             f'{self.target_gene} modulators', fontsize=20)
-        plt.tight_layout()
         plt.show()
 
-    def init_ligands_and_receptors(self, receptor_thresh=0.01, species='mouse'):
+
+    def init_ligands_and_receptors(self, species):
         df_ligrec = ct.pp.ligand_receptor_database(
                 database='CellChat', 
                 species=species, 
@@ -217,9 +257,13 @@ class SpatialCellularProgramsEstimator:
             )
             
         df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
-
+        
         self.lr = expand_paired_interactions(df_ligrec)
         self.lr = self.lr[self.lr.ligand.isin(self.adata.var_names) & (self.lr.receptor.isin(self.adata.var_names))]
+        self.lr['radius'] = np.where(
+            self.lr['signaling'] == 'Secreted Signaling', 
+            self.radius, self.contact_distance
+        )
 
         # receptors = self.lr['receptor']
         # recex_means = np.mean(self.adata.to_df()[receptors], axis=0)
@@ -306,13 +350,12 @@ class SpatialCellularProgramsEstimator:
 
     def init_data(self):
 
-
         if len(self.lr['pairs']) > 0:
 
             self.adata.uns['received_ligands'] = received_ligands(
                 self.adata.obsm['spatial'], 
                 self.adata.to_df(layer=self.layer)[np.unique(self.ligands)], 
-                radius=self.radius,
+                lr_info=self.lr 
             )
 
             self.adata.uns['ligand_receptor'] = self.ligands_receptors_interactions(
@@ -330,7 +373,7 @@ class SpatialCellularProgramsEstimator:
             self.adata.uns['received_ligands_tfl'] = received_ligands(
                 self.adata.obsm['spatial'], 
                 self.adata.to_df(layer=self.layer)[np.unique(self.tfl_ligands)], 
-                radius=self.radius,
+                lr_info=self.lr      
             )
 
             self.adata.uns['ligand_regulator'] = self.ligand_regulators_interactions(
@@ -429,6 +472,7 @@ class SpatialCellularProgramsEstimator:
 
     def fit(self, num_epochs=10, threshold_lambda=1e-4, learning_rate=2e-4, batch_size=512, 
             use_ARD=False, pbar=None, discard=50, use_bayesian=True, score_threshold=0.1):
+        
         sp_maps, X, y, cluster_labels = self.init_data()
 
         self.models = {}
