@@ -264,7 +264,7 @@ class SpaceTravLR(BaseTravLR):
 
     def __init__(self, adata, save_dir='./models', annot='cell_type_int', grn=None,
     max_epochs=15, spatial_dim=64, learning_rate=3e-4, batch_size=256, rotate_maps=True, 
-    layer='imputed_count', alpha=0.05, test_mode=False, 
+    layer='imputed_count', alpha=0.05, test_mode=False,
     threshold_lambda=3e3, tf_ligand_cutoff=0.01, radius=200):
         
         super().__init__(adata, fields_to_keep=[annot])
