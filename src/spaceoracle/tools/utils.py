@@ -189,3 +189,67 @@ def prune_neighbors(dsi, dist, maxl):
     adjacency = np.minimum(adjacency, adjacency.T)
     bknn = csr_matrix(adjacency)
     return bknn
+
+
+def lR_to_l(adata, mapper={'leiden_R': 'leiden'}):
+    '''
+    Map a current column name to a new column name. By default,
+    maps `leiden_R` to `leiden`, typically run after using 
+    `sc.tl.leiden(restrict_to=)`.
+    
+    `adata`: annotated data matrix
+    
+    returns: None, modifies in-place
+    '''
+    for current_col_name in mapper:
+        new_col_name = mapper[current_col_name]
+        current_col = adata.obs[current_col_name].copy()
+        adata.obs.drop(columns=current_col_name)
+        adata.obs[new_col_name] = current_col
+    return
+
+def reset_colors(adata, key='leiden', use_plt=True):
+    if use_plt:
+        try:
+            del(adata.uns['plt']['color'][key])
+        except:
+            pass
+    else:
+        # Fall back to scanpy color storage
+        try:
+            del(adata.uns['%s_colors' % key])
+        except:
+            pass
+    return
+
+def relabel_clusts(adata, key='leiden'):
+    '''
+    Relabel the values in `key` as ordered categories numbering from 0 to _n_.
+    
+    `adata`: annotated data matrix
+    `key`: name of column in `adata.obs` with the clusters
+    
+    returns: None, modifies in-place
+    ''' 
+    try:
+        adata.obs[key].cat
+    except AttributeError:
+        adata.obs[key] = adata.obs[key].astype('category')
+        
+    cats = adata.obs[key].cat.categories
+    new_cats = [str(i) for i in range(len(cats))]
+    adata.obs[key] = adata.obs[key].map(dict(zip(cats, new_cats)))
+    adata.obs[key] = adata.obs[key].astype('category')
+    
+    reset_colors(adata, key=key)
+    
+    return
+
+def clean_leiden(adata):
+    '''
+    Convenience function to clean up the `leiden` column in `adata.obs`.
+
+    `adata`: annotated data matrix
+    '''
+    lR_to_l(adata)
+    relabel_clusts(adata)
