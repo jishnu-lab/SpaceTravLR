@@ -137,7 +137,7 @@ class RotatedTensorDataset(Dataset):
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
-            radius=200, contact_distance=30, 
+            radius=200, contact_distance=50, 
             tf_ligand_cutoff=0.01, 
             regulators=None, grn=None, colinks_path=None):
         
@@ -455,19 +455,19 @@ class SpatialCellularProgramsEstimator:
     
     @property
     def betadata(self):
-        betas_df = self.get_betas()
+        return self.get_betas()
 
-        xy = pd.DataFrame(
-            self.adata.obsm['spatial'], 
-            index=self.adata.obs.index, 
-            columns=['x', 'y']
-        )
+        # xy = pd.DataFrame(
+        #     self.adata.obsm['spatial'], 
+        #     index=self.adata.obs.index, 
+        #     columns=['x', 'y']
+        # )
 
-        _data = betas_df \
-            .join(self.adata.obs) \
-            .join(xy)
+        # _data = betas_df \
+        #     .join(self.adata.obs) \
+        #     .join(xy)
         
-        return _data
+        # return _data
 
 
     def fit(self, num_epochs=10, threshold_lambda=1e-4, learning_rate=2e-4, batch_size=512, 
@@ -609,8 +609,11 @@ class SpatialCellularProgramsEstimator:
                 score = r2_score(all_y_true, all_y_pred)
                 if score < score_threshold:
                     model.anchors = model.anchors*0.0
+                    print(f'{cluster}: x.xxxx | {r2:.4f}')
                     
-                print(f'{cluster}: {score:.4f} | {r2:.4f}')
+                  
+                else:
+                    print(f'{cluster}: {score:.4f} | {r2:.4f}')
             
             self.models[cluster] = model
 
