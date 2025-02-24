@@ -133,7 +133,10 @@ class Prophet(BaseTravLR):
         for i, (gene, betadata) in enumerate(betas_dict.data.items()):
             betas_dict.data[gene].wbetas = self._combine_gene_wbetas(
                 weighted_ligands, gex_df, betadata)
-            self.update_status(f'[{i}/{len(betas_dict.data)}] Ligand interactions - {gene}', color='black_on_salmon')
+            self.update_status(
+                f'[{i:03d}/{len(betas_dict.data):03d}] Ligand interactions - {gene:<20.20s}', 
+                color='black_on_salmon'
+            )
             
         self.update_status(f'Ligand interactions - Done')
         
@@ -273,8 +276,8 @@ class Prophet(BaseTravLR):
         else:
             gem_simulated[cells, target_index] = gene_expr
 
-        self.adata.layers['simulated_count'] = gem_simulated
-        self.adata.layers['delta_X'] = gem_simulated - gene_mtx
+        # self.adata.layers['simulated_count'] = gem_simulated
+        # self.adata.layers['delta_X'] = gem_simulated - gene_mtx
         self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
         
         # print(f'Layer added: {target}_{n_propagation}n_{gene_expr}x')
