@@ -28,7 +28,6 @@ star = SpaceTravLR(
     test_mode=False,
     grn=co_grn,
     radius=200,
-    score_threshold=0.1,
     save_dir='/ix/djishnu/shared/djishnu_kor11/human_tonsil_v4'
 )
 
