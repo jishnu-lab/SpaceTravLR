@@ -31,11 +31,4 @@ pro.perturb_batch(
     save_to='/ix/djishnu/shared/djishnu_kor11/perturbations/mLDN3-1_v4_Ally'
 )
 
-pro.perturb_batch(
-    target_genes=['Bcl6'], 
-    n_propagation=1, 
-    gene_expr=0, 
-    save_to='/ix/djishnu/shared/djishnu_kor11/perturbations/mLDN3-1_v4_Ally'
-)
-
 exit()
