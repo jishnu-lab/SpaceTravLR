@@ -78,6 +78,8 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
     full_df = pd.concat([df for df in full_df if not df.empty], axis=1)
     full_df = full_df.loc[ligands_df.index, ligands_df.columns]
 
+    full_df = pd.concat([df for df in full_df if not df.empty], axis=1)
+    full_df = full_df.loc[ligands_df.index, ligands_df.columns]
     return full_df
 
 
