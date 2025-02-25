@@ -29,14 +29,18 @@ class CPU_Unpickler(pickle.Unpickler):
 def search(query, string_list):
     return [i for i in string_list if query.lower() in i.lower()]
 
-def scale_adata(adata, cell_size=10):
+
+
+def scale_adata(adata, cell_size=15):
     nbrs = NearestNeighbors(n_neighbors=2, algorithm='ball_tree').fit(adata.obsm['spatial'])
     distances, indices = nbrs.kneighbors(adata.obsm['spatial'])
 
     # nn_distance = np.percentile(distances[:, 1], 5).min() # maybe 5% cells are squished
     nn_distance = np.median(distances[:, 1])
     scale_factor = cell_size / nn_distance
+    adata.obsm['spatial_unscaled'] = adata.obsm['spatial'].copy()
     adata.obsm['spatial'] *= scale_factor
+    
     return adata
 
 
@@ -253,3 +257,39 @@ def clean_leiden(adata):
     '''
     lR_to_l(adata)
     relabel_clusts(adata)
+    
+
+    
+def is_mouse_data(adata):
+    """
+    Determine if an AnnData object contains mouse or human data based on gene names.
+    
+    This function examines gene names to determine if the data is from mouse (capitalized first letter only)
+    or human (all caps gene symbols). It samples a subset of genes to make the determination.
+    
+    Parameters
+    ----------
+    adata : AnnData
+        The annotated data matrix to check
+        
+    Returns
+    -------
+    bool
+        True if the data appears to be from mouse, False if it appears to be from human
+    """
+    # Get a sample of gene names to check (up to 100)
+    gene_sample = adata.var_names[:100]
+    
+    # Count genes that follow mouse naming convention (only first letter capitalized)
+    mouse_pattern_count = sum(1 for gene in gene_sample if 
+                             gene[0].isupper() and 
+                             all(not c.isupper() for c in gene[1:]) and
+                             len(gene) > 1)
+    
+    # Count genes that follow human naming convention (all uppercase)
+    human_pattern_count = sum(1 for gene in gene_sample if 
+                             all(c.isupper() or not c.isalpha() for c in gene) and
+                             any(c.isupper() for c in gene))
+    
+    # Return True if more genes match mouse pattern than human pattern
+    return mouse_pattern_count > human_pattern_count

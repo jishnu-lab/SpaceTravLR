@@ -12,9 +12,9 @@ from torch.utils.data import DataLoader, Dataset
 from sklearn.linear_model import ARDRegression, BayesianRidge
 from group_lasso import GroupLasso
 from spaceoracle.models.spatial_map import xyc2spatial_fast
-from spaceoracle.tools.network import DayThreeRegulatoryNetwork, HumanTonsilNetwork, RegulatoryFactory, expand_paired_interactions
+from spaceoracle.tools.network import RegulatoryFactory, expand_paired_interactions
 from .pixel_attention import CellularNicheNetwork
-from ..tools.utils import gaussian_kernel_2d, min_max_df, set_seed
+from ..tools.utils import gaussian_kernel_2d, is_mouse_data, set_seed
 import commot as ct
 from scipy.spatial.distance import cdist
 import numba
@@ -49,7 +49,6 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
                 xy, 
                 radius=radius) for i in range(len(lig_df))
         ]
-
         u_ligands = list(np.unique(ligands))
         lig_df_values = lig_df[u_ligands].values
         weighted_ligands = calculate_weighted_ligands(
@@ -64,19 +63,23 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
     lr_info = lr_info.copy()
     lr_info = lr_info[lr_info['ligand'].isin(np.unique(ligands_df.columns))]
 
+
     ligand_radii = lr_info[
             lr_info['ligand'].isin(np.unique(ligands_df.columns))
         ].drop_duplicates(subset='ligand', keep='first')   
+    
     
     full_df = []
 
     for radius in ligand_radii['radius'].unique():
         radius_ligands = lr_info[lr_info['radius'] == radius]['ligand'].values
         full_df.append(compute_ligands_half(ligands_df[radius_ligands], radius))
+        
+        # print(full_df)
 
     full_df = pd.concat(full_df, axis=0)
-    full_df = full_df.loc[ligands_df.index, ligands_df.columns]
-    return full_df
+    # full_df = full_df.loc[ligands_df.index, ligands_df.columns]
+    return full_df.dropna()
 
 
 def create_spatial_features(x, y, celltypes, obs_index,radius=200):
@@ -157,11 +160,7 @@ class SpatialCellularProgramsEstimator:
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
 
-        sample_gene = adata.var_names[0]
-        if sample_gene.isupper(): 
-            species = 'human'
-        else:
-            species = 'mouse'
+        self.species = 'mouse' if is_mouse_data(adata) else 'human'
 
         if regulators is None:
             if grn is None:
@@ -176,7 +175,7 @@ class SpatialCellularProgramsEstimator:
             self.regulators = regulators
             self.grn = None
 
-        self.init_ligands_and_receptors(species=species)
+        self.init_ligands_and_receptors()
         self.lr_pairs = self.lr['pairs']
         
         self.n_clusters = len(self.adata.obs[self.cluster_annot].unique())
@@ -249,11 +248,11 @@ class SpatialCellularProgramsEstimator:
         plt.show()
 
 
-    def init_ligands_and_receptors(self, species):
+    def init_ligands_and_receptors(self):
         df_ligrec = ct.pp.ligand_receptor_database(
                 database='CellChat', 
-                species=species, 
-                signaling_type="Secreted Signaling"
+                species=self.species, 
+                signaling_type=None
             )
             
         df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
@@ -278,7 +277,7 @@ class SpatialCellularProgramsEstimator:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         data_path = os.path.abspath(
             os.path.join(
-                current_dir, '..', '..', '..', 'data', f'ligand_target_{species}.parquet'))
+                current_dir, '..', '..', '..', 'data', f'ligand_target_{self.species}.parquet'))
         nichenet_lt = pd.read_parquet(data_path)
 
         self.nichenet_lt = nichenet_lt.loc[
