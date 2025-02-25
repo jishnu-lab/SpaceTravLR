@@ -63,23 +63,22 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
     lr_info = lr_info.copy()
     lr_info = lr_info[lr_info['ligand'].isin(np.unique(ligands_df.columns))]
 
-
-    ligand_radii = lr_info[
+    lr_info = lr_info[
             lr_info['ligand'].isin(np.unique(ligands_df.columns))
         ].drop_duplicates(subset='ligand', keep='first')   
     
     
     full_df = []
 
-    for radius in ligand_radii['radius'].unique():
+    for radius in lr_info['radius'].unique():
         radius_ligands = lr_info[lr_info['radius'] == radius]['ligand'].values
         full_df.append(compute_ligands_half(ligands_df[radius_ligands], radius))
         
-        # print(full_df)
 
-    full_df = pd.concat(full_df, axis=0)
-    # full_df = full_df.loc[ligands_df.index, ligands_df.columns]
-    return full_df.dropna()
+    full_df = pd.concat([df for df in full_df if not df.empty], axis=1)
+    full_df = full_df.loc[ligands_df.index, ligands_df.columns]
+
+    return full_df
 
 
 def create_spatial_features(x, y, celltypes, obs_index,radius=200):
@@ -149,7 +148,11 @@ class SpatialCellularProgramsEstimator:
         assert target_gene in adata.var_names, 'target_gene must be in adata.var_names'
         assert layer in adata.layers, 'layer must be in adata.layers'
         assert cluster_annot in adata.obs.columns, 'cluster_annot must be in adata.obs.columns'
+        # assert 'spatial_unscaled' in adata.obsm
         
+        if 'spatial_unscaled' not in adata.obsm:
+            print('!!! Make sure the xy coorniates are scaled')
+          
         self.adata = adata
         self.target_gene = target_gene
         self.cluster_annot = cluster_annot
@@ -159,6 +162,11 @@ class SpatialCellularProgramsEstimator:
         self.contact_distance = contact_distance
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
+        self.xy = pd.DataFrame(
+            adata.obsm['spatial'], 
+            index=adata.obs.index, 
+            columns=['x', 'y']
+        )
 
         self.species = 'mouse' if is_mouse_data(adata) else 'human'
 
@@ -314,7 +322,7 @@ class SpatialCellularProgramsEstimator:
     def ligands_receptors_interactions(received_ligands_df, receptor_gex_df):
         assert isinstance(received_ligands_df, pd.DataFrame)
         assert isinstance(receptor_gex_df, pd.DataFrame)
-        assert received_ligands_df.index.equals(receptor_gex_df.index)
+        assert received_ligands_df.index.equals(receptor_gex_df.index)    
         assert received_ligands_df.shape[1] == receptor_gex_df.shape[1]
 
         _received_ligands = received_ligands_df.values
