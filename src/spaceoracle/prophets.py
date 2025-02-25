@@ -171,7 +171,7 @@ class Prophet(BaseTravLR):
         
         return result
 
-    def perturb(self, target, gene_mtx=None, n_propagation=3, gene_expr=0, cells=None, use_optimized=False):
+    def perturb(self, target, gene_mtx=None, n_propagation=3, gene_expr=0, cells=None, use_optimized=False, delta_dir=None):
 
         assert target in self.adata.var_names
         
@@ -243,8 +243,12 @@ class Prophet(BaseTravLR):
             gem_tmp[gem_tmp<0] = 0
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
+            if delta_dir:
+                np.save(f'{delta_dir}/{target}_{n_propagation}n_{gene_expr}x.npy', delta_simulated)
+
             # save weighted ligand values to weight betas of next iteration
             weighted_ligands_0 = weighted_ligands_1.copy()
+
 
 
         gem_simulated = gene_mtx + delta_simulated
