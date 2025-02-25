@@ -17,7 +17,6 @@ co_grn = RegulatoryFactory(
 adata_train = sc.read_h5ad(
     '/ix/djishnu/shared/djishnu_kor11/training_data_2025/snrna_human_tonsil.h5ad')
 
-print(adata_train)
 
 star = SpaceTravLR(
     adata=adata_train,
@@ -28,8 +27,8 @@ star = SpaceTravLR(
     batch_size=512,
     test_mode=False,
     grn=co_grn,
-    radius=250,
-    save_dir='/ix/djishnu/shared/djishnu_kor11/models_snrna_human_tonsil_v3'
+    radius=200,
+    save_dir='/ix/djishnu/shared/djishnu_kor11/models_snrna_human_tonsil_Ally'
 )
 
 star.run()

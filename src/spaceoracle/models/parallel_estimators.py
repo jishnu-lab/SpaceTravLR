@@ -63,17 +63,17 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
     lr_info = lr_info.copy()
     lr_info = lr_info[lr_info['ligand'].isin(np.unique(ligands_df.columns))]
 
-    ligand_radii = lr_info[
+    lr_info = lr_info[
             lr_info['ligand'].isin(np.unique(ligands_df.columns))
         ].drop_duplicates(subset='ligand', keep='first')   
     
     full_df = []
 
-    for radius in ligand_radii['radius'].unique():
+    for radius in lr_info['radius'].unique():
         radius_ligands = lr_info[lr_info['radius'] == radius]['ligand'].values
         full_df.append(compute_ligands_half(ligands_df[radius_ligands], radius))
 
-    full_df = pd.concat(full_df, axis=0)
+    full_df = pd.concat([df for df in full_df if not df.empty], axis=1)
     full_df = full_df.loc[ligands_df.index, ligands_df.columns]
     return full_df
 
@@ -233,7 +233,7 @@ class SpatialCellularProgramsEstimator:
         df_ligrec = ct.pp.ligand_receptor_database(
                 database='CellChat', 
                 species=species, 
-                signaling_type="Secreted Signaling"
+                signaling_type=None
             )
             
         df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  

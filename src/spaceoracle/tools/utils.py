@@ -155,6 +155,7 @@ def gaussian_kernel_2d(origin, xy_array, radius, eps=0.001):
     distances = np.sqrt(np.sum((xy_array - origin)**2, axis=1))
     sigma = radius / np.sqrt(-2 * np.log(eps))
     weights = np.exp(-(distances**2) / (2 * sigma**2))
+    weights[distances > radius] = 0
     # weights[0] = 0
     return weights
 

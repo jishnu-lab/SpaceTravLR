@@ -61,6 +61,7 @@ class Prophet(BaseTravLR):
         
         self.manager = enlighten.get_manager()
         
+        print(self.queue.remaining_genes)
         assert len(self.queue.remaining_genes) == 0
         
         self.status = self.manager.status_bar(
@@ -75,7 +76,7 @@ class Prophet(BaseTravLR):
         df_ligrec = ct.pp.ligand_receptor_database(
                 database='CellChat', 
                 species=species, 
-                signaling_type="Secreted Signaling"
+                signaling_type=None
             )
             
         df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
@@ -111,8 +112,8 @@ class Prophet(BaseTravLR):
         if len(self.ligands) > 0:
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
-                lig_df=gex_df[self.ligands],
-                radius=self.lr
+                ligands_df=gex_df[self.ligands],
+                lr_info=self.lr
         )
         else:
             weighted_ligands = []
@@ -193,7 +194,7 @@ class Prophet(BaseTravLR):
         
         return result
 
-    def perturb(self, target, gene_mtx=None, n_propagation=3, gene_expr=0, cells=None, use_optimized=False):
+    def perturb(self, target, gene_mtx=None, n_propagation=3, gene_expr=0, cells=None, use_optimized=False, delta_dir=None):
 
         assert target in self.adata.var_names
         
@@ -265,8 +266,12 @@ class Prophet(BaseTravLR):
             gem_tmp[gem_tmp<0] = 0
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
+            if delta_dir:
+                np.save(f'{delta_dir}/{target}_{n_propagation}n_{gene_expr}x.npy', delta_simulated)
+
             # save weighted ligand values to weight betas of next iteration
             weighted_ligands_0 = weighted_ligands_1.copy()
+
 
 
         gem_simulated = gene_mtx + delta_simulated
