@@ -179,6 +179,66 @@ class Cartography:
         return P
     
     
+    def plot_umap(self, hue='banksy_celltypes', figsize=(5, 5), dpi=180, alpha=0.9, alt_colors=None):
+        color_dict = self.color_dict.copy()
+        color_dict['GC Dark Zone'] = 'mediumpurple'
+        color_dict['GC Intermediate Zone'] = 'mediumpurple'
+        color_dict['GC Light Zone'] = 'mediumpurple'
+
+        f, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+        sns.scatterplot(
+            data = pd.DataFrame(
+                self.adata.obsm['X_umap'], 
+                columns=['x', 'y'], 
+                index=self.adata.obs_names).join(self.adata.obs),
+            x='x', y='y',
+            hue=hue, 
+            s=15,
+            ax=ax,
+            alpha=alpha,
+            edgecolor='black',
+            linewidth=0.1,
+            palette=color_dict,
+            legend=False
+        )
+
+
+        ax.set_frame_on(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        ax.set_title('')
+        
+        if alt_colors is None:
+            alt_colors = self.color_dict
+            
+        if 'alt_labels' in self.adata.obs:
+            all_cts = self.adata.obs['alt_labels']
+        else:
+            all_cts = self.adata.obs[hue]
+
+        for cluster in all_cts.unique():
+            cluster_cells = all_cts == cluster
+            x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
+            y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
+            
+            ax.text(x, y, cluster, 
+                    fontsize=6, 
+                    ha='center', 
+                    va='center',
+                    color='black',
+                    bbox=dict(
+                        facecolor=alt_colors[cluster],
+                        alpha=1,
+                        edgecolor='black',
+                        boxstyle='round'
+                    ))
+            
+        return ax
+    
+    
     def plot_umap_quiver(
             self, 
             perturb_target, 
