@@ -29,14 +29,18 @@ class CPU_Unpickler(pickle.Unpickler):
 def search(query, string_list):
     return [i for i in string_list if query.lower() in i.lower()]
 
-def scale_adata(adata, cell_size=10):
+
+
+def scale_adata(adata, cell_size=15):
     nbrs = NearestNeighbors(n_neighbors=2, algorithm='ball_tree').fit(adata.obsm['spatial'])
     distances, indices = nbrs.kneighbors(adata.obsm['spatial'])
 
     # nn_distance = np.percentile(distances[:, 1], 5).min() # maybe 5% cells are squished
     nn_distance = np.median(distances[:, 1])
     scale_factor = cell_size / nn_distance
+    adata.obsm['spatial_unscaled'] = adata.obsm['spatial'].copy()
     adata.obsm['spatial'] *= scale_factor
+    
     return adata
 
 
@@ -190,3 +194,103 @@ def prune_neighbors(dsi, dist, maxl):
     adjacency = np.minimum(adjacency, adjacency.T)
     bknn = csr_matrix(adjacency)
     return bknn
+
+
+def lR_to_l(adata, mapper={'leiden_R': 'leiden'}):
+    '''
+    Map a current column name to a new column name. By default,
+    maps `leiden_R` to `leiden`, typically run after using 
+    `sc.tl.leiden(restrict_to=)`.
+    
+    `adata`: annotated data matrix
+    
+    returns: None, modifies in-place
+    '''
+    for current_col_name in mapper:
+        new_col_name = mapper[current_col_name]
+        current_col = adata.obs[current_col_name].copy()
+        adata.obs.drop(columns=current_col_name)
+        adata.obs[new_col_name] = current_col
+    return
+
+def reset_colors(adata, key='leiden', use_plt=True):
+    if use_plt:
+        try:
+            del(adata.uns['plt']['color'][key])
+        except:
+            pass
+    else:
+        # Fall back to scanpy color storage
+        try:
+            del(adata.uns['%s_colors' % key])
+        except:
+            pass
+    return
+
+def relabel_clusts(adata, key='leiden'):
+    '''
+    Relabel the values in `key` as ordered categories numbering from 0 to _n_.
+    
+    `adata`: annotated data matrix
+    `key`: name of column in `adata.obs` with the clusters
+    
+    returns: None, modifies in-place
+    ''' 
+    try:
+        adata.obs[key].cat
+    except AttributeError:
+        adata.obs[key] = adata.obs[key].astype('category')
+        
+    cats = adata.obs[key].cat.categories
+    new_cats = [str(i) for i in range(len(cats))]
+    adata.obs[key] = adata.obs[key].map(dict(zip(cats, new_cats)))
+    adata.obs[key] = adata.obs[key].astype('category')
+    
+    reset_colors(adata, key=key)
+    
+    return
+
+def clean_leiden(adata):
+    '''
+    Convenience function to clean up the `leiden` column in `adata.obs`.
+
+    `adata`: annotated data matrix
+    '''
+    lR_to_l(adata)
+    relabel_clusts(adata)
+    
+
+    
+def is_mouse_data(adata):
+    """
+    Determine if an AnnData object contains mouse or human data based on gene names.
+    
+    This function examines gene names to determine if the data is from mouse (capitalized first letter only)
+    or human (all caps gene symbols). It samples a subset of genes to make the determination.
+    
+    Parameters
+    ----------
+    adata : AnnData
+        The annotated data matrix to check
+        
+    Returns
+    -------
+    bool
+        True if the data appears to be from mouse, False if it appears to be from human
+    """
+    # Get a sample of gene names to check (up to 100)
+    gene_sample = adata.var_names[:100]
+    
+    # Count genes that follow mouse naming convention (only first letter capitalized)
+    mouse_pattern_count = sum(1 for gene in gene_sample if 
+                             gene[0].isupper() and 
+                             all(not c.isupper() for c in gene[1:]) and
+                             len(gene) > 1)
+    
+    # Count genes that follow human naming convention (all uppercase)
+    human_pattern_count = sum(1 for gene in gene_sample if 
+                             all(c.isupper() or not c.isalpha() for c in gene) and
+                             any(c.isupper() for c in gene))
+    
+    # Return True if more genes match mouse pattern than human pattern
+    return mouse_pattern_count > human_pattern_count

@@ -91,8 +91,8 @@ class BetaFrame(pd.DataFrame):
         ## dy/dwL1 = b2[wL1*dR1/dwL1 + R1] + b3[wL1*dR2/dwL1 + R2]
         ##         = b2*R1 + b3*R2
         ## dy/dR1 = b2*[wL1 + R1*dwL1/dR1] = b2*wL1
-
         
+
         _df = pd.DataFrame(
             np.concatenate([
                 self[self.tf_columns].to_numpy(),

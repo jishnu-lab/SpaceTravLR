@@ -169,20 +169,20 @@ class NicheAttentionNetwork(nn.Module):
 class CellularNicheNetwork(nn.Module):
 
     @staticmethod
-    def make_vision_model(input_channels=1, out_dim=128, kernel_size=3):
+    def make_vision_model(input_channels=1, out_dim=64, kernel_size=3):
 
         return nn.Sequential(
-            weight_norm(nn.Conv2d(input_channels, 32, kernel_size=kernel_size, padding='same')),
-            nn.BatchNorm2d(32),
+            weight_norm(nn.Conv2d(input_channels, 16, kernel_size=kernel_size, padding='same')),
+            nn.BatchNorm2d(16),
             nn.PReLU(init=0.1),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
-            weight_norm(nn.Conv2d(32, 64, kernel_size=kernel_size, padding='same')),
-            nn.BatchNorm2d(64),
+            weight_norm(nn.Conv2d(16, 32, kernel_size=kernel_size, padding='same')),
+            nn.BatchNorm2d(32),
             nn.PReLU(init=0.1),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
-            weight_norm(nn.Conv2d(64, out_dim, kernel_size=kernel_size, padding='same')),
+            weight_norm(nn.Conv2d(32, out_dim, kernel_size=kernel_size, padding='same')),
             nn.BatchNorm2d(out_dim),
             nn.PReLU(init=0.1),
             nn.MaxPool2d(kernel_size=2, stride=2),
@@ -218,23 +218,24 @@ class CellularNicheNetwork(nn.Module):
         self.conv_layers = self.make_vision_model(input_channels=self.in_channels)
 
         self.spatial_features_mlp = nn.Sequential(
-            nn.Linear(n_clusters, 32),
+            nn.Linear(n_clusters, 16),
             nn.PReLU(init=0.1),
-            nn.Linear(32, 64),
+            nn.Linear(16, 32),
             nn.PReLU(init=0.1),
-            nn.Linear(64, 128)
+            nn.Linear(32, 64)
         )
 
         self.mlp = nn.Sequential(
-            nn.Linear(128, 128),
+            nn.Linear(64, 64),
             nn.PReLU(init=0.1),
-            nn.Linear(128, self.dim)
+            nn.Linear(64, self.dim)
         )
 
         # self.output_activation = nn.Tanh()
-        # self.output_activation = nn.Sigmoid()
+        self.output_activation = nn.Sigmoid()
         # self.output_activation = nn.GELU()
-        self.output_activation = nn.Identity()
+        # self.output_activation = nn.Identity()
+        # self.output_activation = nn.Softplus()
 
 
     def get_betas(self, spatial_maps, spatial_features):
@@ -242,7 +243,7 @@ class CellularNicheNetwork(nn.Module):
         sp_out = self.spatial_features_mlp(spatial_features)
         out = out+sp_out
         betas = self.mlp(out)
-        betas = self.output_activation(betas)
+        betas = self.output_activation(betas) * 1.5
 
         return betas*self.anchors
     

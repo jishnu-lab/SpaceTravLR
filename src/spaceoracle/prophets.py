@@ -13,69 +13,55 @@ from .models.parallel_estimators import received_ligands
 from .oracles import OracleQueue, BaseTravLR
 from .beta import Betabase
 from .tools.network import expand_paired_interactions
-
-from .plotting.layout import compare_gex, show_expression_plot, show_locations
-from .plotting.transitions import estimate_transitions_2D, distance_shift, contour_shift
-from .plotting.niche import get_modulator_betas, show_beta_neighborhoods
-from .plotting.beta_maps import plot_spatial
-from .plotting.location import get_cells_in_radius, show_effect_distance
-from .plotting.gsea import compute_gsea_scores, show_gsea_scores
-
-from numba import jit
+from .tools.utils import is_mouse_data
 import enlighten
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 
 
 class Prophet(BaseTravLR):
-    def __init__(self, adata, models_dir, annot, annot_labels=None, species='mouse', radius=100, contact_distance=30):
-
-        if annot_labels == None:
-            annot_labels = annot
+    def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30):
         
-        super().__init__(adata, fields_to_keep=[annot, annot_labels])
+        super().__init__(adata, fields_to_keep=[annot])
         
         self.adata = adata.copy()
         self.annot = annot
         self.save_dir = models_dir
-        self.annot_labels = annot_labels
         self.radius = radius
         self.contact_distance = contact_distance
+        self.species = 'mouse' if is_mouse_data(adata) else 'human'
 
-        self.init_ligands_and_receptors(species=species)
+        self.init_ligands_and_receptors()
 
         self.queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
         self.ligands = []
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
         self.beta_dict = None
-        self.goi = None
 
-        self.gsea_scores = {}
-        self.sim_adata = None
-
-        # with open('../../data/GSEA/GSEA_human/h.all.v2024.1.Hs.json', 'r') as f:
-        #     self.gsea_modules = json.load(f)
-        with open('/ix/djishnu/alw399/SpaceOracle/data/GSEA/m2.all.v2024.1.Mm.json', 'r') as f:
-            self.gsea_modules = json.load(f)
         
         self.manager = enlighten.get_manager()
         
-        print(self.queue.remaining_genes)
-        assert len(self.queue.remaining_genes) == 0
+        _logo = '🚀️🐭️ SpaceTravLR' if self.species == 'mouse' else '🚀️🙅‍♂️️ SpaceTravLR'
         
         self.status = self.manager.status_bar(
-            f'🚀️ SpaceTravLR: [Ready] | {adata.shape[0]} cells / {len(self.genes)} genes',
+            f'{_logo}: [Ready] | {adata.shape[0]} cells / {len(self.genes)} genes',
             color='black_on_green',
             justify=enlighten.Justify.CENTER,
             auto_refresh=True,
             width=30
         )
+        
+        self.xy = pd.DataFrame(
+            self.adata.obsm['spatial'], 
+            index=self.adata.obs_names, 
+            columns=['x', 'y']
+        )
     
-    def init_ligands_and_receptors(self, species='mouse'):
+    def init_ligands_and_receptors(self):
         df_ligrec = ct.pp.ligand_receptor_database(
                 database='CellChat', 
-                species=species, 
+                species=self.species, 
                 signaling_type=None
             )
             
@@ -89,7 +75,7 @@ class Prophet(BaseTravLR):
         )
 
     def compute_betas(self, subsample=None, float16=False):
-        self.status.update('Computing betas - ...')
+        self.status.update('Computing betas ...')
         self.status.color = 'black_on_salmon'
         self.status.refresh()
 
@@ -119,19 +105,7 @@ class Prophet(BaseTravLR):
             weighted_ligands = []
         
         return weighted_ligands
-    
-    # def _get_wbetas_dict(self, betas_dict, weighted_ligands, gene_mtx):
 
-    #     gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
-        
-    #     with ThreadPoolExecutor() as executor:
-    #         futures = {executor.submit(self._combine_gene_wbetas, weighted_ligands, gex_df, betadata): gene 
-    #                    for gene, betadata in betas_dict.data.items()}
-    #         for future in as_completed(futures):
-    #             gene = futures[future]
-    #             betas_dict.data[gene].wbetas = future.result()
-
-    #     return betas_dict
     
     def update_status(self, msg='', color='black_on_green'):
         self.status.update(msg)
@@ -146,7 +120,10 @@ class Prophet(BaseTravLR):
         for i, (gene, betadata) in enumerate(betas_dict.data.items()):
             betas_dict.data[gene].wbetas = self._combine_gene_wbetas(
                 weighted_ligands, gex_df, betadata)
-            self.update_status(f'[{i}/{len(betas_dict.data)}] Ligand interactions - {gene}', color='black_on_salmon')
+            self.update_status(
+                f'[{i:03d}/{len(betas_dict.data):03d}] Ligand interactions', 
+                color='black_on_salmon'
+            )
             
         self.update_status(f'Ligand interactions - Done')
         
@@ -290,8 +267,8 @@ class Prophet(BaseTravLR):
         else:
             gem_simulated[cells, target_index] = gene_expr
 
-        self.adata.layers['simulated_count'] = gem_simulated
-        self.adata.layers['delta_X'] = gem_simulated - gene_mtx
+        # self.adata.layers['simulated_count'] = gem_simulated
+        # self.adata.layers['delta_X'] = gem_simulated - gene_mtx
         self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
         
         # print(f'Layer added: {target}_{n_propagation}n_{gene_expr}x')
@@ -334,287 +311,3 @@ class Prophet(BaseTravLR):
                 
         self.update_status('Batch Perturbions: Done')
         progress_bar.close()
-    
-    def perturb_location(self, coords, goi, n_propagation=3, gene_expr=0, cell_type=[], radius_ko=100, save_dir=None):
-        '''perturb a gene in a specific location'''
-
-        cell_idxs = get_cells_in_radius(coords, self.adata, self.annot_labels, radius=radius_ko, cell_type=cell_type)
-        self.perturb(goi, n_propagation=n_propagation, gene_expr=gene_expr, cells=cell_idxs)
-
-        # show the effect for each cell type
-        top_genes = {}
-        for ct in self.adata.obs[self.annot_labels].unique():
-            top_gene_labels = self.plot_delta_scores(compare_ct=False, include=[ct], ko_gene=goi, save_dir=save_dir)
-            if top_gene_labels is not None:
-                top_genes[ct] = top_gene_labels
-        
-        # show the effect as a wrt distance for each cell type
-        show_effect_distance(self.adata, self.annot_labels, top_genes, coords, save_dir=save_dir)
-
-    def show_ct_gex(self, goi):
-        df = show_expression_plot(self.adata, goi, self.annot_labels)
-        return df
-
-    def evaluate(self, img_dir, perturb_dir, gene_list):
-        '''for each cell type, identify the top genes with greatest spatial variation'''
-        os.makedirs(img_dir, exist_ok=True)
-
-        for gene in gene_list:
-
-            if gene not in self.adata.var_names:
-                print(f'{gene} not found in adata.var_names')
-                continue
-
-            simulated_count = os.path.join(perturb_dir, f'{gene}.parquet')
-            
-            if not os.path.exists(simulated_count):
-                self.perturb(gene)
-                pd.DataFrame(
-                    self.adata.layers['simulated_count'], columns=self.adata.var_names, index=self.adata.obs_names
-                    ).to_parquet(f'{perturb_dir}/{gene}.parquet')
-            else:
-                self.adata.layers['simulated_count'] = pd.read_parquet(simulated_count).values
-                self.adata.layers['delta_X'] = self.adata.layers['simulated_count'] - self.adata.layers['imputed_count']
-            
-            try:
-                self.plot_contour_shift(savepath=f'{img_dir}/{gene}/contour.png')
-            except:
-                print(f'Error in plotting contour for {gene}')
-                
-            self.plot_delta_scores(save_dir=f'{img_dir}/{gene}')
-            self.gene_program_change(savepath=f'{img_dir}/{gene}/delta_gsea.png')
-
-            print(f'finished {gene}')
-
-    
-    def plot_contour_shift(self, seed=1334, savepath=False):
-        assert self.adata.layers.get('delta_X') is not None
-
-        fig, axs = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 1]})
-        axs.flatten()
-        contour_shift(self.adata, title=f'Cell Identity Shift from {self.goi} KO', annot=self.annot_labels, seed=seed, ax=axs[0])
-        
-        delta_X_rndm = self.adata.layers['delta_X'].copy()
-        permute_rows_nsign(delta_X_rndm)
-        fake_simulated_count = self.adata.layers['imputed_count'] + delta_X_rndm
-        
-        contour_shift(self.adata, title=f'Randomized Effect of {self.goi} KO Shift', annot=self.annot_labels, seed=seed, ax=axs[1], perturbed=fake_simulated_count)
-        # axs[1] = distance_shift(self.adata, ax=axs[1], annot=self.annot_labels)
-        plt.tight_layout()
-
-        if savepath:
-            plt.savefig(savepath)
-        plt.show()
-    
-    def plot_delta_scores(self, n_show=10, compare_ct=True, ct_interest=None, alt_annot=None, include=None, 
-                            ko_gene=None, perturbed_cells=None, min_ncells=10, save_dir=False):
-        '''
-        ct_interest: name of cell type in annot_labels that you want to compare against/ over all others
-        alt_annot: group by this annotation instead of cell type
-        include: remove all other cell types from consideration
-        '''
-        if alt_annot is None:
-            alt_annot = self.annot_labels
-        else:
-            assert alt_annot in self.adata.obs.columns, f'{alt_annot} not found in adata.obs'
-        
-        adata = self.adata.copy()
-        
-        if ko_gene is not None:
-            adata = adata[:, adata.var_names != ko_gene] # remove the gene that was perturbed from the analysis
-        if perturbed_cells is not None:
-            perturbed_cells = adata.obs_names[np.array(perturbed_cells)]
-            adata = adata[:, ~adata.obs.index.isin(perturbed_cells)] # remove the cells that were perturbed from the analysis
-
-        if include is not None:
-            adata = self.adata[self.adata.obs[alt_annot].isin(include)]
-        
-        # Exclude clusters with less than min_ncells 
-        cluster_counts = adata.obs[alt_annot].value_counts()
-        valid_clusters = cluster_counts[cluster_counts >= min_ncells].index
-        adata = adata[adata.obs[alt_annot].isin(valid_clusters)]
-
-        top_gene_labels = distance_shift(adata, alt_annot, n_show=n_show, ct_interest=ct_interest, compare_ct=compare_ct, save_dir=save_dir)
-        return top_gene_labels
-
-
-    def plot_beta_neighborhoods(self, goi=None, use_modulators=False, score_thresh=0.3, savepath=False, seed=1334):
-        
-        if goi is None:
-            goi = self.goi
-
-        if use_modulators:
-            # Remove coords and cluster labels
-            assert goi in self.beta_dict.data.keys(), f'{goi} does not have modulators'
-            betas = self.beta_dict.data[goi].iloc[:, :-4].values
-        else:
-            betas = self.betas_cache.get(f'betas_{goi}')
-            if betas is None:
-                self.plot_betas_goi()
-                betas = self.betas_cache[f'betas_{goi}']
-                
-        labels = show_beta_neighborhoods(
-            self, goi, betas, 
-            annot=self.annot_labels, 
-            score_thresh=score_thresh,
-            seed=seed,
-            savepath=savepath
-        )
-
-        self.adata.obs['beta_neighborhood'] = labels
-        self.adata.obs['beta_neighborhood'] = self.adata.obs['beta_neighborhood'].astype('category')
-
-    def plot_betas_goi(self, goi=None, save_dir=False, use_simulated=False, clusters=[]):
-        '''
-        use_simulated: if True, compute rw_ligands from simulated_count, else from imputed_count
-        '''
-        if goi is None:
-            goi = self.goi
-        assert goi is not None, 'Specify a gene of interest'
-
-        betas_goi_all = get_modulator_betas(self, goi, save_dir=save_dir, use_simulated=use_simulated, clusters=clusters)
-        self.betas_cache[f'betas_{goi}'] = betas_goi_all
-
-    def plot_beta_map(self, regulator, target_gene, clusters=None, save_dir=False):
-
-        if clusters is None:
-            clusters = self.adata.obs[self.annot].value_counts().head(3).index
-
-        beta_data = self.beta_dict.data[target_gene]
-        beta_data[self.annot_labels] = self.adata.obs[self.annot_labels]
-
-        ax = plot_spatial(
-            df=beta_data,
-            plot_for=f'beta_{regulator}',
-            target_gene=target_gene,
-            clusters=clusters,
-            annot=self.annot,
-            annot_labels=self.annot_labels,
-            with_expr=False
-        )
-        plt.tight_layout()
-
-        if save_dir:
-            os.makedirs(save_dir, exist_ok=True)
-            savepath = os.path.join(save_dir, f'{target_gene}_beta_{regulator}_map.png')
-            plt.savefig(savepath)
-
-    def plot_beta_umap(self, use_modulators=False, seed=1334, n_neighbors=50):
-
-        assert 'beta_neighborhood' in self.adata.obs.columns, f'Run plot_beta_neighborhood() first'
-
-        reducer = umap.UMAP(random_state=seed, n_neighbors=n_neighbors, min_dist=1.0, spread=5.0)
-        
-        if use_modulators is True:
-            X = self.beta_dict.data[self.goi].iloc[:, :-4].values
-        else:
-            X = self.betas_cache[f'betas_{self.goi}']
-        
-        umap_coords = reducer.fit_transform(X)
-
-        fig, ax = plt.subplots(figsize=(8, 8))
-        sns.scatterplot(
-            x=umap_coords[:,0], 
-            y=umap_coords[:,1],
-            hue=self.adata.obs['beta_neighborhood'].values,
-            alpha=0.5,
-            s=20,
-            ax=ax,
-        )
-        plt.title(f'Beta UMAP for {self.goi}')
-
-        self.adata.obsm['beta_umap'] = umap_coords
-
-    def show_cluster_gex(self, goi=None, embedding='spatial', annot=None, include_ct=[], show_locs=False):
-        if goi is None:
-            goi = self.goi
-
-        if annot is None:
-            annot = self.annot_labels
-
-        if len(include_ct) > 0:
-            adata = self.adata[self.adata.obs[annot].isin(include_ct)]
-        else:
-            adata = self.adata.copy()
-        
-        compare_gex(adata, annot=annot, goi=goi, embedding=embedding)
-        
-        if show_locs:
-            show_locations(adata, annot=annot)
-
-    def show_transitions(self, layout_embedding=None, nn_embedding=None, vector_scale=1,
-    grid_scale=1, annot=None, n_neighbors=200, n_jobs=1, savepath=False):
-            
-        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-        axs.flatten()
-
-        if layout_embedding is None:
-            layout_embedding = self.adata.obsm['spatial']
-        
-        if nn_embedding is None:
-            nn_embedding = self.adata.obsm['X_draw_graph_fr']
-        
-        if annot is None:
-            annot = self.annot_labels
-        
-        estimate_transitions_2D(
-            adata=self.adata,
-            delta_X=self.adata.layers['delta_X'],
-            embedding=nn_embedding,
-            layout_embedding=layout_embedding,
-            annot=annot,
-            grid_scale=grid_scale,
-            vector_scale=vector_scale,
-            n_neighbors=n_neighbors, 
-            n_jobs=n_jobs, ax=axs[0]
-        )
-
-        delta_X_rndm = self.adata.layers['delta_X'].copy()
-        permute_rows_nsign(delta_X_rndm)
-
-        estimate_transitions_2D(
-            adata=self.adata,
-            delta_X=delta_X_rndm,
-            embedding=nn_embedding,
-            layout_embedding=layout_embedding,
-            annot=annot,
-            grid_scale=grid_scale,
-            vector_scale=vector_scale,
-            n_neighbors=n_neighbors, 
-            n_jobs=n_jobs, ax=axs[1]
-        )
-
-        fig.suptitle(f"Transition Estimation from {self.goi} KO", fontsize=16)
-        axs[0].set_title("Prediction")
-        axs[1].set_title("Randomized")
-        plt.tight_layout()
-
-        if savepath:
-            plt.savefig(savepath)
-
-        plt.show()
-    
-    def gene_program_change(self, show_spatial=True, savepath=False, keyword='BIOCARTA', n_show=9):
-        gsea_scores = compute_gsea_scores(self.adata, self.gsea_modules)
-        self.gsea_scores = gsea_scores
-        gsea_scores_perturbed = compute_gsea_scores(self.adata, self.gsea_modules, layer='simulated_count')
-        self.gsea_scores_ko = gsea_scores_perturbed
-
-        delta_gsea_scores = gsea_scores_perturbed - gsea_scores
-        delta_gsea_scores.dropna(inplace=True)
-
-        delta_gsea_scores['abs_mean'] = delta_gsea_scores.iloc[:, :-1].apply(lambda row: np.abs(row.mean()), axis=1)
-        delta_gsea_scores.sort_values(by = 'abs_mean', ascending=False, inplace=True)
-        
-        delta_gsea_scores = delta_gsea_scores.loc[delta_gsea_scores.index.str.contains(keyword)]
-        show_gsea_scores(self.adata, delta_gsea_scores, self.annot_labels, n_show=9, show_spatial=True, savepath=savepath)
-
-# Cannibalized from CellOracle
-@jit(nopython=True)
-def permute_rows_nsign(A: np.ndarray) -> None:
-    """Permute in place the entries and randomly switch the sign for each row of a matrix independently.
-    """
-    plmi = np.array([+1, -1])
-    for i in range(A.shape[0]):
-        np.random.shuffle(A[i, :])
-        A[i, :] = A[i, :] * np.random.choice(plmi, size=A.shape[1])

@@ -12,15 +12,16 @@ from torch.utils.data import DataLoader, Dataset
 from sklearn.linear_model import ARDRegression, BayesianRidge
 from group_lasso import GroupLasso
 from spaceoracle.models.spatial_map import xyc2spatial_fast
-from spaceoracle.tools.network import DayThreeRegulatoryNetwork, HumanTonsilNetwork, RegulatoryFactory, expand_paired_interactions
+from spaceoracle.tools.network import RegulatoryFactory, expand_paired_interactions
 from .pixel_attention import CellularNicheNetwork
-from ..tools.utils import gaussian_kernel_2d, min_max_df, set_seed
+from ..tools.utils import gaussian_kernel_2d, is_mouse_data, set_seed
 import commot as ct
 from scipy.spatial.distance import cdist
 import numba
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 import pickle
+from matplotlib.colors import rgb2hex
 
 tt = torch.tensor
 set_seed(42)
@@ -48,7 +49,6 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
                 xy, 
                 radius=radius) for i in range(len(lig_df))
         ]
-
         u_ligands = list(np.unique(ligands))
         lig_df_values = lig_df[u_ligands].values
         weighted_ligands = calculate_weighted_ligands(
@@ -67,11 +67,14 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
             lr_info['ligand'].isin(np.unique(ligands_df.columns))
         ].drop_duplicates(subset='ligand', keep='first')   
     
+    
     full_df = []
 
     for radius in lr_info['radius'].unique():
         radius_ligands = lr_info[lr_info['radius'] == radius]['ligand'].values
         full_df.append(compute_ligands_half(ligands_df[radius_ligands], radius))
+        
+        # print(full_df)
 
     full_df = pd.concat([df for df in full_df if not df.empty], axis=1)
     full_df = full_df.loc[ligands_df.index, ligands_df.columns]
@@ -136,7 +139,7 @@ class RotatedTensorDataset(Dataset):
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
-            radius=200, contact_distance=30, 
+            radius=200, contact_distance=50, 
             tf_ligand_cutoff=0.01, 
             regulators=None, grn=None, colinks_path=None):
         
@@ -145,7 +148,6 @@ class SpatialCellularProgramsEstimator:
         assert target_gene in adata.var_names, 'target_gene must be in adata.var_names'
         assert layer in adata.layers, 'layer must be in adata.layers'
         assert cluster_annot in adata.obs.columns, 'cluster_annot must be in adata.obs.columns'
-
         
         self.adata = adata
         self.target_gene = target_gene
@@ -157,17 +159,12 @@ class SpatialCellularProgramsEstimator:
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
 
-        sample_gene = adata.var_names[0]
-        if sample_gene.isupper(): 
-            species = 'human'
-        else:
-            species = 'mouse'
+        self.species = 'mouse' if is_mouse_data(adata) else 'human'
 
         if regulators is None:
             if grn is None:
                 assert colinks_path is not None, 'colinks_path must be provided if grn is None'
-                self.grn = RegulatoryFactory(
-                    colinks_path=colinks_path, organism=species, annot=cluster_annot)
+                self.grn = RegulatoryFactory(colinks_path=colinks_path, annot=cluster_annot)
             else:
                 self.grn = grn
 
@@ -177,7 +174,7 @@ class SpatialCellularProgramsEstimator:
             self.regulators = regulators
             self.grn = None
 
-        self.init_ligands_and_receptors(species=species)
+        self.init_ligands_and_receptors()
         self.lr_pairs = self.lr['pairs']
         
         self.n_clusters = len(self.adata.obs[self.cluster_annot].unique())
@@ -192,7 +189,7 @@ class SpatialCellularProgramsEstimator:
         assert np.isin(self.regulators, self.adata.var_names).all(), 'all regulators must be in adata.var_names'
 
 
-    def plot_modulators(self, use_expression=True, cmap='viridis'):
+    def plot_modulators(self, use_expression=True):
         
         if use_expression:
             # Get mean expression values for each gene
@@ -214,25 +211,46 @@ class SpatialCellularProgramsEstimator:
                 self.tfl_regulators
             )}
 
-        # print(word_freq)
+        # Create colormaps for each gene category
+        ligand_cmap = plt.get_cmap('viridis')
+        receptor_cmap = plt.get_cmap('magma')
+        regulator_cmap = plt.get_cmap('rainbow')
+
+        def my_color_func(word, font_size, position, orientation, font_path, random_state):
+            rnd = random_state.random()  # random float in [0.0, 1.0)
+            if word in set(self.ligands).union(self.tfl_ligands):
+                color = ligand_cmap(rnd)
+                return rgb2hex(color[:3])
+            elif word in set(self.receptors):
+                color = receptor_cmap(rnd)
+                return rgb2hex(color[:3])
+            elif word in set(self.regulators).union(self.tfl_regulators):
+                color = regulator_cmap(rnd)
+                return rgb2hex(color[:3])
+            else:
+                return "grey"
 
         wordcloud = WordCloud(
-            width=800, height=400, colormap=cmap,
-            contour_width=1, contour_color='black',
-            background_color='white').generate_from_frequencies(word_freq)
+            width=800,
+            height=400,
+            contour_width=1,
+            contour_color='black',
+            background_color='white',
+            color_func=my_color_func
+        ).generate_from_frequencies(word_freq)
 
         plt.figure(figsize=(16, 8))
         plt.imshow(wordcloud, interpolation='bilinear', aspect='equal')
         plt.axis('off')
         plt.title(
             f'{self.target_gene} modulators', fontsize=20)
-        plt.tight_layout()
         plt.show()
 
-    def init_ligands_and_receptors(self, receptor_thresh=0.01, species='mouse'):
+
+    def init_ligands_and_receptors(self):
         df_ligrec = ct.pp.ligand_receptor_database(
                 database='CellChat', 
-                species=species, 
+                species=self.species, 
                 signaling_type=None
             )
             
@@ -258,7 +276,7 @@ class SpatialCellularProgramsEstimator:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         data_path = os.path.abspath(
             os.path.join(
-                current_dir, '..', '..', '..', 'data', f'ligand_target_{species}.parquet'))
+                current_dir, '..', '..', '..', 'data', f'ligand_target_{self.species}.parquet'))
         nichenet_lt = pd.read_parquet(data_path)
 
         self.nichenet_lt = nichenet_lt.loc[
@@ -435,23 +453,24 @@ class SpatialCellularProgramsEstimator:
     
     @property
     def betadata(self):
-        betas_df = self.get_betas()
+        return self.get_betas()
 
-        xy = pd.DataFrame(
-            self.adata.obsm['spatial'], 
-            index=self.adata.obs.index, 
-            columns=['x', 'y']
-        )
+        # xy = pd.DataFrame(
+        #     self.adata.obsm['spatial'], 
+        #     index=self.adata.obs.index, 
+        #     columns=['x', 'y']
+        # )
 
-        _data = betas_df \
-            .join(self.adata.obs) \
-            .join(xy)
+        # _data = betas_df \
+        #     .join(self.adata.obs) \
+        #     .join(xy)
         
-        return _data
+        # return _data
 
 
     def fit(self, num_epochs=10, threshold_lambda=1e-4, learning_rate=2e-4, batch_size=512, 
             use_ARD=False, pbar=None, discard=50, use_bayesian=True, score_threshold=0.1):
+        
         sp_maps, X, y, cluster_labels = self.init_data()
 
         self.models = {}
@@ -588,8 +607,11 @@ class SpatialCellularProgramsEstimator:
                 score = r2_score(all_y_true, all_y_pred)
                 if score < score_threshold:
                     model.anchors = model.anchors*0.0
+                    print(f'{cluster}: x.xxxx | {r2:.4f}')
                     
-                print(f'{cluster}: {score:.4f} | {r2:.4f}')
+                  
+                else:
+                    print(f'{cluster}: {score:.4f} | {r2:.4f}')
             
             self.models[cluster] = model
 
