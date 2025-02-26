@@ -1,14 +1,5 @@
 from abc import ABC
-import warnings
-
-from scipy import sparse
-
-from spaceoracle.beta import BetaOutput
-warnings.simplefilter(action='ignore', category=FutureWarning)
-
 import numpy as np
-import sys
-import gc
 import enlighten
 import time
 import pandas as pd
@@ -23,26 +14,21 @@ import pickle
 import io
 import warnings
 from sklearn.decomposition import PCA
-# from sklearn.preprocessing import MinMaxScaler
 import warnings
 from sklearn.linear_model import Ridge
 from sklearn.neighbors import NearestNeighbors
 
 from .tools.network import DayThreeRegulatoryNetwork
 from .tools.knn_smooth import knn_smoothing
-from .beta import Betabase
 from .models.spatial_map import xyc2spatial, xyc2spatial_fast
-from .models.pixel_attention import NicheAttentionNetwork
-from .models.parallel_estimators import SpatialCellularProgramsEstimator, received_ligands
+from .models.parallel_estimators import SpatialCellularProgramsEstimator
 
 from .tools.utils import (
-    CPU_Unpickler,
     clean_up_adata,
     knn_distance_matrix,
     _adata_to_matrix,
     connectivity_to_weights,
     convolve_by_sparse_weights,
-    # min_max_df
     prune_neighbors
 )
 
@@ -154,12 +140,6 @@ class BaseTravLR(ABC):
             adata.layers['imputed_count'] = S.T
 
             
-        
-        
-
-        
-
-
 
 class OracleQueue:
 
@@ -264,8 +244,8 @@ class SpaceTravLR(BaseTravLR):
 
     def __init__(self, adata, save_dir='./models', annot='cell_type_int', grn=None,
     max_epochs=15, spatial_dim=64, learning_rate=3e-4, batch_size=256, rotate_maps=True, 
-    layer='imputed_count', alpha=0.05, test_mode=False,
-    threshold_lambda=3e3, tf_ligand_cutoff=0.01, radius=200):
+    layer='imputed_count', alpha=0.05,
+    threshold_lambda=3e3, tf_ligand_cutoff=0.01, radius=150, contact_distance=30):
         
         super().__init__(adata, fields_to_keep=[annot])
         if grn is None:
@@ -285,11 +265,11 @@ class SpaceTravLR(BaseTravLR):
         self.layer = layer
         self.alpha = alpha
         self.threshold_lambda = threshold_lambda
-        self.test_mode = test_mode
         self.tf_ligand_cutoff = tf_ligand_cutoff
         self.beta_dict = None
         self.coef_matrix = None
         self.radius = radius
+        self.contact_distance = contact_distance
 
         self.estimator_models = {}
         self.ligands = set()
@@ -355,11 +335,12 @@ class SpaceTravLR(BaseTravLR):
                 cluster_annot=self.annot,
                 spatial_dim=self.spatial_dim,
                 radius=self.radius,
+                contact_distance=self.contact_distance,
                 tf_ligand_cutoff=self.tf_ligand_cutoff,
                 grn=self.grn
             )
             
-            estimator.test_mode = self.test_mode
+            estimator.test_mode = False
             
             if len(estimator.regulators) == 0:
                 self.queue.add_orphan(gene)
