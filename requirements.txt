@@ -31,4 +31,5 @@ pqdm
 magic-impute
 wordcloud
 pysankeybeta
+easydict
 # velocyto==0.17.17

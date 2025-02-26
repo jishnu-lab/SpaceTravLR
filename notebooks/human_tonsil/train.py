@@ -25,9 +25,9 @@ star = SpaceTravLR(
     learning_rate=5e-4, 
     spatial_dim=64,
     batch_size=512,
-    test_mode=False,
     grn=co_grn,
-    radius=200,
+    radius=150,
+    contact_distance=30,
     save_dir='/ix/djishnu/shared/djishnu_kor11/super_filtered_runs/human_tonsil_v4'
 )
 
