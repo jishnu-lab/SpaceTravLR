@@ -4,7 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 import commot as ct
 
-from tools.network import expand_paired_interactions
+from .tools.network import expand_paired_interactions
 
 from .models.parallel_estimators import received_ligands
 from .oracles import OracleQueue, BaseTravLR
@@ -116,8 +116,6 @@ class Prophet(BaseTravLR):
             )
             
         self.update_status(f'Ligand interactions - Done')
-        
-            
 
         return betas_dict
 
@@ -234,7 +232,7 @@ class Prophet(BaseTravLR):
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
             if delta_dir:
-                np.save(f'{delta_dir}/{target}_{n_propagation}n_{gene_expr}x.npy', delta_simulated)
+                np.save(f'{delta_dir}/{target}_{n}n_{gene_expr}x.npy', delta_simulated)
 
             # save weighted ligand values to weight betas of next iteration
             weighted_ligands_0 = weighted_ligands_1.copy()
