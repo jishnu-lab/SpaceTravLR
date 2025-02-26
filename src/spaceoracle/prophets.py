@@ -2,22 +2,15 @@
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import json, os 
 import commot as ct
 
-import matplotlib.pyplot as plt
-import seaborn as sns 
-import umap
+from tools.network import expand_paired_interactions
 
 from .models.parallel_estimators import received_ligands
 from .oracles import OracleQueue, BaseTravLR
 from .beta import Betabase
-from .tools.network import expand_paired_interactions
 from .tools.utils import is_mouse_data
 import enlighten
-
-
-
 
 class Prophet(BaseTravLR):
     def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30):
@@ -30,8 +23,6 @@ class Prophet(BaseTravLR):
         self.radius = radius
         self.contact_distance = contact_distance
         self.species = 'mouse' if is_mouse_data(adata) else 'human'
-
-        self.init_ligands_and_receptors()
 
         self.queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
         self.ligands = []
@@ -58,7 +49,6 @@ class Prophet(BaseTravLR):
             columns=['x', 'y']
         )
     
-    def init_ligands_and_receptors(self):
         df_ligrec = ct.pp.ligand_receptor_database(
                 database='CellChat', 
                 species=self.species, 

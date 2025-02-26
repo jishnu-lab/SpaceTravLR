@@ -133,14 +133,112 @@ class RotatedTensorDataset(Dataset):
             torch.from_numpy(np.array(self.y_cell[idx])).float(),
             torch.from_numpy(self.spatial_features[idx]).float()
         )
+      
+  
+from easydict import EasyDict as edict
+
+def init_ligands_and_receptors(
+    species, 
+    adata, 
+    annot,
+    target_gene, 
+    receptor_thresh, 
+    radius, 
+    contact_distance,
+    tf_ligand_cutoff, 
+    regulators,
+    grn):
     
+    
+    ligand_mixtures = edict()
+    
+    df_ligrec = ct.pp.ligand_receptor_database(
+            database='CellChat', 
+            species=species, 
+            signaling_type=None
+        )
+        
+    df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+    
+    lr = expand_paired_interactions(df_ligrec)
+    lr = lr[lr.ligand.isin(adata.var_names) &\
+        (lr.receptor.isin(adata.var_names))]
+    
+    receptors = list(lr.receptor.values)
+    _layer = 'normalized_count' if 'normalized_count' in adata.layers else 'imputed_count'
+    
+    receptor_levels = adata.to_df(layer=_layer)[np.unique(receptors)].join(
+        adata.obs[annot]).groupby(annot).mean().max(0).to_frame()
+    receptor_levels.columns = ['mean_max']
+    
+    lr = lr[lr.receptor.isin(
+        receptor_levels.index[receptor_levels['mean_max'] > receptor_thresh])]
+    
+    lr['radius'] = np.where(
+        lr['signaling'] == 'Secreted Signaling', 
+        radius, contact_distance
+    )
+
+
+    lr = lr[~((lr.receptor == target_gene) | (lr.ligand == target_gene))]
+    lr['pairs'] = lr.ligand.values + '$' + lr.receptor.values
+    lr = lr.drop_duplicates(subset='pairs', keep='first')
+    ligands = list(lr.ligand.values)
+    receptors = list(lr.receptor.values)
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.abspath(
+        os.path.join(
+            current_dir, '..', '..', '..', 'data', f'ligand_target_{species}.parquet'))
+    nichenet_lt = pd.read_parquet(data_path)
+
+    nichenet_lt = nichenet_lt.loc[
+        np.intersect1d(nichenet_lt.index, regulators)][
+            np.intersect1d(nichenet_lt.columns, ligands)]
+    
+    tfl_pairs = []
+    tfl_regulators = []
+    tfl_ligands = []
+
+    if grn is not None:
+        ligand_regulators = {lig: set(
+            grn.get_regulators(adata, lig)) for lig in nichenet_lt.columns}
+    else:
+        from collections import defaultdict
+        ligand_regulators = defaultdict(list)
+
+    for tf_ in nichenet_lt.index:
+        row = nichenet_lt.loc[tf_]
+        top_5 = row.nlargest(5)
+        for lig_, value in top_5.items():
+            if target_gene not in ligand_regulators[lig_] and \
+                tf_ not in ligand_regulators[lig_] and \
+                value > tf_ligand_cutoff:
+                tfl_ligands.append(lig_)
+                tfl_regulators.append(tf_)
+                tfl_pairs.append(f"{lig_}#{tf_}")
+
+
+    assert len(ligands) == len(receptors)
+    assert len(tfl_regulators) == len(tfl_ligands)
+
+    ligand_mixtures.lr = lr
+    ligand_mixtures.ligands = ligands
+    ligand_mixtures.receptors = receptors
+    ligand_mixtures.tfl_pairs = tfl_pairs
+    ligand_mixtures.tfl_regulators = tfl_regulators
+    ligand_mixtures.tfl_ligands = tfl_ligands
+
+    return ligand_mixtures
+
+
 
 
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
             radius=200, contact_distance=50, 
-            tf_ligand_cutoff=0.01, 
+            tf_ligand_cutoff=0.01, receptor_thresh=0.1,
             regulators=None, grn=None, colinks_path=None):
         
 
@@ -162,6 +260,7 @@ class SpatialCellularProgramsEstimator:
         self.contact_distance = contact_distance
         self.spatial_dim = spatial_dim
         self.tf_ligand_cutoff = tf_ligand_cutoff
+        self.receptor_thresh = receptor_thresh
         self.xy = pd.DataFrame(
             adata.obsm['spatial'], 
             index=adata.obs.index, 
@@ -183,8 +282,30 @@ class SpatialCellularProgramsEstimator:
             self.regulators = regulators
             self.grn = None
 
-        self.init_ligands_and_receptors()
+        # self.init_ligands_and_receptors()
+        
+        ligand_mixtures = init_ligands_and_receptors(
+            species=self.species,
+            adata=self.adata,
+            annot=self.cluster_annot,
+            target_gene=self.target_gene,
+            receptor_thresh=self.receptor_thresh,
+            radius=self.radius,
+            contact_distance=self.contact_distance,
+            tf_ligand_cutoff=self.tf_ligand_cutoff,
+            regulators=self.regulators,
+            grn=self.grn,
+        )
+        
+        self.lr = ligand_mixtures.lr
+        self.ligands = ligand_mixtures.ligands
+        self.receptors = ligand_mixtures.receptors
+        self.tfl_pairs = ligand_mixtures.tfl_pairs
+        self.tfl_regulators = ligand_mixtures.tfl_regulators
+        self.tfl_ligands = ligand_mixtures.tfl_ligands
+        
         self.lr_pairs = self.lr['pairs']
+        
         
         self.n_clusters = len(self.adata.obs[self.cluster_annot].unique())
         self.modulators = self.regulators + list(self.lr_pairs) + self.tfl_pairs
@@ -266,15 +387,22 @@ class SpatialCellularProgramsEstimator:
         df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
         
         self.lr = expand_paired_interactions(df_ligrec)
-        self.lr = self.lr[self.lr.ligand.isin(self.adata.var_names) & (self.lr.receptor.isin(self.adata.var_names))]
+        self.lr = self.lr[self.lr.ligand.isin(self.adata.var_names) &\
+            (self.lr.receptor.isin(self.adata.var_names))]
+        
+        _receptors = np.unique(self.lr.receptor.values)
+        _layer = 'normalized_count' if 'normalized_count' in self.adata.layers else 'imputed_count'
+        receptor_levels = self.adata.to_df(layer=_layer)[np.unique(_receptors)].join(
+            self.adata.obs[self.cluster_annot]).groupby(self.cluster_annot).mean().max(0).to_frame()
+        receptor_levels.columns = ['mean_max']
+        
+        self.lr = self.lr[self.lr.receptor.isin(
+            receptor_levels.index[receptor_levels['mean_max'] > self.receptor_thresh])]
+        
         self.lr['radius'] = np.where(
             self.lr['signaling'] == 'Secreted Signaling', 
             self.radius, self.contact_distance
         )
-
-        # receptors = self.lr['receptor']
-        # recex_means = np.mean(self.adata.to_df()[receptors], axis=0)
-        # self.lr = self.lr.iloc[np.argwhere(recex_means > receptor_thresh).flatten()]
 
         self.lr = self.lr[~((self.lr.receptor == self.target_gene) | (self.lr.ligand == self.target_gene))]
         self.lr['pairs'] = self.lr.ligand.values + '$' + self.lr.receptor.values
@@ -477,8 +605,9 @@ class SpatialCellularProgramsEstimator:
         # return _data
 
 
-    def fit(self, num_epochs=10, threshold_lambda=1e-4, learning_rate=2e-4, batch_size=512, 
-            use_ARD=False, pbar=None, discard=50, use_bayesian=True, score_threshold=0.1):
+    def fit(self, num_epochs=10, threshold_lambda=1e-4, learning_rate=5e-3, batch_size=512, 
+            use_ARD=False, pbar=None, discard=50, use_bayesian=True, 
+            score_threshold=0.1, coef_filter=0.001):
         
         sp_maps, X, y, cluster_labels = self.init_data()
 
@@ -521,7 +650,8 @@ class SpatialCellularProgramsEstimator:
                 m.fit(X_cell, y_cell)
                 y_pred = m.predict(X_cell)
                 r2 = r2_score(y_cell, y_pred)
-                _betas = np.hstack([m.intercept_, m.coef_])
+                coef_ = np.where(np.abs(m.coef_) < coef_filter, 0, m.coef_)
+                _betas = np.hstack([m.intercept_, coef_])
 
             else:
 
@@ -556,7 +686,7 @@ class SpatialCellularProgramsEstimator:
                 tf_coefs = threshold_coefficients(coefs, group=1, discard=discard)
                 lr_coefs = threshold_coefficients(coefs, group=2, discard=discard)
                 tfl_coefs = threshold_coefficients(coefs, group=3, discard=discard)
-
+                
                 _betas = np.hstack([gl.intercept_, tf_coefs, lr_coefs, tfl_coefs])
 
                 r2 = r2_score(y_cell, y_pred)
