@@ -9,8 +9,6 @@ import warnings
 import numpy as np
 from torch.utils.data import Dataset
 from ..models.spatial_map import xyc2spatial_fast
-from .network import DayThreeRegulatoryNetwork, GeneRegulatoryNetwork
-from ..tools.utils import deprecated, gaussian_kernel_2d
 import torch
 import pandas as pd
 import os

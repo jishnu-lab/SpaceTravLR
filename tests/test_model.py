@@ -141,7 +141,8 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
     
     @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
     @patch('spaceoracle.models.parallel_estimators.ct')
-    def test_init_ligands_and_receptors(self, mock_ct):
+    @patch('spaceoracle.models.parallel_estimators.init_ligands_and_receptors')
+    def test_init_ligands_and_receptors(self, mock_init_ligands, mock_ct):
         """Test the initialization of ligands and receptors."""
         # Mock the CellChat database
         mock_df_ligrec = pd.DataFrame({
@@ -152,36 +153,32 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
         })
         mock_ct.pp.ligand_receptor_database.return_value = mock_df_ligrec
         
-        # Create a custom estimator class for testing
-        class TestEstimator(SpatialCellularProgramsEstimator):
-            def init_ligands_and_receptors(self, species='mouse'):
-                self.regulators = ['TF1', 'TF2', 'TF3']
-                self.ligands = ['ligand1', 'ligand2']
-                self.receptors = ['receptor1', 'receptor2']
-                self.tfl_ligands = ['ligand1']
-                self.tfl_regulators = ['TF1']
-                # Set the lr attribute that the parent class expects
-                self.lr = {
-                    'pairs': [('ligand1', 'receptor1'), ('ligand2', 'receptor2')]
-                }
-                self.lr_pairs = self.lr['pairs']
-                self.tfl_pairs = [('TF1', 'ligand1')]
-                self.modulators = self.regulators + self.lr_pairs + self.tfl_pairs
+        # Create a mock return value for init_ligands_and_receptors
+        from easydict import EasyDict as edict
+        mock_ligand_mixtures = edict()
+        mock_ligand_mixtures.lr = {'pairs': [('ligand1', 'receptor1'), ('ligand2', 'receptor2')]}
+        mock_ligand_mixtures.ligands = ['ligand1', 'ligand2']
+        mock_ligand_mixtures.receptors = ['receptor1', 'receptor2']
+        mock_ligand_mixtures.tfl_pairs = [('TF1', 'ligand1')]
+        mock_ligand_mixtures.tfl_regulators = ['TF1']
+        mock_ligand_mixtures.tfl_ligands = ['ligand1']
         
-        # Create the test estimator
-        estimator = TestEstimator(
+        mock_init_ligands.return_value = mock_ligand_mixtures
+        
+        # Create the estimator
+        estimator = SpatialCellularProgramsEstimator(
             adata=self.adata,
             target_gene='target_gene',
             cluster_annot='rctd_cluster',
             layer='imputed_count',
             radius=200,
             contact_distance=50,
-            tf_ligand_cutoff=0.01,
+            tf_ligand_cutoff=0.1,
             colinks_path='dummy_path'
         )
         
         # Test that the ligands and receptors are initialized correctly
-        self.assertEqual(estimator.regulators, ['TF1', 'TF2', 'TF3'])
+        self.assertEqual(estimator.regulators, ['TF1', 'TF2', 'TF3'])  # This comes from MockRegulatoryFactory
         self.assertEqual(estimator.ligands, ['ligand1', 'ligand2'])
         self.assertEqual(estimator.receptors, ['receptor1', 'receptor2'])
         self.assertEqual(estimator.tfl_ligands, ['ligand1'])
