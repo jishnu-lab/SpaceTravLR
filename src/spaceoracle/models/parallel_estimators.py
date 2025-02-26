@@ -605,9 +605,9 @@ class SpatialCellularProgramsEstimator:
         # return _data
 
 
-    def fit(self, num_epochs=10, threshold_lambda=1e-4, learning_rate=5e-3, batch_size=512, 
+    def fit(self, num_epochs=100, threshold_lambda=1e-4, learning_rate=5e-3, batch_size=512, 
             use_ARD=False, pbar=None, discard=50, use_bayesian=True, 
-            score_threshold=0.1, coef_filter=0.001):
+            score_threshold=0.1, coef_filter=0.0):
         
         sp_maps, X, y, cluster_labels = self.init_data()
 
