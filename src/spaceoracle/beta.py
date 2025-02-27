@@ -73,10 +73,10 @@ class BetaFrame(pd.DataFrame):
         
         self._all_ligands = np.unique(list(self.ligands) + list(self.tfl_ligands))
 
-        self.df_lr_columns = [f'beta_{r}' for r in self.receptors]+ \
-            [f'beta_{l}' for l in self.ligands]
-        self.df_tfl_columns = [f'beta_{r}' for r in self.tfl_regulators]+ \
-            [f'beta_{l}' for l in self.tfl_ligands]
+        # self.df_lr_columns = [f'beta_{r}' for r in self.receptors]+ \
+        #     [f'beta_{l}' for l in self.ligands]
+        # self.df_tfl_columns = [f'beta_{r}' for r in self.tfl_regulators]+ \
+        #     [f'beta_{l}' for l in self.tfl_ligands]
         self.tf_columns = [f'beta_{t}' for t in self.tfs]
 
         self.lr_pairs = [pair.split('$') for pair in self.lr_pairs]
@@ -92,20 +92,50 @@ class BetaFrame(pd.DataFrame):
         ##         = b2*R1 + b3*R2
         ## dy/dR1 = b2*[wL1 + R1*dwL1/dR1] = b2*wL1
         
+                
+        lr_betas = self[[beta for beta in self.columns if '$' in beta]]
+        tfl_betas = self[[beta for beta in self.columns if '#' in beta]]
 
-        _df = pd.DataFrame(
-            np.concatenate([
-                self[self.tf_columns].to_numpy(),
-                self[[f'beta_{a}${b}' for a, b in zip(self.ligands, self.receptors)]*2].to_numpy() * \
-                    rw_ligands[self.ligands].join(gex_df[self.receptors]).to_numpy(),
-                self[[f'beta_{a}#{b}' for a, b in zip(self.tfl_ligands, self.tfl_regulators)]*2].to_numpy() * \
-                    rw_ligands[self.tfl_ligands].join(gex_df[self.tfl_regulators]).to_numpy()
-            ], axis=1),
+        rec_derivatives = pd.DataFrame(
+            lr_betas.values * rw_ligands[self.ligands].values, 
+            index=self.index, 
+            columns=self.receptors)
+
+        lig_lr_derivatives = pd.DataFrame(
+            lr_betas.values * gex_df[self.receptors].values, 
+            index=self.index, 
+            columns=self.ligands)
+
+        lig_tfl_derivatives = pd.DataFrame(
+            tfl_betas.values * gex_df[self.tfl_regulators].values, 
+            index=self.index, 
+            columns=self.tfl_ligands)
+
+        tf_derivatives = pd.DataFrame(
+            self[self.tf_columns].values,
             index=self.index,
-            columns=self.tf_columns + self.df_lr_columns + self.df_tfl_columns
-        ).groupby(lambda x: x, axis=1).sum()
+            columns=self.tfs
+        )
 
+        tf_tfl_derivatives = pd.DataFrame(
+            tfl_betas.values * rw_ligands[self.tfl_ligands].values,
+            index=self.index,
+            columns=self.tfl_regulators
+        )
+
+        _df = pd.concat(
+            [
+                rec_derivatives, 
+                lig_lr_derivatives, 
+                lig_tfl_derivatives,
+                tf_derivatives,
+                tf_tfl_derivatives
+            ], axis=1).groupby(lambda x: x, axis=1).sum()
+
+        _df.columns = 'beta_' + _df.columns.astype(str)
         return _df[self.modulators_genes]
+
+
         
     def _repr_html_(self):
         info = f"BetaFrame with {len(self.modulators_genes)} modulator genes<br>"
