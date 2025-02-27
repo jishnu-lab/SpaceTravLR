@@ -5,26 +5,30 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 import scanpy as sc
 from spaceoracle import SpaceTravLR
 
-from spaceoracle.tools.network import HumanTonsilRegulatoryNetwork
-co_grn = HumanTonsilRegulatoryNetwork()
+from spaceoracle.tools.network import RegulatoryFactory
 
-adata_train = sc.read_h5ad(
-    '/ix/djishnu/shared/djishnu_kor11/training_data/snrna_human_tonsil.h5ad')
 
-print(adata_train)
+co_grn = RegulatoryFactory(
+    colinks_path='/ix/djishnu/shared/djishnu_kor11/training_data_2025/mouse_kidney_13_colinks.pkl',
+    annot='cell_type_int'
+)
+
+adata = sc.read_h5ad(
+    '/ix/djishnu/shared/djishnu_kor11/training_data_2025/mouse_kidney_13.h5ad')
+
+print(adata)
 
 star = SpaceTravLR(
-    adata=adata_train,
+    adata=adata,
     annot='cell_type_int', 
-    max_epochs=200, 
+    max_epochs=100, 
     learning_rate=5e-4, 
     spatial_dim=64,
     batch_size=512,
-    threshold_lambda=1e-8,
-    test_mode=False,
     grn=co_grn,
-    species='human',
-    save_dir='/ix/djishnu/shared/djishnu_kor11/models_snrna_human_tonsil_v2'
+    radius=150,
+    contact_distance=30,
+    save_dir='/ix/djishnu/shared/djishnu_kor11/super_filtered_runs/mouse_kidney_13'
 )
 
 star.run()
