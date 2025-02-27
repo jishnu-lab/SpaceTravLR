@@ -376,7 +376,7 @@ class SpaceTravLR(BaseTravLR):
             train_bar.start = time.time()
 
     @staticmethod
-    def imbue_adata_with_space(adata, annot='rctd_cluster', spatial_dim=64, in_place=False, method='fast'):
+    def imbue_adata_with_space(adata, annot='cell_type_int', spatial_dim=64, in_place=False, method='fast'):
         clusters = np.array(adata.obs[annot])
         xy = np.array(adata.obsm['spatial'])
 
@@ -410,70 +410,70 @@ class SpaceTravLR(BaseTravLR):
 
     # This is incorrect, needs to be cluster specific
     # Load links from CO trained model
-    def _get_co_betas(self, alpha=1):
+    # def _get_co_betas(self, alpha=1):
 
-        gem = self.adata.to_df(layer='imputed_count')
-        genes = self.adata.var_names
+    #     gem = self.adata.to_df(layer='imputed_count')
+    #     genes = self.adata.var_names
         
-        zero_ = pd.Series(np.zeros(len(genes)), index=genes)
+    #     zero_ = pd.Series(np.zeros(len(genes)), index=genes)
 
-        def get_coef(target_gene):
-            tmp = zero_.copy()
+    #     def get_coef(target_gene):
+    #         tmp = zero_.copy()
 
-            reggenes = self.grn.get_regulators(self.adata, target_gene)
+    #         reggenes = self.grn.get_regulators(self.adata, target_gene)
 
-            if target_gene in reggenes:
-                reggenes.remove(target_gene)
-            if len(reggenes) == 0 :
-                tmp[target_gene] = 0
-                return(tmp)
+    #         if target_gene in reggenes:
+    #             reggenes.remove(target_gene)
+    #         if len(reggenes) == 0 :
+    #             tmp[target_gene] = 0
+    #             return(tmp)
             
-            Data = gem[reggenes]
-            Label = gem[target_gene]
-            model = Ridge(alpha=alpha, random_state=123)
-            model.fit(Data, Label)
-            tmp[reggenes] = model.coef_
+    #         Data = gem[reggenes]
+    #         Label = gem[target_gene]
+    #         model = Ridge(alpha=alpha, random_state=123)
+    #         model.fit(Data, Label)
+    #         tmp[reggenes] = model.coef_
 
-            return tmp
+    #         return tmp
 
-        li = []
-        li_calculated = []
-        with tqdm(genes) as pbar:
-            for i in pbar:
-                if not i in self.queue.completed_genes:
-                    tmp = zero_.copy()
-                    tmp[i] = 0
-                else:
-                    tmp = get_coef(i)
-                    li_calculated.append(i)
-                li.append(tmp)
-        coef_matrix = pd.concat(li, axis=1)
-        coef_matrix.columns = genes
+    #     li = []
+    #     li_calculated = []
+    #     with tqdm(genes) as pbar:
+    #         for i in pbar:
+    #             if not i in self.queue.completed_genes:
+    #                 tmp = zero_.copy()
+    #                 tmp[i] = 0
+    #             else:
+    #                 tmp = get_coef(i)
+    #                 li_calculated.append(i)
+    #             li.append(tmp)
+    #     coef_matrix = pd.concat(li, axis=1)
+    #     coef_matrix.columns = genes
 
-        return coef_matrix
+    #     return coef_matrix
 
 
-    def perturb_via_celloracle(self, gene_mtx, target, n_propagation=3):
+    # def perturb_via_celloracle(self, gene_mtx, target, n_propagation=3):
         
-        target_index = self.gene2index[target]  
-        simulation_input = gene_mtx.copy()
+    #     target_index = self.gene2index[target]  
+    #     simulation_input = gene_mtx.copy()
 
-        simulation_input[target] = 0 # ko target gene
-        delta_input = simulation_input - gene_mtx # get delta X
-        delta_simulated = delta_input.copy() 
+    #     simulation_input[target] = 0 # ko target gene
+    #     delta_input = simulation_input - gene_mtx # get delta X
+    #     delta_simulated = delta_input.copy() 
 
-        if self.coef_matrix is None:
-            self.coef_matrix = self._get_co_betas()
+    #     if self.coef_matrix is None:
+    #         self.coef_matrix = self._get_co_betas()
         
-        for i in range(n_propagation):
-            delta_simulated = delta_simulated.dot(self.coef_matrix)
-            delta_simulated[delta_input != 0] = delta_input
-            gem_tmp = gene_mtx + delta_simulated
-            gem_tmp[gem_tmp<0] = 0
-            delta_simulated = gem_tmp - gene_mtx
+    #     for i in range(n_propagation):
+    #         delta_simulated = delta_simulated.dot(self.coef_matrix)
+    #         delta_simulated[delta_input != 0] = delta_input
+    #         gem_tmp = gene_mtx + delta_simulated
+    #         gem_tmp[gem_tmp<0] = 0
+    #         delta_simulated = gem_tmp - gene_mtx
 
-        gem_simulated = gene_mtx + delta_simulated
+    #     gem_simulated = gene_mtx + delta_simulated
 
-        return gem_simulated
+    #     return gem_simulated
 
 
