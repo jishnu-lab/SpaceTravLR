@@ -212,7 +212,6 @@ class Prophet(BaseTravLR):
             
             delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
 
-
             if not use_optimized:
                 _simulated = np.array(
                     [self._perturb_single_cell(delta_simulated, i, beta_dict) 
@@ -223,12 +222,17 @@ class Prophet(BaseTravLR):
                 _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
             
             delta_simulated = np.array(_simulated)
+            assert not np.isnan(delta_simulated).any(), "NaN values found in delta_simulated"
             
             # ensure values in delta_simulated match our desired KO / input
             delta_simulated = np.where(delta_input != 0, delta_input, delta_simulated)
 
+            # Don't allow simulated to exceed observed values
             gem_tmp = gene_mtx + delta_simulated
-            gem_tmp[gem_tmp<0] = 0
+            min_ = 0
+            max_ = gene_mtx.max(axis=0) * 1.5
+            gem_tmp = pd.DataFrame(gem_tmp).clip(lower=min_, upper=max_, axis=1).values
+
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
             if delta_dir:
@@ -238,16 +242,8 @@ class Prophet(BaseTravLR):
             weighted_ligands_0 = weighted_ligands_1.copy()
 
 
-
         gem_simulated = gene_mtx + delta_simulated
-        
         assert gem_simulated.shape == gene_mtx.shape
-
-        # Don't allow simulated to exceed observed values
-        imputed_count = gene_mtx
-        min_ = 0
-        max_ = imputed_count.max(axis=0) * 1.5
-        gem_simulated = pd.DataFrame(gem_simulated).clip(lower=min_, upper=max_, axis=1).values
 
         # Force the gene_expr value for the target gene again
         if cells is None:
