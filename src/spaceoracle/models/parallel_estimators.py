@@ -81,9 +81,9 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
 
     return full_df
 
-def get_ligands_df(counts_df, cell_thresholds=None, ligands=None):
-    '''Get filtered expression of ligands based on celltype/ thresholds'''
-    ligand_counts = counts_df[np.unique(ligands)]
+def get_filtered_df(counts_df, cell_thresholds=None, genes=None):
+    '''Get filtered expression of ligands/ receptors based on celltype/ thresholds'''
+    ligand_counts = counts_df[np.unique(genes)]
 
     if cell_thresholds is None:
         return ligand_counts
@@ -501,13 +501,13 @@ class SpatialCellularProgramsEstimator:
 
             self.adata.uns['received_ligands'] = received_ligands(
                 self.adata.obsm['spatial'], 
-                get_ligands_df(counts_df, cell_thresholds, self.ligands),
+                get_filtered_df(counts_df, cell_thresholds, self.ligands),
                 lr_info=self.lr 
             )
 
             self.adata.uns['ligand_receptor'] = self.ligands_receptors_interactions(
                 self.adata.uns['received_ligands'][self.ligands], 
-                self.adata.to_df(layer=self.layer)[self.receptors]
+                get_filtered_df(counts_df, cell_thresholds, self.receptors)
             )
 
         else:
@@ -519,7 +519,7 @@ class SpatialCellularProgramsEstimator:
             
             self.adata.uns['received_ligands_tfl'] = received_ligands(
                 self.adata.obsm['spatial'], 
-                get_ligands_df(counts_df, cell_thresholds, self.tfl_ligands),
+                get_filtered_df(counts_df, cell_thresholds, self.tfl_ligands),
                 lr_info=self.lr      
             )
 
