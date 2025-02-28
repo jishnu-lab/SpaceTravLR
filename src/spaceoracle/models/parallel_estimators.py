@@ -84,7 +84,7 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
 def get_ligands_df(counts_df, cell_thresholds=None, ligands=None):
     '''Get filtered expression of ligands based on celltype/ thresholds'''
     ligand_counts = counts_df[np.unique(ligands)]
-    
+
     if cell_thresholds is None:
         return ligand_counts
     
@@ -495,7 +495,7 @@ class SpatialCellularProgramsEstimator:
     def init_data(self):
 
         counts_df = self.adata.to_df(layer=self.layer)
-        cell_thresholds = self.adata.obs['cell_thresholds']
+        cell_thresholds = self.adata.obs.get('cell_thresholds', np.zeros(len(self.adata.obs)))
 
         if len(self.lr['pairs']) > 0:
 
