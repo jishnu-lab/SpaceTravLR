@@ -88,8 +88,10 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None):
     if cell_thresholds is None:
         return ligand_counts
     
-    mask = ligand_counts.values - np.array(cell_thresholds).reshape(-1, 1)
-    mask = (mask > 0).astype(int)
+    # mask = ligand_counts.values - np.array(cell_thresholds).reshape(-1, 1)
+    # mask = (mask > 0).astype(int)
+    mask = cell_thresholds.reindex(ligand_counts.columns, axis=1).fillna(0).values
+    mask = np.where(mask > 0, 1, 0)
     return mask * ligand_counts
 
 def create_spatial_features(x, y, celltypes, obs_index, radius=200):
@@ -495,7 +497,7 @@ class SpatialCellularProgramsEstimator:
     def init_data(self):
 
         counts_df = self.adata.to_df(layer=self.layer)
-        cell_thresholds = self.adata.obs.get('cell_thresholds', np.zeros(len(self.adata.obs)))
+        cell_thresholds = self.adata.uns.get('cell_thresholds', None)
 
         if len(self.lr['pairs']) > 0:
 
@@ -507,7 +509,7 @@ class SpatialCellularProgramsEstimator:
 
             self.adata.uns['ligand_receptor'] = self.ligands_receptors_interactions(
                 self.adata.uns['received_ligands'][self.ligands], 
-                get_filtered_df(counts_df, cell_thresholds, self.receptors)
+                get_filtered_df(counts_df, cell_thresholds, self.receptors)[self.receptors]
             )
 
         else:
