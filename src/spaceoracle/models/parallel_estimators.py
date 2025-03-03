@@ -521,7 +521,7 @@ class SpatialCellularProgramsEstimator:
             
             self.adata.uns['received_ligands_tfl'] = received_ligands(
                 self.adata.obsm['spatial'], 
-                get_filtered_df(counts_df, cell_thresholds, self.tfl_ligands),
+                get_filtered_df(counts_df, None, self.tfl_ligands), # Only Commot LRs should be filtered
                 lr_info=self.lr      
             )
 
