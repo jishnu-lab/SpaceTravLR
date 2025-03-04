@@ -89,14 +89,16 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
         mask = np.where(ligand_counts > min_expression, 1, 0)
         ligand_counts = ligand_counts * mask
 
-    if cell_thresholds is None:
-        return ligand_counts
+    if cell_thresholds is not None:
     
-    # mask = ligand_counts.values - np.array(cell_thresholds).reshape(-1, 1)
-    # mask = (mask > 0).astype(int)
-    mask = cell_thresholds.reindex(ligand_counts.columns, axis=1).fillna(0).values
-    mask = np.where(mask > 0, 1, 0)
-    return mask * ligand_counts
+        # mask = ligand_counts.values - np.array(cell_thresholds).reshape(-1, 1)
+        # mask = (mask > 0).astype(int)
+        mask = cell_thresholds.reindex(ligand_counts.columns, axis=1).fillna(0).values
+        mask = np.where(mask > 0, 1, 0)
+        ligand_counts = mask * ligand_counts
+
+    # return ligand_counts.reindex(genes, axis=1)
+    return ligand_counts
 
 def create_spatial_features(x, y, celltypes, obs_index, radius=200):
     coords = np.column_stack((x, y))
@@ -463,6 +465,7 @@ class SpatialCellularProgramsEstimator:
         
     @staticmethod
     def ligands_receptors_interactions(received_ligands_df, receptor_gex_df):
+
         assert isinstance(received_ligands_df, pd.DataFrame)
         assert isinstance(receptor_gex_df, pd.DataFrame)
         assert received_ligands_df.index.equals(receptor_gex_df.index)    
@@ -502,6 +505,9 @@ class SpatialCellularProgramsEstimator:
 
         counts_df = self.adata.to_df(layer=self.layer)
         cell_thresholds = self.adata.uns.get('cell_thresholds', None)
+
+        if cell_thresholds is None:
+            print('warning: cell_thresholds not found in adata.uns')
 
         if len(self.lr['pairs']) > 0:
 
