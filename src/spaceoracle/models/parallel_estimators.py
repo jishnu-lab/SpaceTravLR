@@ -38,27 +38,26 @@ def calculate_weighted_ligands(gauss_weights, lig_df_values, u_ligands):
     
     return weighted_ligands
 
+def compute_radius_weights(xy, lig_df, radius, scale_factor):
+    ligands = lig_df.columns
+    gauss_weights = [
+        scale_factor * gaussian_kernel_2d(
+            xy[i], 
+            xy, 
+            radius=radius) for i in range(len(lig_df))
+    ]
+    u_ligands = list(np.unique(ligands))
+    lig_df_values = lig_df[u_ligands].values
+    weighted_ligands = calculate_weighted_ligands(
+        gauss_weights, lig_df_values, u_ligands)
+
+    return pd.DataFrame(
+        weighted_ligands, 
+        index=u_ligands, 
+        columns=lig_df.index
+    ).T
+
 def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
-
-    def compute_ligands_half(lig_df, radius):
-
-        ligands = lig_df.columns
-        gauss_weights = [
-            scale_factor * gaussian_kernel_2d(
-                xy[i], 
-                xy, 
-                radius=radius) for i in range(len(lig_df))
-        ]
-        u_ligands = list(np.unique(ligands))
-        lig_df_values = lig_df[u_ligands].values
-        weighted_ligands = calculate_weighted_ligands(
-            gauss_weights, lig_df_values, u_ligands)
-
-        return pd.DataFrame(
-            weighted_ligands, 
-            index=u_ligands, 
-            columns=lig_df.index
-        ).T
 
     lr_info = lr_info.copy()
     lr_info = lr_info[lr_info['ligand'].isin(np.unique(ligands_df.columns))]
@@ -67,21 +66,41 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
             lr_info['ligand'].isin(np.unique(ligands_df.columns))
         ].drop_duplicates(subset='ligand', keep='first')   
     
-    
     full_df = []
 
     for radius in lr_info['radius'].unique():
         radius_ligands = lr_info[lr_info['radius'] == radius]['ligand'].values
-        full_df.append(compute_ligands_half(ligands_df[radius_ligands], radius))
+        full_df.append(
+            compute_radius_weights(
+                xy, ligands_df[radius_ligands], radius, scale_factor
+            )
+        )
         
-
     full_df = pd.concat([df for df in full_df if not df.empty], axis=1)
     full_df = full_df.loc[ligands_df.index, ligands_df.columns]
 
     return full_df
 
+def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=1e-5):
+    '''Get filtered expression of ligands/ receptors based on celltype/ thresholds'''
+    ligand_counts = counts_df[np.unique(genes)]
 
-def create_spatial_features(x, y, celltypes, obs_index,radius=200):
+    if min_expression > 0:
+        mask = np.where(ligand_counts > min_expression, 1, 0)
+        ligand_counts = ligand_counts * mask
+
+    if cell_thresholds is not None:
+    
+        # mask = ligand_counts.values - np.array(cell_thresholds).reshape(-1, 1)
+        # mask = (mask > 0).astype(int)
+        mask = cell_thresholds.reindex(ligand_counts.columns, axis=1).fillna(0).values
+        mask = np.where(mask > 0, 1, 0)
+        ligand_counts = mask * ligand_counts
+
+    # return ligand_counts.reindex(genes, axis=1)
+    return ligand_counts
+
+def create_spatial_features(x, y, celltypes, obs_index, radius=200):
     coords = np.column_stack((x, y))
     unique_celltypes = np.unique(celltypes)
     result = np.zeros((len(x), len(unique_celltypes)))
@@ -232,8 +251,6 @@ def init_ligands_and_receptors(
     return ligand_mixtures
 
 
-
-
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
@@ -377,77 +394,78 @@ class SpatialCellularProgramsEstimator:
         plt.show()
 
 
-    def init_ligands_and_receptors(self):
-        df_ligrec = ct.pp.ligand_receptor_database(
-                database='CellChat', 
-                species=self.species, 
-                signaling_type=None
-            )
+    # def init_ligands_and_receptors(self):
+    #     df_ligrec = ct.pp.ligand_receptor_database(
+    #             database='CellChat', 
+    #             species=self.species, 
+    #             signaling_type=None
+    #         )
             
-        df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+    #     df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
         
-        self.lr = expand_paired_interactions(df_ligrec)
-        self.lr = self.lr[self.lr.ligand.isin(self.adata.var_names) &\
-            (self.lr.receptor.isin(self.adata.var_names))]
+    #     self.lr = expand_paired_interactions(df_ligrec)
+    #     self.lr = self.lr[self.lr.ligand.isin(self.adata.var_names) &\
+    #         (self.lr.receptor.isin(self.adata.var_names))]
         
-        _receptors = np.unique(self.lr.receptor.values)
-        _layer = 'normalized_count' if 'normalized_count' in self.adata.layers else 'imputed_count'
-        receptor_levels = self.adata.to_df(layer=_layer)[np.unique(_receptors)].join(
-            self.adata.obs[self.cluster_annot]).groupby(self.cluster_annot).mean().max(0).to_frame()
-        receptor_levels.columns = ['mean_max']
+    #     _receptors = np.unique(self.lr.receptor.values)
+    #     _layer = 'normalized_count' if 'normalized_count' in self.adata.layers else 'imputed_count'
+    #     receptor_levels = self.adata.to_df(layer=_layer)[np.unique(_receptors)].join(
+    #         self.adata.obs[self.cluster_annot]).groupby(self.cluster_annot).mean().max(0).to_frame()
+    #     receptor_levels.columns = ['mean_max']
         
-        self.lr = self.lr[self.lr.receptor.isin(
-            receptor_levels.index[receptor_levels['mean_max'] > self.receptor_thresh])]
+    #     self.lr = self.lr[self.lr.receptor.isin(
+    #         receptor_levels.index[receptor_levels['mean_max'] > self.receptor_thresh])]
         
-        self.lr['radius'] = np.where(
-            self.lr['signaling'] == 'Secreted Signaling', 
-            self.radius, self.contact_distance
-        )
+    #     self.lr['radius'] = np.where(
+    #         self.lr['signaling'] == 'Secreted Signaling', 
+    #         self.radius, self.contact_distance
+    #     )
 
-        self.lr = self.lr[~((self.lr.receptor == self.target_gene) | (self.lr.ligand == self.target_gene))]
-        self.lr['pairs'] = self.lr.ligand.values + '$' + self.lr.receptor.values
-        self.lr = self.lr.drop_duplicates(subset='pairs', keep='first')
-        self.ligands = list(self.lr.ligand.values)
-        self.receptors = list(self.lr.receptor.values)
+    #     self.lr = self.lr[~((self.lr.receptor == self.target_gene) | (self.lr.ligand == self.target_gene))]
+    #     self.lr['pairs'] = self.lr.ligand.values + '$' + self.lr.receptor.values
+    #     self.lr = self.lr.drop_duplicates(subset='pairs', keep='first')
+    #     self.ligands = list(self.lr.ligand.values)
+    #     self.receptors = list(self.lr.receptor.values)
 
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        data_path = os.path.abspath(
-            os.path.join(
-                current_dir, '..', '..', '..', 'data', f'ligand_target_{self.species}.parquet'))
-        nichenet_lt = pd.read_parquet(data_path)
+    #     current_dir = os.path.dirname(os.path.abspath(__file__))
+    #     data_path = os.path.abspath(
+    #         os.path.join(
+    #             current_dir, '..', '..', '..', 'data', f'ligand_target_{self.species}.parquet'))
+    #     nichenet_lt = pd.read_parquet(data_path)
 
-        self.nichenet_lt = nichenet_lt.loc[
-            np.intersect1d(nichenet_lt.index, self.regulators)][
-                np.intersect1d(nichenet_lt.columns, self.ligands)]
+    #     self.nichenet_lt = nichenet_lt.loc[
+    #         np.intersect1d(nichenet_lt.index, self.regulators)][
+    #             np.intersect1d(nichenet_lt.columns, self.ligands)]
         
-        self.tfl_pairs = []
-        self.tfl_regulators = []
-        self.tfl_ligands = []
+    #     self.tfl_pairs = []
+    #     self.tfl_regulators = []
+    #     self.tfl_ligands = []
 
-        if self.grn is not None:
-            self.ligand_regulators = {lig: set(
-                self.grn.get_regulators(self.adata, lig)) for lig in self.nichenet_lt.columns}
-        else:
-            from collections import defaultdict
-            self.ligand_regulators = defaultdict(list)
+    #     if self.grn is not None:
+    #         self.ligand_regulators = {lig: set(
+    #             self.grn.get_regulators(self.adata, lig)) for lig in self.nichenet_lt.columns}
+    #     else:
+    #         from collections import defaultdict
+    #         self.ligand_regulators = defaultdict(list)
 
-        for tf_ in self.nichenet_lt.index:
-            row = self.nichenet_lt.loc[tf_]
-            top_5 = row.nlargest(5)
-            for lig_, value in top_5.items():
-                if self.target_gene not in self.ligand_regulators[lig_] and \
-                    tf_ not in self.ligand_regulators[lig_] and \
-                    value > self.tf_ligand_cutoff:
-                    self.tfl_ligands.append(lig_)
-                    self.tfl_regulators.append(tf_)
-                    self.tfl_pairs.append(f"{lig_}#{tf_}")
+    #     for tf_ in self.nichenet_lt.index:
+    #         row = self.nichenet_lt.loc[tf_]
+    #         top_5 = row.nlargest(5)
+    #         for lig_, value in top_5.items():
+    #             if self.target_gene not in self.ligand_regulators[lig_] and \
+    #                 tf_ not in self.ligand_regulators[lig_] and \
+    #                 value > self.tf_ligand_cutoff:
+    #                 self.tfl_ligands.append(lig_)
+    #                 self.tfl_regulators.append(tf_)
+    #                 self.tfl_pairs.append(f"{lig_}#{tf_}")
 
 
-        assert len(self.ligands) == len(self.receptors)
-        assert len(self.tfl_regulators) == len(self.tfl_ligands)
+    #     assert len(self.ligands) == len(self.receptors)
+    #     assert len(self.tfl_regulators) == len(self.tfl_ligands)
         
     @staticmethod
     def ligands_receptors_interactions(received_ligands_df, receptor_gex_df):
+
         assert isinstance(received_ligands_df, pd.DataFrame)
         assert isinstance(receptor_gex_df, pd.DataFrame)
         assert received_ligands_df.index.equals(receptor_gex_df.index)    
@@ -485,17 +503,23 @@ class SpatialCellularProgramsEstimator:
 
     def init_data(self):
 
+        counts_df = self.adata.to_df(layer=self.layer)
+        cell_thresholds = self.adata.uns.get('cell_thresholds', None)
+
+        if cell_thresholds is None:
+            print('warning: cell_thresholds not found in adata.uns')
+
         if len(self.lr['pairs']) > 0:
 
             self.adata.uns['received_ligands'] = received_ligands(
                 self.adata.obsm['spatial'], 
-                self.adata.to_df(layer=self.layer)[np.unique(self.ligands)], 
+                get_filtered_df(counts_df, cell_thresholds, self.ligands),
                 lr_info=self.lr 
             )
 
             self.adata.uns['ligand_receptor'] = self.ligands_receptors_interactions(
                 self.adata.uns['received_ligands'][self.ligands], 
-                self.adata.to_df(layer=self.layer)[self.receptors]
+                get_filtered_df(counts_df, cell_thresholds, self.receptors)[self.receptors]
             )
 
         else:
@@ -507,7 +531,7 @@ class SpatialCellularProgramsEstimator:
             
             self.adata.uns['received_ligands_tfl'] = received_ligands(
                 self.adata.obsm['spatial'], 
-                self.adata.to_df(layer=self.layer)[np.unique(self.tfl_ligands)], 
+                get_filtered_df(counts_df, None, self.tfl_ligands), # Only Commot LRs should be filtered
                 lr_info=self.lr      
             )
 
