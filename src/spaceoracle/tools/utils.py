@@ -30,7 +30,6 @@ def search(query, string_list):
     return [i for i in string_list if query.lower() in i.lower()]
 
 
-
 def scale_adata(adata, cell_size=15):
     nbrs = NearestNeighbors(n_neighbors=2, algorithm='ball_tree').fit(adata.obsm['spatial'])
     distances, indices = nbrs.kneighbors(adata.obsm['spatial'])
@@ -82,6 +81,9 @@ def _adata_to_matrix(adata, layer_name, transpose=True):
         matrix = matrix.transpose()
 
     return matrix.copy(order="C")
+
+
+
 
 
 class DeprecatedWarning(UserWarning):
@@ -151,7 +153,8 @@ def clean_up_adata(adata, fields_to_keep):
     for field in excess_var_fields:
         del adata.var[field]
 
-    del adata.uns
+    for field in set(adata.uns.keys()) - set(fields_to_keep):
+        del adata.uns[field]
 
 
 @jit
