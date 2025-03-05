@@ -153,7 +153,8 @@ def clean_up_adata(adata, fields_to_keep):
     for field in excess_var_fields:
         del adata.var[field]
 
-    del adata.uns
+    for field in set(adata.uns.keys()) - set(fields_to_keep):
+        del adata.uns[field]
 
 
 @jit
