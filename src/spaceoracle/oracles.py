@@ -45,7 +45,7 @@ class CPU_Unpickler(pickle.Unpickler):
 
 class BaseTravLR(ABC):
     
-    def __init__(self, adata, fields_to_keep=['rctd_cluster', 'rctd_celltypes']):
+    def __init__(self, adata, fields_to_keep=['rctd_cluster', 'rctd_celltypes', 'cell_thresholds']):
         assert 'normalized_count' in adata.layers
         self.adata = adata.copy()
         # self.adata.layers['normalized_count'] = self.adata.X.copy()
@@ -247,7 +247,7 @@ class SpaceTravLR(BaseTravLR):
     layer='imputed_count', alpha=0.05,
     threshold_lambda=3e3, tf_ligand_cutoff=0.01, radius=150, contact_distance=30):
         
-        super().__init__(adata, fields_to_keep=[annot])
+        super().__init__(adata, fields_to_keep=[annot, 'cell_thresholds'])
         if grn is None:
             self.grn = DayThreeRegulatoryNetwork() # CellOracle GRN
         else: 
