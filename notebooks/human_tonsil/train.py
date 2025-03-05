@@ -3,6 +3,7 @@ sys.path.append('../../src')
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 import scanpy as sc
+import pandas as pd
 from spaceoracle import SpaceTravLR
 
 from spaceoracle.tools.network import RegulatoryFactory

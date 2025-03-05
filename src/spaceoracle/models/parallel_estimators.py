@@ -81,7 +81,7 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
 
     return full_df
 
-def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=1e-5):
+def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=1e-9):
     '''Get filtered expression of ligands/ receptors based on celltype/ thresholds'''
     ligand_counts = counts_df[np.unique(genes)]
 
@@ -90,9 +90,7 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
         ligand_counts = ligand_counts * mask
 
     if cell_thresholds is not None:
-    
-        # mask = ligand_counts.values - np.array(cell_thresholds).reshape(-1, 1)
-        # mask = (mask > 0).astype(int)
+
         mask = cell_thresholds.reindex(ligand_counts.columns, axis=1).fillna(0).values
         mask = np.where(mask > 0, 1, 0)
         ligand_counts = mask * ligand_counts
