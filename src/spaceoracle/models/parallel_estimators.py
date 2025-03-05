@@ -38,27 +38,26 @@ def calculate_weighted_ligands(gauss_weights, lig_df_values, u_ligands):
     
     return weighted_ligands
 
+def compute_radius_weights(xy, lig_df, radius, scale_factor):
+    ligands = lig_df.columns
+    gauss_weights = [
+        scale_factor * gaussian_kernel_2d(
+            xy[i], 
+            xy, 
+            radius=radius) for i in range(len(lig_df))
+    ]
+    u_ligands = list(np.unique(ligands))
+    lig_df_values = lig_df[u_ligands].values
+    weighted_ligands = calculate_weighted_ligands(
+        gauss_weights, lig_df_values, u_ligands)
+
+    return pd.DataFrame(
+        weighted_ligands, 
+        index=u_ligands, 
+        columns=lig_df.index
+    ).T
+
 def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
-
-    def compute_ligands_half(lig_df, radius):
-
-        ligands = lig_df.columns
-        gauss_weights = [
-            scale_factor * gaussian_kernel_2d(
-                xy[i], 
-                xy, 
-                radius=radius) for i in range(len(lig_df))
-        ]
-        u_ligands = list(np.unique(ligands))
-        lig_df_values = lig_df[u_ligands].values
-        weighted_ligands = calculate_weighted_ligands(
-            gauss_weights, lig_df_values, u_ligands)
-
-        return pd.DataFrame(
-            weighted_ligands, 
-            index=u_ligands, 
-            columns=lig_df.index
-        ).T
 
     lr_info = lr_info.copy()
     lr_info = lr_info[lr_info['ligand'].isin(np.unique(ligands_df.columns))]
@@ -67,21 +66,39 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
             lr_info['ligand'].isin(np.unique(ligands_df.columns))
         ].drop_duplicates(subset='ligand', keep='first')   
     
-    
     full_df = []
 
     for radius in lr_info['radius'].unique():
         radius_ligands = lr_info[lr_info['radius'] == radius]['ligand'].values
-        full_df.append(compute_ligands_half(ligands_df[radius_ligands], radius))
+        full_df.append(
+            compute_radius_weights(
+                xy, ligands_df[radius_ligands], radius, scale_factor
+            )
+        )
         
-
     full_df = pd.concat([df for df in full_df if not df.empty], axis=1)
     full_df = full_df.loc[ligands_df.index, ligands_df.columns]
 
     return full_df
 
+def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=1e-9):
+    '''Get filtered expression of ligands/ receptors based on celltype/ thresholds'''
+    ligand_counts = counts_df[np.unique(genes)]
 
-def create_spatial_features(x, y, celltypes, obs_index,radius=200):
+    if min_expression > 0:
+        mask = np.where(ligand_counts > min_expression, 1, 0)
+        ligand_counts = ligand_counts * mask
+
+    if cell_thresholds is not None:
+
+        mask = cell_thresholds.reindex(ligand_counts.columns, axis=1).fillna(0).values
+        mask = np.where(mask > 0, 1, 0)
+        ligand_counts = mask * ligand_counts
+
+    # return ligand_counts.reindex(genes, axis=1)
+    return ligand_counts
+
+def create_spatial_features(x, y, celltypes, obs_index, radius=200):
     coords = np.column_stack((x, y))
     unique_celltypes = np.unique(celltypes)
     result = np.zeros((len(x), len(unique_celltypes)))
@@ -230,8 +247,6 @@ def init_ligands_and_receptors(
     ligand_mixtures.tfl_ligands = tfl_ligands
 
     return ligand_mixtures
-
-
 
 
 class SpatialCellularProgramsEstimator:
@@ -461,6 +476,7 @@ class SpatialCellularProgramsEstimator:
         
     @staticmethod
     def ligands_receptors_interactions(received_ligands_df, receptor_gex_df):
+
         assert isinstance(received_ligands_df, pd.DataFrame)
         assert isinstance(receptor_gex_df, pd.DataFrame)
         assert received_ligands_df.index.equals(receptor_gex_df.index)    
@@ -498,17 +514,23 @@ class SpatialCellularProgramsEstimator:
 
     def init_data(self):
 
+        counts_df = self.adata.to_df(layer=self.layer)
+        cell_thresholds = self.adata.uns.get('cell_thresholds', None)
+
+        if cell_thresholds is None:
+            print('warning: cell_thresholds not found in adata.uns')
+
         if len(self.lr['pairs']) > 0:
 
             self.adata.uns['received_ligands'] = received_ligands(
                 self.adata.obsm['spatial'], 
-                self.adata.to_df(layer=self.layer)[np.unique(self.ligands)], 
+                get_filtered_df(counts_df, cell_thresholds, self.ligands),
                 lr_info=self.lr 
             )
 
             self.adata.uns['ligand_receptor'] = self.ligands_receptors_interactions(
                 self.adata.uns['received_ligands'][self.ligands], 
-                self.adata.to_df(layer=self.layer)[self.receptors]
+                get_filtered_df(counts_df, cell_thresholds, self.receptors)[self.receptors]
             )
 
         else:
@@ -520,7 +542,7 @@ class SpatialCellularProgramsEstimator:
             
             self.adata.uns['received_ligands_tfl'] = received_ligands(
                 self.adata.obsm['spatial'], 
-                self.adata.to_df(layer=self.layer)[np.unique(self.tfl_ligands)], 
+                get_filtered_df(counts_df, None, self.tfl_ligands), # Only Commot LRs should be filtered
                 lr_info=self.lr      
             )
 
