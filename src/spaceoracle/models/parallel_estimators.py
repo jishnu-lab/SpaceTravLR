@@ -184,12 +184,12 @@ def init_ligands_and_receptors(
     receptors = list(lr.receptor.values)
     _layer = 'normalized_count' if 'normalized_count' in adata.layers else 'imputed_count'
     
-    receptor_levels = adata.to_df(layer=_layer)[np.unique(receptors)].join(
-        adata.obs[annot]).groupby(annot).mean().max(0).to_frame()
-    receptor_levels.columns = ['mean_max']
+    # receptor_levels = adata.to_df(layer=_layer)[np.unique(receptors)].join(
+    #     adata.obs[annot]).groupby(annot).mean().max(0).to_frame()
+    # receptor_levels.columns = ['mean_max']
     
-    lr = lr[lr.receptor.isin(
-        receptor_levels.index[receptor_levels['mean_max'] > receptor_thresh])]
+    # lr = lr[lr.receptor.isin(
+    #     receptor_levels.index[receptor_levels['mean_max'] > receptor_thresh])]
     
     lr['radius'] = np.where(
         lr['signaling'] == 'Secreted Signaling', 
@@ -252,7 +252,7 @@ def init_ligands_and_receptors(
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='rctd_cluster', layer='imputed_count', 
-            radius=200, contact_distance=50, 
+            radius=200, contact_distance=50, use_ligands=True,
             tf_ligand_cutoff=0.01, receptor_thresh=0.1,
             regulators=None, grn=None, colinks_path=None):
         
@@ -267,6 +267,7 @@ class SpatialCellularProgramsEstimator:
             print('!!! Make sure the xy coorniates are scaled')
           
         self.adata = adata
+        self.use_ligands = use_ligands
         self.target_gene = target_gene
         self.cluster_annot = cluster_annot
         self.layer = layer
@@ -299,25 +300,37 @@ class SpatialCellularProgramsEstimator:
 
         # self.init_ligands_and_receptors()
         
-        ligand_mixtures = init_ligands_and_receptors(
-            species=self.species,
-            adata=self.adata,
-            annot=self.cluster_annot,
-            target_gene=self.target_gene,
-            receptor_thresh=self.receptor_thresh,
-            radius=self.radius,
-            contact_distance=self.contact_distance,
-            tf_ligand_cutoff=self.tf_ligand_cutoff,
-            regulators=self.regulators,
-            grn=self.grn,
-        )
+        if self.use_ligands:
         
-        self.lr = ligand_mixtures.lr
-        self.ligands = ligand_mixtures.ligands
-        self.receptors = ligand_mixtures.receptors
-        self.tfl_pairs = ligand_mixtures.tfl_pairs
-        self.tfl_regulators = ligand_mixtures.tfl_regulators
-        self.tfl_ligands = ligand_mixtures.tfl_ligands
+            ligand_mixtures = init_ligands_and_receptors(
+                species=self.species,
+                adata=self.adata,
+                annot=self.cluster_annot,
+                target_gene=self.target_gene,
+                receptor_thresh=self.receptor_thresh,
+                radius=self.radius,
+                contact_distance=self.contact_distance,
+                tf_ligand_cutoff=self.tf_ligand_cutoff,
+                regulators=self.regulators,
+                grn=self.grn,
+            )
+            
+            self.lr = ligand_mixtures.lr
+            self.ligands = ligand_mixtures.ligands
+            self.receptors = ligand_mixtures.receptors
+            self.tfl_pairs = ligand_mixtures.tfl_pairs
+            self.tfl_regulators = ligand_mixtures.tfl_regulators
+            self.tfl_ligands = ligand_mixtures.tfl_ligands
+            
+        else:
+            self.lr = pd.DataFrame(columns=['ligand', 'receptor', 'pathway', 'signaling'])
+            self.lr['pairs'] = self.lr.ligand.values + '$' + self.lr.receptor.values
+            self.ligands = []
+            self.receptors = []
+            self.tfl_pairs = []
+            self.tfl_regulators = []
+            self.tfl_ligands = []
+            
         
         self.lr_pairs = self.lr['pairs']
         
@@ -328,10 +341,10 @@ class SpatialCellularProgramsEstimator:
         self.modulators_genes = list(np.unique(
             self.regulators+self.ligands+self.receptors+self.tfl_regulators+self.tfl_ligands))
 
-        assert len(self.ligands) == len(self.receptors), 'ligands and receptors must have the same length for pairing'
-        assert np.isin(self.ligands, self.adata.var_names).all(), 'all ligands must be in adata.var_names'
-        assert np.isin(self.receptors, self.adata.var_names).all(), 'all receptors must be in adata.var_names'
-        assert np.isin(self.regulators, self.adata.var_names).all(), 'all regulators must be in adata.var_names'
+        assert len(self.ligands) == len(self.receptors)
+        assert np.isin(self.ligands, self.adata.var_names).all()
+        assert np.isin(self.receptors, self.adata.var_names).all()
+        assert np.isin(self.regulators, self.adata.var_names).all()
 
 
     def plot_modulators(self, use_expression=True):
@@ -627,9 +640,9 @@ class SpatialCellularProgramsEstimator:
         # return _data
 
 
-    def fit(self, num_epochs=10, threshold_lambda=1e-4, learning_rate=5e-3, batch_size=512, 
+    def fit(self, num_epochs=100, threshold_lambda=1e-4, learning_rate=5e-3, batch_size=512, 
             use_ARD=False, pbar=None, discard=50, use_bayesian=True, 
-            score_threshold=0.1, coef_filter=0.001):
+            score_threshold=0.1, coef_filter=0.0):
         
         sp_maps, X, y, cluster_labels = self.init_data()
 

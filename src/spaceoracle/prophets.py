@@ -1,21 +1,25 @@
 
+from functools import partial
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import commot as ct
-
+import gc
+from easydict import EasyDict
 from .tools.network import expand_paired_interactions
-
-from .models.parallel_estimators import received_ligands
+from .models.parallel_estimators import get_filtered_df, received_ligands
 from .oracles import OracleQueue, BaseTravLR
 from .beta import Betabase
 from .tools.utils import is_mouse_data
 import enlighten
+from pqdm.threads import pqdm
+
 
 class Prophet(BaseTravLR):
     def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30):
         
         super().__init__(adata, fields_to_keep=[annot])
+        
         
         self.adata = adata.copy()
         self.annot = annot
@@ -58,21 +62,26 @@ class Prophet(BaseTravLR):
         df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
         
         self.lr = expand_paired_interactions(df_ligrec)
-        self.lr = self.lr[self.lr.ligand.isin(self.adata.var_names) & (self.lr.receptor.isin(self.adata.var_names))]
+        self.lr = self.lr[
+            self.lr.ligand.isin(self.adata.var_names) & (
+                self.lr.receptor.isin(self.adata.var_names))]
         self.lr['radius'] = np.where(
             self.lr['signaling'] == 'Secreted Signaling', 
             self.radius, self.contact_distance
         )
+        
 
     def compute_betas(self, subsample=None, float16=False):
-        self.status.update('Computing betas ...')
+        del self.beta_dict
+        gc.collect()
+        self.status.update('💾️ Loading betas from disk')
         self.status.color = 'black_on_salmon'
         self.status.refresh()
 
         self.beta_dict = self._get_spatial_betas_dict(
             subsample=subsample, float16=float16)
         
-        self.status.update('Computing betas - Done')
+        self.status.update('Loading betas - Done')
         self.status.color = 'black_on_green'
         self.status.refresh()
         
@@ -83,12 +92,20 @@ class Prophet(BaseTravLR):
     
     def _compute_weighted_ligands(self, gene_mtx):
         self.update_status('Computing received ligands', color='black_on_cyan')
-        gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
+        gex_df = pd.DataFrame(
+            gene_mtx, 
+            index=self.adata.obs_names, 
+            columns=self.adata.var_names
+        )
+        
+        cell_thresholds = self.adata.uns.get('cell_thresholds', None)
+        
 
         if len(self.ligands) > 0:
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
-                ligands_df=gex_df[self.ligands],
+                # ligands_df=gex_df[self.ligands],
+                ligands_df=get_filtered_df(gex_df, cell_thresholds, self.ligands),
                 lr_info=self.lr
         )
         else:
@@ -102,25 +119,54 @@ class Prophet(BaseTravLR):
         self.status.color = color
         self.status.refresh()
         
+        
+
+
+    def process_gene(self, item, weighted_ligands, gene_mtx):
+        gene, betadata = item
+        return gene, self._combine_gene_wbetas(weighted_ligands, gene_mtx, betadata)
+            
     
     def _get_wbetas_dict(self, betas_dict, weighted_ligands, gene_mtx):
 
-        gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
+        gex_df = pd.DataFrame(
+            gene_mtx, 
+            index=self.adata.obs_names, 
+            columns=self.adata.var_names
+        )
         
-        for i, (gene, betadata) in enumerate(betas_dict.data.items()):
-            betas_dict.data[gene].wbetas = self._combine_gene_wbetas(
-                weighted_ligands, gex_df, betadata)
-            self.update_status(
-                f'[{i:03d}/{len(betas_dict.data):03d}] Ligand interactions', 
-                color='black_on_salmon'
-            )
+        # out_dict = {}
+        self.update_status(f'Computing Ligand interactions', color='black_on_salmon')
+        
+        process_gene_partial = partial(
+            self.process_gene, weighted_ligands=weighted_ligands, gene_mtx=gex_df)
+        
+        results = pqdm(
+            betas_dict.data.items(), 
+            process_gene_partial, 
+            n_jobs=8, 
+            tqdm_class=tqdm
+        )
+        
+        # for i, (gene, betadata) in enumerate(betas_dict.data.items()):
+        #     # betas_dict.data[gene].wbetas = self._combine_gene_wbetas(
+        #     #     weighted_ligands, gex_df, betadata)
+        #     out_dict[gene] = self._combine_gene_wbetas(
+        #         weighted_ligands, gex_df, betadata)
+            
+        #     self.update_status(
+        #         f'{self.iter}/{self.max_iter} | [{i/len(betas_dict.data)*100:5.1f}%] Ligand interactions splash', 
+        #         color='black_on_salmon'
+        #     )
             
         self.update_status(f'Ligand interactions - Done')
 
-        return betas_dict
+        return dict(results)
 
     def _combine_gene_wbetas(self, rw_ligands, gex_df, betadata):
+        # betas_df = betadata.splash_fast(rw_ligands, gex_df) ## this works but doesn't seem faster
         betas_df = betadata.splash(rw_ligands, gex_df)
+        
         return betas_df
         
     def _get_spatial_betas_dict(self, subsample=None, float16=False):
@@ -136,11 +182,12 @@ class Prophet(BaseTravLR):
         gene_gene_matrix = np.zeros((len(genes), len(genes))) 
 
         for i, gene in enumerate(genes):
-            _beta_out = betas_dict.data.get(gene, None)
+            _beta_out = betas_dict.get(gene, None)
             
             if _beta_out is not None:
-                r = np.array(_beta_out.modulator_gene_indices)
-                gene_gene_matrix[r, i] = _beta_out.wbetas.values[cell_index]
+                # r = np.array(_beta_out.modulator_gene_indices)
+                r = np.array(self.beta_dict.data[gene].modulator_gene_indices)
+                gene_gene_matrix[r, i] = _beta_out.values[cell_index]
 
         return gex_delta[cell_index, :].dot(gene_gene_matrix)
     
@@ -148,23 +195,34 @@ class Prophet(BaseTravLR):
     def _perturb_all_cells(self, gex_delta, betas_dict):
         n_obs, n_genes = gex_delta.shape
         result = np.zeros((n_obs, n_genes))
+        n_vars = len(self.adata.var_names)
         
-        self.update_status('Perturbing cells 🐝️', color='black_on_cyan')
         
         for i, gene in enumerate(self.adata.var_names):
-            _beta_out = betas_dict.data.get(gene, None)
+            self.update_status(
+                f'[{self.iter}/{self.max_iter}] | {i+1}/{n_vars} | Perturbing cells 🐝️', 
+                color='black_on_cyan'
+            )
+            
+            _beta_out = betas_dict.get(gene, None)
             if _beta_out is not None:
-                mod_idx = np.array(_beta_out.modulator_gene_indices)
-                result[:, i] = np.sum(_beta_out.wbetas.values * gex_delta[:, mod_idx], axis=1)
+                # mod_idx = np.array(_beta_out.modulator_gene_indices)
+                mod_idx = np.array(self.beta_dict.data[gene].modulator_gene_indices)
+                
+                result[:, i] = np.sum(_beta_out.values * gex_delta[:, mod_idx], axis=1)
         
         return result
 
-    def perturb(self, target, gene_mtx=None, n_propagation=3, gene_expr=0, cells=None, use_optimized=False, delta_dir=None):
+    def perturb(self, target, gene_mtx=None, n_propagation=2, gene_expr=0, 
+                cells=None, use_optimized=True, retain_propagation=False):
 
         assert target in self.adata.var_names
         
+        if retain_propagation:
+            propagations = []
+        
         if gene_mtx is None: 
-            gene_mtx = self.adata.layers['imputed_count']
+            gene_mtx = self.adata.layers['imputed_count'].copy()
 
         if isinstance(gene_mtx, pd.DataFrame):
             gene_mtx = gene_mtx.values
@@ -188,8 +246,14 @@ class Prophet(BaseTravLR):
         weighted_ligands_0 = weighted_ligands_0.reindex(columns=self.adata.var_names, fill_value=0)
 
         gene_mtx_1 = gene_mtx.copy()
+        
+        self.iter = 0
+        self.max_iter = n_propagation
+        
+        ## refer: src/celloracle/trajectory/oracle_GRN.py
 
         for n in range(n_propagation):
+            self.iter+=1
             self.update_status(f'{target} -> {gene_expr} - {n+1}/{n_propagation}', color='black_on_salmon')
 
             # weight betas by the gene expression from the previous iteration
@@ -212,14 +276,7 @@ class Prophet(BaseTravLR):
             
             delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
 
-            if not use_optimized:
-                _simulated = np.array(
-                    [self._perturb_single_cell(delta_simulated, i, beta_dict) 
-                        for i in tqdm(
-                            range(self.adata.n_obs), 
-                            desc=f'Running simulation {n+1}/{n_propagation}')])
-            else:
-                _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
+            _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
             
             delta_simulated = np.array(_simulated)
             assert not np.isnan(delta_simulated).any(), "NaN values found in delta_simulated"
@@ -230,18 +287,20 @@ class Prophet(BaseTravLR):
             # Don't allow simulated to exceed observed values
             gem_tmp = gene_mtx + delta_simulated
             min_ = 0
-            max_ = gene_mtx.max(axis=0) * 1.5
+            max_ = gene_mtx.max(axis=0)
             gem_tmp = pd.DataFrame(gem_tmp).clip(lower=min_, upper=max_, axis=1).values
 
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
-            if delta_dir:
-                np.save(f'{delta_dir}/{target}_{n}n_{gene_expr}x.npy', delta_simulated)
-
+            if retain_propagation:
+                propagations.append(gene_mtx + delta_simulated)
+   
             # save weighted ligand values to weight betas of next iteration
             weighted_ligands_0 = weighted_ligands_1.copy()
-
-
+            
+            del beta_dict
+            gc.collect()
+        
         gem_simulated = gene_mtx + delta_simulated
         assert gem_simulated.shape == gene_mtx.shape
 
@@ -253,9 +312,15 @@ class Prophet(BaseTravLR):
 
         # self.adata.layers['simulated_count'] = gem_simulated
         # self.adata.layers['delta_X'] = gem_simulated - gene_mtx
-        self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
+        # self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
         
         # print(f'Layer added: {target}_{n_propagation}n_{gene_expr}x')
+        
+        self.update_status(f'{target} -> {gene_expr} - {n_propagation}/{n_propagation} - Done')
+        
+        if retain_propagation:
+            return propagations
+        
     
     def perturb_batch(self, target_genes, save_to=None, n_propagation=3, gene_expr=0, cells=None):
         
