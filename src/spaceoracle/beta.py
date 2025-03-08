@@ -92,7 +92,6 @@ class BetaFrame(pd.DataFrame):
         ##         = b2*R1 + b3*R2
         ## dy/dR1 = b2*[wL1 + R1*dwL1/dR1] = b2*wL1
         
-                
         lr_betas = self[[beta for beta in self.columns if '$' in beta]]
         tfl_betas = self[[beta for beta in self.columns if '#' in beta]]
 
