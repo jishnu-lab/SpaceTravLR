@@ -3,10 +3,11 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import commot as ct
+import os
 
 from .tools.network import expand_paired_interactions
 
-from .models.parallel_estimators import received_ligands
+from .models.parallel_estimators import received_ligands, get_filtered_df
 from .oracles import OracleQueue, BaseTravLR
 from .beta import Betabase
 from .tools.utils import is_mouse_data
@@ -81,14 +82,19 @@ class Prophet(BaseTravLR):
     def load_betadata(gene, save_dir):
         return pd.read_parquet(f'{save_dir}/{gene}_betadata.parquet')
     
-    def _compute_weighted_ligands(self, gene_mtx):
+    def _compute_weighted_ligands(self, gene_mtx, cell_thresholds):
         self.update_status('Computing received ligands', color='black_on_cyan')
         gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
+        gex_df = get_filtered_df(
+            counts_df = gex_df,
+            cell_thresholds=cell_thresholds,
+            genes=self.ligands
+        )
 
         if len(self.ligands) > 0:
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
-                ligands_df=gex_df[self.ligands],
+                ligands_df=gex_df,
                 lr_info=self.lr
         )
         else:
@@ -103,10 +109,15 @@ class Prophet(BaseTravLR):
         self.status.refresh()
         
     
-    def _get_wbetas_dict(self, betas_dict, weighted_ligands, gene_mtx):
+    def _get_wbetas_dict(self, betas_dict, weighted_ligands, gene_mtx, cell_thresholds):
 
         gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
-        
+        gex_df = get_filtered_df(
+            counts_df=gex_df,
+            cell_thresholds=cell_thresholds,
+            genes=self.adata.var_names
+        )
+
         for i, (gene, betadata) in enumerate(betas_dict.data.items()):
             betas_dict.data[gene].wbetas = self._combine_gene_wbetas(
                 weighted_ligands, gex_df, betadata)
@@ -165,7 +176,6 @@ class Prophet(BaseTravLR):
         
         if gene_mtx is None: 
             gene_mtx = self.adata.layers['imputed_count']
-
         if isinstance(gene_mtx, pd.DataFrame):
             gene_mtx = gene_mtx.values
 
@@ -184,8 +194,18 @@ class Prophet(BaseTravLR):
         if self.beta_dict is None:
             self.beta_dict = self._get_spatial_betas_dict() # compute betas for all genes for all cells
 
-        weighted_ligands_0 = self._compute_weighted_ligands(gene_mtx)
-        weighted_ligands_0 = weighted_ligands_0.reindex(columns=self.adata.var_names, fill_value=0)
+        # get LR specific filtered gex contributions
+        cell_thresholds = self.adata.uns.get('cell_thresholds')
+        if cell_thresholds is not None:
+            cell_thresholds = cell_thresholds.reindex(              # Only commot LR values should be filtered
+                index=self.adata.obs_names, columns=self.adata.var_names, fill_value=1)
+        else:
+            cell_thresholds = None   
+            print('warning: cell_thresholds not found in adata.uns')
+
+        weighted_ligands_0 = self.adata.uns.get('received_ligands')
+        if weighted_ligands_0 is None:
+            weighted_ligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds)
 
         gene_mtx_1 = gene_mtx.copy()
 
@@ -193,11 +213,11 @@ class Prophet(BaseTravLR):
             self.update_status(f'{target} -> {gene_expr} - {n+1}/{n_propagation}', color='black_on_salmon')
 
             # weight betas by the gene expression from the previous iteration
-            beta_dict = self._get_wbetas_dict(self.beta_dict, weighted_ligands_0, gene_mtx_1)
+            beta_dict = self._get_wbetas_dict(self.beta_dict, weighted_ligands_0, gene_mtx_1, cell_thresholds)
 
             # get updated gene expressions
             gene_mtx_1 = gene_mtx + delta_simulated
-            weighted_ligands_1 = self._compute_weighted_ligands(gene_mtx_1)
+            weighted_ligands_1 = self._compute_weighted_ligands(gene_mtx_1, cell_thresholds)
             # self.weighted_ligands = weighted_ligands_1
 
             # update deltas to reflect change in received ligands
@@ -236,6 +256,7 @@ class Prophet(BaseTravLR):
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
             if delta_dir:
+                os.make_dirs(delta_dir, exist_ok=True)
                 np.save(f'{delta_dir}/{target}_{n}n_{gene_expr}x.npy', delta_simulated)
 
             # save weighted ligand values to weight betas of next iteration
@@ -257,7 +278,7 @@ class Prophet(BaseTravLR):
         
         # print(f'Layer added: {target}_{n_propagation}n_{gene_expr}x')
     
-    def perturb_batch(self, target_genes, save_to=None, n_propagation=3, gene_expr=0, cells=None):
+    def perturb_batch(self, target_genes, save_to=None, n_propagation=3, gene_expr=0, cells=None, delta_dir=None):
         
         self.update_status(f'Batch Perturbion mode: {len(target_genes)} genes')
         
@@ -268,6 +289,8 @@ class Prophet(BaseTravLR):
             color='orange',
             autorefresh=True,
         )
+
+        os.makedirs(save_to, exist_ok=True)
         
         for target in target_genes:
             progress_bar.desc = f'Batch Perturbions - {target}'
@@ -278,7 +301,8 @@ class Prophet(BaseTravLR):
                 n_propagation=n_propagation, 
                 gene_expr=gene_expr, 
                 cells=cells, 
-                use_optimized=True
+                use_optimized=True,
+                delta_dir=delta_dir
             )
                      
             progress_bar.update()
