@@ -98,8 +98,6 @@ class Prophet(BaseTravLR):
             columns=self.adata.var_names
         )
         
-        cell_thresholds = self.adata.uns.get('cell_thresholds', None)
-        
 
         if len(self.ligands) > 0:
             weighted_ligands = received_ligands(
