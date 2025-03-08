@@ -1,4 +1,5 @@
 from abc import ABC
+from easydict import EasyDict
 import numpy as np
 import enlighten
 import time
@@ -47,6 +48,9 @@ class BaseTravLR(ABC):
     
     def __init__(self, adata, fields_to_keep=['rctd_cluster', 'rctd_celltypes', 'cell_thresholds']):
         assert 'normalized_count' in adata.layers
+        
+        self.settings = EasyDict({})
+        
         self.adata = adata.copy()
         # self.adata.layers['normalized_count'] = self.adata.X.copy()
         self.gene2index = dict(zip(self.adata.var_names, range(len(self.adata.var_names))))

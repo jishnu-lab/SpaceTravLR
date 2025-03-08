@@ -1,21 +1,25 @@
 
+from functools import partial
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import commot as ct
 import gc
-
+from easydict import EasyDict
 from .tools.network import expand_paired_interactions
-from .models.parallel_estimators import received_ligands
+from .models.parallel_estimators import get_filtered_df, received_ligands
 from .oracles import OracleQueue, BaseTravLR
 from .beta import Betabase
 from .tools.utils import is_mouse_data
 import enlighten
+from pqdm.threads import pqdm
+
 
 class Prophet(BaseTravLR):
     def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30):
         
         super().__init__(adata, fields_to_keep=[annot])
+        
         
         self.adata = adata.copy()
         self.annot = annot
@@ -58,16 +62,19 @@ class Prophet(BaseTravLR):
         df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
         
         self.lr = expand_paired_interactions(df_ligrec)
-        self.lr = self.lr[self.lr.ligand.isin(self.adata.var_names) & (self.lr.receptor.isin(self.adata.var_names))]
+        self.lr = self.lr[
+            self.lr.ligand.isin(self.adata.var_names) & (
+                self.lr.receptor.isin(self.adata.var_names))]
         self.lr['radius'] = np.where(
             self.lr['signaling'] == 'Secreted Signaling', 
             self.radius, self.contact_distance
         )
+        
 
     def compute_betas(self, subsample=None, float16=False):
         del self.beta_dict
         gc.collect()
-        self.status.update('Loading betas from disk ...')
+        self.status.update('💾️ Loading betas from disk')
         self.status.color = 'black_on_salmon'
         self.status.refresh()
 
@@ -85,12 +92,20 @@ class Prophet(BaseTravLR):
     
     def _compute_weighted_ligands(self, gene_mtx):
         self.update_status('Computing received ligands', color='black_on_cyan')
-        gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
+        gex_df = pd.DataFrame(
+            gene_mtx, 
+            index=self.adata.obs_names, 
+            columns=self.adata.var_names
+        )
+        
+        cell_thresholds = self.adata.uns.get('cell_thresholds', None)
+        
 
         if len(self.ligands) > 0:
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
-                ligands_df=gex_df[self.ligands],
+                # ligands_df=gex_df[self.ligands],
+                ligands_df=get_filtered_df(gex_df, cell_thresholds, self.ligands),
                 lr_info=self.lr
         )
         else:
@@ -104,27 +119,49 @@ class Prophet(BaseTravLR):
         self.status.color = color
         self.status.refresh()
         
+        
+
+
+    def process_gene(self, item, weighted_ligands, gene_mtx):
+        gene, betadata = item
+        return gene, self._combine_gene_wbetas(weighted_ligands, gene_mtx, betadata)
+            
     
     def _get_wbetas_dict(self, betas_dict, weighted_ligands, gene_mtx):
 
-        gex_df = pd.DataFrame(gene_mtx, index=self.adata.obs_names, columns=self.adata.var_names)
+        gex_df = pd.DataFrame(
+            gene_mtx, 
+            index=self.adata.obs_names, 
+            columns=self.adata.var_names
+        )
         
-        out_dict = {}
+        # out_dict = {}
+        self.update_status(f'Computing Ligand interactions', color='black_on_salmon')
         
-        for i, (gene, betadata) in enumerate(betas_dict.data.items()):
-            # betas_dict.data[gene].wbetas = self._combine_gene_wbetas(
-            #     weighted_ligands, gex_df, betadata)
-            out_dict[gene] = self._combine_gene_wbetas(
-                weighted_ligands, gex_df, betadata)
+        process_gene_partial = partial(
+            self.process_gene, weighted_ligands=weighted_ligands, gene_mtx=gex_df)
+        
+        results = pqdm(
+            betas_dict.data.items(), 
+            process_gene_partial, 
+            n_jobs=8, 
+            tqdm_class=tqdm
+        )
+        
+        # for i, (gene, betadata) in enumerate(betas_dict.data.items()):
+        #     # betas_dict.data[gene].wbetas = self._combine_gene_wbetas(
+        #     #     weighted_ligands, gex_df, betadata)
+        #     out_dict[gene] = self._combine_gene_wbetas(
+        #         weighted_ligands, gex_df, betadata)
             
-            self.update_status(
-                f'{self.iter}/{self.max_iter} | [{i/len(betas_dict.data)*100:5.1f}%] Ligand interactions splash', 
-                color='black_on_salmon'
-            )
+        #     self.update_status(
+        #         f'{self.iter}/{self.max_iter} | [{i/len(betas_dict.data)*100:5.1f}%] Ligand interactions splash', 
+        #         color='black_on_salmon'
+        #     )
             
         self.update_status(f'Ligand interactions - Done')
 
-        return out_dict
+        return dict(results)
 
     def _combine_gene_wbetas(self, rw_ligands, gex_df, betadata):
         # betas_df = betadata.splash_fast(rw_ligands, gex_df) ## this works but doesn't seem faster

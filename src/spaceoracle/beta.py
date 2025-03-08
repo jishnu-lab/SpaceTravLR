@@ -1,3 +1,4 @@
+from functools import partialmethod
 import os
 import pandas as pd
 import numpy as np
@@ -6,7 +7,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from numba import jit, prange
 import numpy as np
-from tqdm import tqdm
+from tqdm import tqdm as tqdm_mock
+tqdm_mock.__init__ = partialmethod(tqdm_mock.__init__, disable=True)
 # import warnings
 # warnings.filterwarnings('ignore')
 
@@ -48,7 +50,7 @@ class BetaFrame(pd.DataFrame):
 
     @classmethod
     def from_path(cls, path, cell_index=None, float16=False):
-        df = pd.read_parquet(path)
+        df = pd.read_parquet(path, engine='pyarrow')
         if float16:
             beta_cols = [col for col in df.columns if col.startswith('beta')]
             df[beta_cols] = df[beta_cols].astype(np.float16)
@@ -130,35 +132,38 @@ class BetaFrame(pd.DataFrame):
         # return _df[self.modulators_genes]
         
                 
-        lr_betas = self[[beta for beta in self.columns if '$' in beta]]
-        tfl_betas = self[[beta for beta in self.columns if '#' in beta]]
+        lr_betas = self.filter(like='$', axis=1)
+        tfl_betas = self.filter(like='#', axis=1)
 
         rec_derivatives = pd.DataFrame(
             lr_betas.values * rw_ligands[self.ligands].values, 
             index=self.index, 
-            columns=self.receptors)
+            columns=self.receptors
+        ).astype(float)
 
         lig_lr_derivatives = pd.DataFrame(
             lr_betas.values * gex_df[self.receptors].values, 
             index=self.index, 
-            columns=self.ligands)
+            columns=self.ligands
+        ).astype(float)
 
         lig_tfl_derivatives = pd.DataFrame(
             tfl_betas.values * gex_df[self.tfl_regulators].values, 
             index=self.index, 
-            columns=self.tfl_ligands)
+            columns=self.tfl_ligands
+        ).astype(float)
 
         tf_derivatives = pd.DataFrame(
             self[self.tf_columns].values,
             index=self.index,
             columns=self.tfs
-        )
+        ).astype(float)
 
         tf_tfl_derivatives = pd.DataFrame(
             tfl_betas.values * rw_ligands[self.tfl_ligands].values,
             index=self.index,
             columns=self.tfl_regulators
-        )
+        ).astype(float)
 
         _df = pd.concat(
             [
@@ -167,7 +172,7 @@ class BetaFrame(pd.DataFrame):
                 lig_tfl_derivatives,
                 tf_derivatives,
                 tf_tfl_derivatives
-            ], axis=1).groupby(lambda x: x, axis=1).sum()
+            ], axis=1).groupby(level=0, axis=1).sum()
 
         _df.columns = 'beta_' + _df.columns.astype(str)
         return _df[self.modulators_genes]
@@ -246,6 +251,7 @@ class Betabase:
 
 
     def load_betas_from_disk(self, cell_index):
+        from tqdm import tqdm
         for path in tqdm(self.beta_paths):
             gene_name = path.split('/')[-1].split('_')[0]
             self.data[gene_name] = BetaFrame.from_path(path, cell_index=cell_index)
