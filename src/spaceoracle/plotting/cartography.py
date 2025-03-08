@@ -242,17 +242,20 @@ class Cartography:
     def plot_umap_quiver(
             self, 
             perturb_target, 
-            hue='banksy_celltypes',
+            hue='cell_type',
             normalize=False, 
             n_neighbors=200, 
             grid_scale=1, 
-            vector_scale=1, 
+            vector_scale=1,
+            scatter_size=5,
+            legend_on_loc=False, 
             figsize=(5, 5),
             dpi=180,
             alpha=0.9,
             alt_colors=None
         ):
         assert 'X_umap' in self.adata.obsm
+        assert 'cell_type' in self.adata.obs
         layout_embedding = self.adata.obsm['X_umap']
         
         delta_X = self.adata.layers[perturb_target] - self.adata.layers['imputed_count']
@@ -299,9 +302,9 @@ class Cartography:
         f, ax = plt.subplots(figsize=figsize, dpi=dpi)
         
         color_dict = self.color_dict.copy()
-        color_dict['GC Dark Zone'] = 'mediumpurple'
-        color_dict['GC Intermediate Zone'] = 'mediumpurple'
-        color_dict['GC Light Zone'] = 'mediumpurple'
+        # color_dict['GC Dark Zone'] = 'mediumpurple'
+        # color_dict['GC Intermediate Zone'] = 'mediumpurple'
+        # color_dict['GC Light Zone'] = 'mediumpurple'
 
         sns.scatterplot(
             data = pd.DataFrame(
@@ -310,13 +313,13 @@ class Cartography:
                 index=self.adata.obs_names).join(self.adata.obs),
             x='x', y='y',
             hue=hue, 
-            s=15,
+            s=scatter_size,
             ax=ax,
             alpha=alpha,
             edgecolor='black',
             linewidth=0.1,
             palette=color_dict,
-            legend=False
+            legend=not legend_on_loc
         )
 
         plot_quiver(grid_points, vector_field, background=None, ax=ax)
@@ -336,24 +339,30 @@ class Cartography:
         else:
             all_cts = self.adata.obs[hue]
 
-        for cluster in all_cts.unique():
-            cluster_cells = all_cts == cluster
-            x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
-            y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
-            
-            ax.text(x, y, cluster, 
-                    fontsize=6, 
-                    ha='center', 
-                    va='center',
-                    color='black',
-                    bbox=dict(
-                        facecolor=alt_colors[cluster],
-                        alpha=1,
-                        edgecolor='black',
-                        boxstyle='round'
-                    ))
-            
+
+        if legend_on_loc:
+            for cluster in all_cts.unique():
+                cluster_cells = all_cts == cluster
+                x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
+                y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
+                
+                ax.text(x, y, cluster, 
+                        fontsize=6, 
+                        ha='center', 
+                        va='center',
+                        color='black',
+                        bbox=dict(
+                            facecolor=alt_colors[cluster],
+                            alpha=1,
+                            edgecolor='black',
+                            boxstyle='round'
+                        ))
+                
         plt.title(f'{perturb_target}')
+        
+        if not legend_on_loc:
+            handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
+            ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
         
         return ax
     
