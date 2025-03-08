@@ -12,6 +12,7 @@ from .beta import Betabase
 from .tools.utils import is_mouse_data
 import enlighten
 from pqdm.threads import pqdm
+import os
 
 
 class Prophet(BaseTravLR):
@@ -306,7 +307,7 @@ class Prophet(BaseTravLR):
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
             if delta_dir:
-                os.make_dirs(delta_dir, exist_ok=True)
+                os.makedirs(delta_dir, exist_ok=True)
                 np.save(f'{delta_dir}/{target}_{n}n_{gene_expr}x.npy', delta_simulated)
 
             if retain_propagation:
@@ -329,7 +330,7 @@ class Prophet(BaseTravLR):
 
         # self.adata.layers['simulated_count'] = gem_simulated
         # self.adata.layers['delta_X'] = gem_simulated - gene_mtx
-        # self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
+        self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
         
         # print(f'Layer added: {target}_{n_propagation}n_{gene_expr}x')
         
