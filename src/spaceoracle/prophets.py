@@ -14,6 +14,7 @@ from .tools.utils import is_mouse_data
 import enlighten
 from pqdm.threads import pqdm
 
+EPS = 1e-6
 
 class Prophet(BaseTravLR):
     def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30):
@@ -136,7 +137,8 @@ class Prophet(BaseTravLR):
         )
         
         # out_dict = {}
-        self.update_status(f'Computing Ligand interactions', color='black_on_salmon')
+        self.update_status(f'{self.iter}/{self.max_iter} | Computing Ligand interactions', 
+                color='black_on_salmon')
         
         process_gene_partial = partial(
             self.process_gene, weighted_ligands=weighted_ligands, gene_mtx=gex_df)
@@ -214,12 +216,9 @@ class Prophet(BaseTravLR):
         return result
 
     def perturb(self, target, gene_mtx=None, n_propagation=2, gene_expr=0, 
-                cells=None, use_optimized=True, retain_propagation=False):
+                cells=None, retain_propagation=False, save_layer=True):
 
         assert target in self.adata.var_names
-        
-        if retain_propagation:
-            propagations = []
         
         if gene_mtx is None: 
             gene_mtx = self.adata.layers['imputed_count'].copy()
@@ -286,14 +285,14 @@ class Prophet(BaseTravLR):
 
             # Don't allow simulated to exceed observed values
             gem_tmp = gene_mtx + delta_simulated
-            min_ = 0
+            min_ = gene_mtx.min(axis=0)
             max_ = gene_mtx.max(axis=0)
             gem_tmp = pd.DataFrame(gem_tmp).clip(lower=min_, upper=max_, axis=1).values
 
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
 
             if retain_propagation:
-                propagations.append(gene_mtx + delta_simulated)
+                np.save(f'/tmp/{target}_{n+1}.npy', gene_mtx + delta_simulated)
    
             # save weighted ligand values to weight betas of next iteration
             weighted_ligands_0 = weighted_ligands_1.copy()
@@ -312,14 +311,12 @@ class Prophet(BaseTravLR):
 
         # self.adata.layers['simulated_count'] = gem_simulated
         # self.adata.layers['delta_X'] = gem_simulated - gene_mtx
-        # self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
+        if save_layer:
+            self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
         
         # print(f'Layer added: {target}_{n_propagation}n_{gene_expr}x')
         
         self.update_status(f'{target} -> {gene_expr} - {n_propagation}/{n_propagation} - Done')
-        
-        if retain_propagation:
-            return propagations
         
     
     def perturb_batch(self, target_genes, save_to=None, n_propagation=3, gene_expr=0, cells=None):
