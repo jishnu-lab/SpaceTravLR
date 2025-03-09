@@ -77,7 +77,7 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1e5):
         )
         
     full_df = pd.concat([df for df in full_df if not df.empty], axis=1)
-    full_df = full_df.loc[ligands_df.index, ligands_df.columns]
+    full_df = full_df.reindex(ligands_df.index).reindex(ligands_df.columns, axis=1).fillna(0)
 
     return full_df
 
@@ -90,7 +90,6 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
         ligand_counts = ligand_counts * mask
 
     if cell_thresholds is not None:
-
         mask = cell_thresholds.reindex(ligand_counts.columns, axis=1).fillna(0).values
         mask = np.where(mask > 0, 1, 0)
         ligand_counts = mask * ligand_counts
@@ -369,7 +368,6 @@ class SpatialCellularProgramsEstimator:
                 self.tfl_regulators
             )}
 
-        # Create colormaps for each gene category
         ligand_cmap = plt.get_cmap('viridis')
         receptor_cmap = plt.get_cmap('magma')
         regulator_cmap = plt.get_cmap('rainbow')
@@ -521,12 +519,13 @@ class SpatialCellularProgramsEstimator:
             print('warning: cell_thresholds not found in adata.uns')
 
         if len(self.lr['pairs']) > 0:
-
-            self.adata.uns['received_ligands'] = received_ligands(
-                self.adata.obsm['spatial'], 
-                get_filtered_df(counts_df, cell_thresholds, self.ligands),
-                lr_info=self.lr 
-            )
+            
+            if not hasattr(self.adata.uns, 'received_ligands'):
+                self.adata.uns['received_ligands'] = received_ligands(
+                    self.adata.obsm['spatial'], 
+                    get_filtered_df(counts_df, cell_thresholds, self.ligands),
+                    lr_info=self.lr 
+                )
 
             self.adata.uns['ligand_receptor'] = self.ligands_receptors_interactions(
                 self.adata.uns['received_ligands'][self.ligands], 
@@ -685,8 +684,8 @@ class SpatialCellularProgramsEstimator:
                 m.fit(X_cell, y_cell)
                 y_pred = m.predict(X_cell)
                 r2 = r2_score(y_cell, y_pred)
-                coef_ = np.where(np.abs(m.coef_) < coef_filter, 0, m.coef_)
-                _betas = np.hstack([m.intercept_, coef_])
+                # coef_ = np.where(np.abs(m.coef_) < coef_filter, 0, m.coef_)
+                _betas = np.hstack([m.intercept_, m.coef_])
 
             else:
 
