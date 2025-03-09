@@ -94,6 +94,8 @@ class BetaFrame(pd.DataFrame):
                 self.tfl_ligands + self.tfl_regulators)
             ]
         
+        self._ligands = np.unique(list(self.ligands))
+        self._tfl_ligands = np.unique(list(self.tfl_ligands))
         self._all_ligands = np.unique(list(self.ligands) + list(self.tfl_ligands))
 
         # self.df_lr_columns = [f'beta_{r}' for r in self.receptors]+ \
@@ -107,7 +109,7 @@ class BetaFrame(pd.DataFrame):
         self.tfl_pairs = [pair.split('#') for pair in self.tfl_pairs]
     
 
-    def splash(self, rw_ligands, gex_df):
+    def splash(self, rw_ligands, rw_ligands_tfl, gex_df):
         ## wL is the amount of ligand 'received' at each location
         ## assuming ligands and receptors expression are independent, dL/dR = 0
         ## y = b0 + b1*TF1 + b2*wL1R1 + b3*wL1R2
@@ -160,7 +162,7 @@ class BetaFrame(pd.DataFrame):
         ).astype(float)
 
         tf_tfl_derivatives = pd.DataFrame(
-            tfl_betas.values * rw_ligands[self.tfl_ligands].values,
+            tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
             index=self.index,
             columns=self.tfl_regulators
         ).astype(float)
@@ -243,6 +245,7 @@ class Betabase:
 
         self.data = {}
         self.ligands_set = set()
+        self.tfl_ligands_set = set()
         self.float16 = float16
         self.load_betas_from_disk(cell_index=cell_index)
 
@@ -255,7 +258,9 @@ class Betabase:
         for path in tqdm(self.beta_paths):
             gene_name = path.split('/')[-1].split('_')[0]
             self.data[gene_name] = BetaFrame.from_path(path, cell_index=cell_index)
-            self.ligands_set.update(self.data[gene_name]._all_ligands)
+            self.ligands_set.update(self.data[gene_name]._ligands)
+            self.tfl_ligands_set.update(self.data[gene_name]._tfl_ligands)
+
         
         for gene_name, betadata in self.data.items():
             betadata.modulator_gene_indices = [
