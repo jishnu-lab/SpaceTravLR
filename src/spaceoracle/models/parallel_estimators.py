@@ -99,7 +99,7 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
     return ligand_counts
 
 
-def init_received_ligands(adata, radius, contact_distance, cell_threshes, lig_receivers):
+def init_received_ligands(adata, radius, contact_distance, cell_threshes):
     species = 'mouse' if is_mouse_data(adata) else 'human'
     df_ligrec = ct.pp.ligand_receptor_database(
         database='CellChat', 
@@ -122,15 +122,13 @@ def init_received_ligands(adata, radius, contact_distance, cell_threshes, lig_re
     adata.uns['received_ligands'] = received_ligands(
         xy=adata.obsm['spatial'], 
         ligands_df=get_filtered_df(counts_df, cell_thresholds=cell_threshes, genes=ligands),
-        lr_info=lr,
-        lig_receivers=lig_receivers,
+        lr_info=lr
     )
 
     adata.uns['received_ligands_tfl'] = received_ligands(
         xy=adata.obsm['spatial'], 
         ligands_df=get_filtered_df(counts_df, None, genes=ligands), # Only Commot LRs should be filtered
-        lr_info=lr,
-        lig_receivers=None
+        lr_info=lr
     )
 
     return adata
@@ -479,18 +477,14 @@ class SpatialCellularProgramsEstimator:
         )
     
     @staticmethod
-    def check_LR_properties(adata, layer, ligands):
+    def check_LR_properties(adata, layer):
         counts_df = adata.to_df(layer=layer)
         cell_thresholds = adata.uns.get('cell_thresholds', None)
-        lig_receivers = adata.uns.get('ligand_receivers', None)
 
         if cell_thresholds is None:
             print('warning: cell_thresholds not found in adata.uns')
-        
-        if lig_receivers is None:
-            print('warning: no ligand receivers specified in adata.uns')
 
-        return counts_df, cell_thresholds, lig_receivers
+        return counts_df, cell_thresholds
 
     def init_data(self):
         """
@@ -498,8 +492,8 @@ class SpatialCellularProgramsEstimator:
         and ligand-regulators pairs with low std across clusters
         """
 
-        lr_info = self.check_LR_properties(self.adata, self.layer, self.ligands)
-        counts_df, cell_thresholds, lig_receivers = lr_info
+        lr_info = self.check_LR_properties(self.adata, self.layer)
+        counts_df, cell_thresholds = lr_info
 
         if not all(
             hasattr(self.adata.uns, attr) 
@@ -509,8 +503,7 @@ class SpatialCellularProgramsEstimator:
                 self.adata,
                 radius=self.radius, 
                 contact_distance=self.contact_distance, 
-                cell_threshes=cell_thresholds,
-                lig_receivers=lig_receivers
+                cell_threshes=cell_thresholds
             )
 
         if len(self.lr['pairs']) > 0:
