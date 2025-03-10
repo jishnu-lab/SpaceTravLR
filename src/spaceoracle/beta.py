@@ -94,6 +94,8 @@ class BetaFrame(pd.DataFrame):
                 self.tfl_ligands + self.tfl_regulators)
             ]
         
+        self._ligands = np.unique(list(self.ligands))
+        self._tfl_ligands = np.unique(list(self.tfl_ligands))
         self._all_ligands = np.unique(list(self.ligands) + list(self.tfl_ligands))
 
         # self.df_lr_columns = [f'beta_{r}' for r in self.receptors]+ \
@@ -107,7 +109,7 @@ class BetaFrame(pd.DataFrame):
         self.tfl_pairs = [pair.split('#') for pair in self.tfl_pairs]
     
 
-    def splash(self, rw_ligands, gex_df):
+    def splash(self, rw_ligands, rw_ligands_tfl, gex_df, scale_factor=1e5):
         ## wL is the amount of ligand 'received' at each location
         ## assuming ligands and receptors expression are independent, dL/dR = 0
         ## y = b0 + b1*TF1 + b2*wL1R1 + b3*wL1R2
@@ -136,22 +138,26 @@ class BetaFrame(pd.DataFrame):
         tfl_betas = self.filter(like='#', axis=1)
 
         rec_derivatives = pd.DataFrame(
-            lr_betas.values * rw_ligands[self.ligands].values, 
+            np.where(
+                gex_df[self.receptors].values > 0, # LR receptor betas only present if receptor is important to cell   
+                lr_betas.values * rw_ligands[self.ligands].values,
+                0
+            ), 
             index=self.index, 
             columns=self.receptors
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         lig_lr_derivatives = pd.DataFrame(
             lr_betas.values * gex_df[self.receptors].values, 
             index=self.index, 
             columns=self.ligands
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         lig_tfl_derivatives = pd.DataFrame(
             tfl_betas.values * gex_df[self.tfl_regulators].values, 
             index=self.index, 
             columns=self.tfl_ligands
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         tf_derivatives = pd.DataFrame(
             self[self.tf_columns].values,
@@ -160,10 +166,10 @@ class BetaFrame(pd.DataFrame):
         ).astype(float)
 
         tf_tfl_derivatives = pd.DataFrame(
-            tfl_betas.values * rw_ligands[self.tfl_ligands].values,
+            tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
             index=self.index,
             columns=self.tfl_regulators
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         _df = pd.concat(
             [
@@ -175,15 +181,16 @@ class BetaFrame(pd.DataFrame):
             ], axis=1).groupby(level=0, axis=1).sum()
 
         _df.columns = 'beta_' + _df.columns.astype(str)
+        # print(_df)
         return _df[self.modulators_genes]
     
     
-    def splash_fast(self, rw_ligands, gex_df):
+    def splash_fast(self, rw_ligands, rw_ligands_tfl, gex_df):
         # Extract needed data as numpy arrays for better performance
         tf_values = self[self.tf_columns].values  # Use tf_columns which has the 'beta_' prefix
         lr_ligands = rw_ligands[self.ligands].values
         lr_receptors = gex_df[self.receptors].values
-        tfl_ligands = rw_ligands[self.tfl_ligands].values
+        tfl_ligands = rw_ligands_tfl[self.tfl_ligands].values
         tfl_regulators = gex_df[self.tfl_regulators].values
         
         # Get all betas as numpy arrays
@@ -205,7 +212,6 @@ class BetaFrame(pd.DataFrame):
         # Add prefix and handle duplicates in one step
         _df.columns = 'beta_' + _df.columns.astype(str)
         _df = _df.groupby(_df.columns, axis=1).sum()
-        
         return _df[self.modulators_genes]
 
 
@@ -243,6 +249,7 @@ class Betabase:
 
         self.data = {}
         self.ligands_set = set()
+        self.tfl_ligands_set = set()
         self.float16 = float16
         self.load_betas_from_disk(cell_index=cell_index)
 
@@ -255,7 +262,9 @@ class Betabase:
         for path in tqdm(self.beta_paths):
             gene_name = path.split('/')[-1].split('_')[0]
             self.data[gene_name] = BetaFrame.from_path(path, cell_index=cell_index)
-            self.ligands_set.update(self.data[gene_name]._all_ligands)
+            self.ligands_set.update(self.data[gene_name]._ligands)
+            self.tfl_ligands_set.update(self.data[gene_name]._tfl_ligands)
+
         
         for gene_name, betadata in self.data.items():
             betadata.modulator_gene_indices = [
