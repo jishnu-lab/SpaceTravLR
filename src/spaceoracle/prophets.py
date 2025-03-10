@@ -307,12 +307,13 @@ class Prophet(BaseTravLR):
             
             delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
             _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
-            delta_simulated = delta_simulated + np.array(_simulated)
+            # delta_simulated = delta_simulated + np.array(_simulated)
             
             assert not np.isnan(_simulated).any(), "NaN values found in delta_simulated"
             
             # ensure values in delta_simulated match our desired KO / input
             delta_simulated = np.where(delta_input != 0, delta_input, delta_simulated)
+            print(pd.DataFrame(delta_simulated, index=self.adata.obs_names, columns=self.adata.var_names))
 
             # Don't allow simulated to exceed observed values
             gem_tmp = gene_mtx + delta_simulated
@@ -326,11 +327,6 @@ class Prophet(BaseTravLR):
 
             if retain_propagation:
                 propagations.append(gene_mtx + delta_simulated)
-   
-            # save weighted ligand values to weight betas of next iteration
-            w_ligands_0 = w_ligands_1.copy()
-            w_tfligands_0 = w_tfligands_1.copy()
-            weighted_ligands_0 = weighted_ligands_1.copy()
             
             del beta_dict
             gc.collect()
