@@ -118,14 +118,14 @@ class Prophet(BaseTravLR):
         
 
 
-    def process_gene(self, item, weighted_ligands, weighted_ligands_tfl, gene_mtx):
+    def process_gene(self, item, weighted_ligands, weighted_ligands_tfl, filtered_df):
         gene, betadata = item
-        return gene, self._combine_gene_wbetas(weighted_ligands, weighted_ligands_tfl, gene_mtx, betadata)
+        return gene, self._combine_gene_wbetas(weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
             
     
     def _get_wbetas_dict(self, betas_dict, weighted_ligands, weighted_ligands_tfl, gene_mtx, cell_thresholds):
 
-        gex_df = get_filtered_df(
+        gex_df = get_filtered_df(       # mask out receptors too
             counts_df=pd.DataFrame(
                 gene_mtx, 
                 index=self.adata.obs_names, 
@@ -133,13 +133,13 @@ class Prophet(BaseTravLR):
             ),
             cell_thresholds=cell_thresholds,
             genes=self.adata.var_names
-        )
+        )[self.adata.var_names] 
         
         # out_dict = {}
         self.update_status(f'Computing Ligand interactions', color='black_on_salmon')
         
         process_gene_partial = partial(
-            self.process_gene, weighted_ligands=weighted_ligands, weighted_ligands_tfl=weighted_ligands_tfl, gene_mtx=gex_df)
+            self.process_gene, weighted_ligands=weighted_ligands, weighted_ligands_tfl=weighted_ligands_tfl, filtered_df=gex_df)
         
         results = pqdm(
             betas_dict.data.items(), 
@@ -163,9 +163,13 @@ class Prophet(BaseTravLR):
 
         return dict(results)
 
-    def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, gex_df, betadata):
-        # betas_df = betadata.splash_fast(rw_ligands, gex_df) ## this works but doesn't seem faster
-        betas_df = betadata.splash(rw_ligands, rw_ligands_tfl, gex_df)
+    def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata):
+        # betas_df = betadata.splash_fast(rw_ligands, rw_ligands_tfl, gex_df) ## this works but doesn't seem faster
+        betas_df = betadata.splash(
+            rw_ligands, 
+            rw_ligands_tfl, 
+            filtered_df
+        )
         
         return betas_df
         
@@ -207,11 +211,11 @@ class Prophet(BaseTravLR):
             
             _beta_out = betas_dict.get(gene, None)
             if _beta_out is not None:
+
                 # mod_idx = np.array(_beta_out.modulator_gene_indices)
                 mod_idx = np.array(self.beta_dict.data[gene].modulator_gene_indices)
                 
                 result[:, i] = np.sum(_beta_out.values * gex_delta[:, mod_idx], axis=1)
-        
         return result
 
     def perturb(self, target, gene_mtx=None, n_propagation=2, gene_expr=0, 
@@ -249,9 +253,7 @@ class Prophet(BaseTravLR):
             cell_thresholds = cell_thresholds.reindex(              # Only commot LR values should be filtered
                 index=self.adata.obs_names, columns=self.adata.var_names, fill_value=1)
         else:
-            cell_thresholds = None   
             print('warning: cell_thresholds not found in adata.uns')
-
 
         w_ligands_0 = self.adata.uns.get('received_ligands')
         w_tfligands_0 = self.adata.uns.get('received_ligandds_tfl')
@@ -292,9 +294,7 @@ class Prophet(BaseTravLR):
                 columns=self.adata.var_names, fill_value=0).values
             
             delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
-
             _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
-            
             delta_simulated = np.array(_simulated)
             assert not np.isnan(delta_simulated).any(), "NaN values found in delta_simulated"
             

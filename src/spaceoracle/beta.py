@@ -138,7 +138,11 @@ class BetaFrame(pd.DataFrame):
         tfl_betas = self.filter(like='#', axis=1)
 
         rec_derivatives = pd.DataFrame(
-            lr_betas.values * rw_ligands[self.ligands].values, 
+            np.where(
+                gex_df[self.receptors].values > 0, # LR receptor betas only present if receptor is important to cell   
+                lr_betas.values * rw_ligands[self.ligands].values,
+                0
+            ), 
             index=self.index, 
             columns=self.receptors
         ).astype(float)
@@ -180,12 +184,12 @@ class BetaFrame(pd.DataFrame):
         return _df[self.modulators_genes]
     
     
-    def splash_fast(self, rw_ligands, gex_df):
+    def splash_fast(self, rw_ligands, rw_ligands_tfl, gex_df):
         # Extract needed data as numpy arrays for better performance
         tf_values = self[self.tf_columns].values  # Use tf_columns which has the 'beta_' prefix
         lr_ligands = rw_ligands[self.ligands].values
         lr_receptors = gex_df[self.receptors].values
-        tfl_ligands = rw_ligands[self.tfl_ligands].values
+        tfl_ligands = rw_ligands_tfl[self.tfl_ligands].values
         tfl_regulators = gex_df[self.tfl_regulators].values
         
         # Get all betas as numpy arrays
@@ -207,7 +211,6 @@ class BetaFrame(pd.DataFrame):
         # Add prefix and handle duplicates in one step
         _df.columns = 'beta_' + _df.columns.astype(str)
         _df = _df.groupby(_df.columns, axis=1).sum()
-        
         return _df[self.modulators_genes]
 
 
