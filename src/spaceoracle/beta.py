@@ -109,7 +109,7 @@ class BetaFrame(pd.DataFrame):
         self.tfl_pairs = [pair.split('#') for pair in self.tfl_pairs]
     
 
-    def splash(self, rw_ligands, rw_ligands_tfl, gex_df):
+    def splash(self, rw_ligands, rw_ligands_tfl, gex_df, scale_factor=1e5):
         ## wL is the amount of ligand 'received' at each location
         ## assuming ligands and receptors expression are independent, dL/dR = 0
         ## y = b0 + b1*TF1 + b2*wL1R1 + b3*wL1R2
@@ -138,22 +138,26 @@ class BetaFrame(pd.DataFrame):
         tfl_betas = self.filter(like='#', axis=1)
 
         rec_derivatives = pd.DataFrame(
-            lr_betas.values * rw_ligands[self.ligands].values, 
+            np.where(
+                gex_df[self.receptors].values > 0, # LR receptor betas only present if receptor is important to cell   
+                lr_betas.values * rw_ligands[self.ligands].values,
+                0
+            ), 
             index=self.index, 
             columns=self.receptors
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         lig_lr_derivatives = pd.DataFrame(
             lr_betas.values * gex_df[self.receptors].values, 
             index=self.index, 
             columns=self.ligands
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         lig_tfl_derivatives = pd.DataFrame(
             tfl_betas.values * gex_df[self.tfl_regulators].values, 
             index=self.index, 
             columns=self.tfl_ligands
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         tf_derivatives = pd.DataFrame(
             self[self.tf_columns].values,
@@ -165,7 +169,7 @@ class BetaFrame(pd.DataFrame):
             tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
             index=self.index,
             columns=self.tfl_regulators
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         _df = pd.concat(
             [
@@ -241,21 +245,6 @@ class Betabase:
             if self.gene_subset is not None and gene_name not in self.gene_subset:
                 continue
             self.data[gene_name] = BetaFrame.from_path(path, cell_index=cell_index)
-            
-            # betas_with_ligands = [i for i in self.data[gene_name].columns if '$' in i or '#' in i]
-            # _underscaled_df = self.data[gene_name][betas_with_ligands]
-            # self.data[gene_name][betas_with_ligands] = _underscaled_df * 100
-            
-            # betas_tfl = [i for i in self.data[gene_name].columns if '#' in i]
-            # _underscaled_df = self.data[gene_name][betas_tfl]
-            # self.data[gene_name][betas_tfl] = _underscaled_df * 0
-            
-            # betas_tfl = [i for i in self.data[gene_name].columns if '$' in i]
-            # _underscaled_df = self.data[gene_name][betas_tfl]
-            # self.data[gene_name][betas_tfl] = _underscaled_df * 0
-            
-            
-            
             self.ligands_set.update(self.data[gene_name]._ligands)
             self.tfl_ligands_set.update(self.data[gene_name]._tfl_ligands)
 
