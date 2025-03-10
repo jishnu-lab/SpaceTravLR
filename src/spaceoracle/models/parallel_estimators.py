@@ -108,7 +108,7 @@ def create_spatial_features(x, y, celltypes, obs_index, radius=200):
         result[:, i] = np.sum(neighbors, axis=1)
     
     if result.shape != (len(x), len(unique_celltypes)):
-        raise ValueError(f"Unexpected result shape: {result.shape}. Expected: {(len(x), len(unique_celltypes))}")
+        raise ValueError(f"Expected: {(len(x), len(unique_celltypes))}")
     
     columns = [f'{ct}_within' for ct in unique_celltypes]
     df = pd.DataFrame(result, columns=columns, index=obs_index)
@@ -298,8 +298,6 @@ class SpatialCellularProgramsEstimator:
             self.regulators = regulators
             self.grn = None
 
-        # self.init_ligands_and_receptors()
-        
         if self.use_ligands:
         
             ligand_mixtures = init_ligands_and_receptors(
@@ -609,7 +607,7 @@ class SpatialCellularProgramsEstimator:
         self.Xn = X
         self.yn = y
         self.sp_maps = sp_maps
-        self.cell_indices = self.adata.obs.index
+        self.cell_indices = self.adata.obs.index.copy()
         self.cluster_labels = cluster_labels
 
         if pbar is None:
