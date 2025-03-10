@@ -181,39 +181,7 @@ class BetaFrame(pd.DataFrame):
             ], axis=1).groupby(level=0, axis=1).sum()
 
         _df.columns = 'beta_' + _df.columns.astype(str)
-        # print(_df)
         return _df[self.modulators_genes]
-    
-    
-    def splash_fast(self, rw_ligands, rw_ligands_tfl, gex_df):
-        # Extract needed data as numpy arrays for better performance
-        tf_values = self[self.tf_columns].values  # Use tf_columns which has the 'beta_' prefix
-        lr_ligands = rw_ligands[self.ligands].values
-        lr_receptors = gex_df[self.receptors].values
-        tfl_ligands = rw_ligands_tfl[self.tfl_ligands].values
-        tfl_regulators = gex_df[self.tfl_regulators].values
-        
-        # Get all betas as numpy arrays
-        lr_betas = self[[f'beta_{a}${b}' for a, b in zip(self.ligands, self.receptors)]].values
-        tfl_betas = self[[f'beta_{a}#{b}' for a, b in zip(self.tfl_ligands, self.tfl_regulators)]].values
-        
-
-        # Compute all derivatives at once using JIT
-        rec_derivs, lig_lr_derivs, lig_tfl_derivs, tf_tfl_derivs = compute_all_derivatives(
-            tf_values, lr_betas, lr_ligands, lr_receptors, tfl_betas, tfl_ligands, tfl_regulators
-        )
-        
-        # Create DataFrames from the computed arrays
-        # Create single DataFrame directly instead of list + concat
-        columns = self.receptors + self.ligands + self.tfl_ligands + self.tfs + self.tfl_regulators
-        values = np.hstack([rec_derivs, lig_lr_derivs, lig_tfl_derivs, tf_values, tf_tfl_derivs])
-        _df = pd.DataFrame(values, index=self.index, columns=columns)
-        
-        # Add prefix and handle duplicates in one step
-        _df.columns = 'beta_' + _df.columns.astype(str)
-        _df = _df.groupby(_df.columns, axis=1).sum()
-        return _df[self.modulators_genes]
-
 
         
     def _repr_html_(self):
@@ -231,7 +199,7 @@ class Betabase:
     """
     Holds a collection of BetaFrames for each gene.
     """
-    def __init__(self, adata, folder, cell_index=None, subsample=None, float16=False):
+    def __init__(self, adata, folder, gene_subset=None, cell_index=None, subsample=None, float16=False):
         assert os.path.exists(folder), f'Folder {folder} does not exist'
         # self.adata = adata
         self.xydf = pd.DataFrame(
@@ -243,7 +211,9 @@ class Betabase:
                 range(len(adata.var_names))
             )
         )
+        self.gene_subset = gene_subset
         self.beta_paths = glob.glob(f'{self.folder}/*_betadata.parquet')
+        
         if subsample is not None:
             self.beta_paths = self.beta_paths[:subsample]
 
@@ -255,18 +225,34 @@ class Betabase:
 
     def __len__(self):
         return len(self.data)
+    
+    def __getitem__(self, gene_name):
+        return self.data.get(gene_name, None)
 
 
     def load_betas_from_disk(self, cell_index):
-        from tqdm import tqdm
-        for path in tqdm(self.beta_paths):
+        import enlighten
+        manager = enlighten.get_manager()
+        progress_bar = manager.counter(
+            total=len(self.beta_paths),
+            desc='Reading betadata files',
+            unit='parquet',
+            color='lightblue',
+            autorefresh=True,
+        )   
+        for path in self.beta_paths:
             gene_name = path.split('/')[-1].split('_')[0]
+            if self.gene_subset is not None and gene_name not in self.gene_subset:
+                continue
             self.data[gene_name] = BetaFrame.from_path(path, cell_index=cell_index)
             self.ligands_set.update(self.data[gene_name]._ligands)
             self.tfl_ligands_set.update(self.data[gene_name]._tfl_ligands)
 
+            progress_bar.update()
         
         for gene_name, betadata in self.data.items():
             betadata.modulator_gene_indices = [
                 self.gene2index[g.replace('beta_', '')] for g in betadata.modulators_genes
             ]
+            
+        progress_bar.close()

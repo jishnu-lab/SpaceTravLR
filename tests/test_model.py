@@ -97,6 +97,8 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
         self.adata.var_names = gene_names
         self.adata.obs_names = [f'cell_{i}' for i in range(self.n_cells)]
         self.adata.obs['rctd_cluster'] = clusters
+        self.adata.obs['cell_type_int'] = clusters
+        
         self.adata.obsm['spatial'] = spatial_coords
         
         # Add imputed count layer
@@ -217,7 +219,6 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
             estimator = SpatialCellularProgramsEstimator(
                 adata=self.adata,
                 target_gene='target_gene',
-                cluster_annot='rctd_cluster',
                 layer='imputed_count',
                 radius=200,
                 contact_distance=50,
