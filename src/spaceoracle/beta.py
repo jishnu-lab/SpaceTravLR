@@ -109,7 +109,7 @@ class BetaFrame(pd.DataFrame):
         self.tfl_pairs = [pair.split('#') for pair in self.tfl_pairs]
     
 
-    def splash(self, rw_ligands, rw_ligands_tfl, gex_df):
+    def splash(self, rw_ligands, rw_ligands_tfl, gex_df, scale_factor=1e5):
         ## wL is the amount of ligand 'received' at each location
         ## assuming ligands and receptors expression are independent, dL/dR = 0
         ## y = b0 + b1*TF1 + b2*wL1R1 + b3*wL1R2
@@ -145,19 +145,19 @@ class BetaFrame(pd.DataFrame):
             ), 
             index=self.index, 
             columns=self.receptors
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         lig_lr_derivatives = pd.DataFrame(
             lr_betas.values * gex_df[self.receptors].values, 
             index=self.index, 
             columns=self.ligands
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         lig_tfl_derivatives = pd.DataFrame(
             tfl_betas.values * gex_df[self.tfl_regulators].values, 
             index=self.index, 
             columns=self.tfl_ligands
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         tf_derivatives = pd.DataFrame(
             self[self.tf_columns].values,
@@ -169,7 +169,7 @@ class BetaFrame(pd.DataFrame):
             tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
             index=self.index,
             columns=self.tfl_regulators
-        ).astype(float)
+        ).astype(float) * scale_factor
 
         _df = pd.concat(
             [
@@ -181,6 +181,7 @@ class BetaFrame(pd.DataFrame):
             ], axis=1).groupby(level=0, axis=1).sum()
 
         _df.columns = 'beta_' + _df.columns.astype(str)
+        # print(_df)
         return _df[self.modulators_genes]
     
     

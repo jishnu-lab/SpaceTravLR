@@ -102,7 +102,8 @@ class Prophet(BaseTravLR):
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
                 ligands_df=get_filtered_df(gex_df, cell_thresholds, genes),
-                lr_info=self.lr
+                lr_info=self.lr,
+                scale_factor=1
         )
         else:
             weighted_ligands = []
@@ -252,6 +253,7 @@ class Prophet(BaseTravLR):
         if cell_thresholds is not None:
             cell_thresholds = cell_thresholds.reindex(              # Only commot LR values should be filtered
                 index=self.adata.obs_names, columns=self.adata.var_names, fill_value=1)
+            self.adata.uns['cell_thresholds'] = cell_thresholds
         else:
             print('warning: cell_thresholds not found in adata.uns')
 
@@ -261,12 +263,17 @@ class Prophet(BaseTravLR):
             w_ligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds, genes=self.ligands)
             w_tfligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds=None, genes=self.tfl_ligands)
         
-        weighted_ligands_0 = w_ligands_0.add(w_tfligands_0, fill_value=0).reindex(columns=self.adata.var_names, fill_value=0)
+        weighted_ligands_0 = pd.concat(
+                [w_ligands_0, w_tfligands_0], axis=1
+            ).groupby(level=0, axis=1).max().reindex(
+                index=self.adata.obs_names, columns=self.adata.var_names, fill_value=0)
 
         gene_mtx_1 = gene_mtx.copy()
         
         self.iter = 0
         self.max_iter = n_propagation
+        min_ = 0
+        max_ = gene_mtx.max(axis=0)
         
         ## refer: src/celloracle/trajectory/oracle_GRN.py
 
@@ -285,30 +292,34 @@ class Prophet(BaseTravLR):
 
             # update deltas to reflect change in received ligands
             # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
-            weighted_ligands_1 = w_ligands_1.add(w_tfligands_1, fill_value=0).reindex(columns=self.adata.var_names, fill_value=0)
+            weighted_ligands_1 = pd.concat(
+                    [w_ligands_1, w_tfligands_1], axis=1
+                ).groupby(level=0, axis=1).max().reindex(
+                    index=self.adata.obs_names, columns=self.adata.var_names, fill_value=0)
             delta_weighted_ligands = weighted_ligands_1.values - weighted_ligands_0.values
 
             delta_df = pd.DataFrame(
                 delta_simulated, columns=self.adata.var_names, index=self.adata.obs_names)
-            delta_ligands = delta_df[self.ligands].add(delta_df[self.tfl_ligands], fill_value=0).reindex(
-                columns=self.adata.var_names, fill_value=0).values
+            delta_ligands = pd.concat(
+                    [delta_df[self.ligands], delta_df[self.tfl_ligands]], axis=1
+                ).groupby(level=0, axis=1).max().reindex(
+                    index=self.adata.obs_names, columns=self.adata.var_names, fill_value=0).values
             
             delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
             _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
-            delta_simulated = np.array(_simulated)
-            assert not np.isnan(delta_simulated).any(), "NaN values found in delta_simulated"
+            delta_simulated = delta_simulated + np.array(_simulated)
+            
+            assert not np.isnan(_simulated).any(), "NaN values found in delta_simulated"
             
             # ensure values in delta_simulated match our desired KO / input
             delta_simulated = np.where(delta_input != 0, delta_input, delta_simulated)
 
             # Don't allow simulated to exceed observed values
             gem_tmp = gene_mtx + delta_simulated
-            min_ = 0
-            max_ = gene_mtx.max(axis=0)
             gem_tmp = pd.DataFrame(gem_tmp).clip(lower=min_, upper=max_, axis=1).values
 
             delta_simulated = gem_tmp - gene_mtx # update delta_simulated in case of negative values
-
+            
             if delta_dir:
                 os.makedirs(delta_dir, exist_ok=True)
                 np.save(f'{delta_dir}/{target}_{n}n_{gene_expr}x.npy', delta_simulated)
