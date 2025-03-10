@@ -75,7 +75,7 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1):
                 xy, ligands_df[radius_ligands], radius, scale_factor
             )
         )
-        
+
     full_df = pd.concat([df for df in full_df if not df.empty], axis=1)
     full_df = full_df.reindex(ligands_df.index).reindex(ligands_df.columns, axis=1).fillna(0)
 
