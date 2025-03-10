@@ -132,22 +132,6 @@ def test_space_oracle_initialization(mock_adata_with_true_betas, temp_dir):
     assert space_oracle.grn is not None
     assert space_oracle.queue is not None
 
-# @pytest.mark.parametrize("estimator_class", [ProbabilisticPixelModulators])
-# def test_space_oracle_run(mock_adata_with_true_betas, temp_dir, estimator_class):
-#     adata = mock_adata_with_true_betas
-#     with patch('spaceoracle.oracles.PixelAttention', MagicMock(return_value=estimator_class(adata, 'Cd74'))):
-#         space_oracle = SpaceOracle(adata, save_dir=temp_dir, max_epochs=2, batch_size=3)
-#         space_oracle.adata.uns['received_ligands'] = ProbabilisticPixelModulators.received_ligands(
-#             xy=adata.obsm['spatial'], 
-#             lig_df=adata.to_df()[[adata.var_names[0]]], 
-#             radius=10, 
-#         )
-#         space_oracle.run()
-
-#     assert len(space_oracle.queue.completed_genes) > 0
-#     assert len(space_oracle.trained_genes) > 0
-#     assert len(os.listdir(temp_dir)) > 0
-
 
 def test_lr_radius(mock_adata_with_true_betas):
     adata = mock_adata_with_true_betas
