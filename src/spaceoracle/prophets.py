@@ -17,7 +17,7 @@ import os
 EPS = 1e-6
 
 class Prophet(BaseTravLR):
-    def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30):
+    def __init__(self, adata, models_dir, annot='cell_type_int', gene_subset=None, radius=100, contact_distance=30):
         
         super().__init__(adata, fields_to_keep=[annot])
         
@@ -26,6 +26,7 @@ class Prophet(BaseTravLR):
         self.annot = annot
         self.save_dir = models_dir
         self.radius = radius
+        self.gene_subset = gene_subset
         self.contact_distance = contact_distance
         self.species = 'mouse' if is_mouse_data(adata) else 'human'
 
@@ -91,7 +92,7 @@ class Prophet(BaseTravLR):
     def load_betadata(gene, save_dir):
         return pd.read_parquet(f'{save_dir}/{gene}_betadata.parquet')
     
-    def _compute_weighted_ligands(self, gene_mtx, cell_thresholds):
+    def _compute_weighted_ligands(self, gene_mtx, cell_thresholds, genes, scale_factor=1e5):
         self.update_status('Computing received ligands', color='black_on_cyan')
         gex_df = pd.DataFrame(
             gene_mtx, 
@@ -99,13 +100,12 @@ class Prophet(BaseTravLR):
             columns=self.adata.var_names
         )
         
-
         if len(self.ligands) > 0:
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
-                # ligands_df=gex_df[self.ligands],
-                ligands_df=get_filtered_df(gex_df, cell_thresholds, self.ligands),
-                lr_info=self.lr
+                ligands_df=get_filtered_df(gex_df, cell_thresholds, genes),
+                lr_info=self.lr,
+                scale_factor=scale_factor
         )
         else:
             weighted_ligands = []
@@ -121,12 +121,12 @@ class Prophet(BaseTravLR):
         
 
 
-    def process_gene(self, item, weighted_ligands, gene_mtx):
+    def process_gene(self, item, weighted_ligands, weighted_ligands_tfl, gene_mtx):
         gene, betadata = item
-        return gene, self._combine_gene_wbetas(weighted_ligands, gene_mtx, betadata)
+        return gene, self._combine_gene_wbetas(weighted_ligands, weighted_ligands_tfl, gene_mtx, betadata)
             
     
-    def _get_wbetas_dict(self, betas_dict, weighted_ligands, gene_mtx, cell_thresholds):
+    def _get_wbetas_dict(self, betas_dict, weighted_ligands, weighted_ligands_tfl, gene_mtx, cell_thresholds):
 
         gex_df = get_filtered_df(
             counts_df=pd.DataFrame(
@@ -143,7 +143,7 @@ class Prophet(BaseTravLR):
                 color='black_on_salmon')
         
         process_gene_partial = partial(
-            self.process_gene, weighted_ligands=weighted_ligands, gene_mtx=gex_df)
+            self.process_gene, weighted_ligands=weighted_ligands, weighted_ligands_tfl=weighted_ligands_tfl, gene_mtx=gex_df)
         
         results = pqdm(
             betas_dict.data.items(), 
@@ -167,15 +167,16 @@ class Prophet(BaseTravLR):
 
         return dict(results)
 
-    def _combine_gene_wbetas(self, rw_ligands, gex_df, betadata):
+    def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, gex_df, betadata):
         # betas_df = betadata.splash_fast(rw_ligands, gex_df) ## this works but doesn't seem faster
-        betas_df = betadata.splash(rw_ligands, gex_df)
+        betas_df = betadata.splash(rw_ligands, rw_ligands_tfl, gex_df)
         
         return betas_df
         
     def _get_spatial_betas_dict(self, subsample=None, float16=False):
-        bdb = Betabase(self.adata, self.save_dir, subsample=subsample, float16=float16)
+        bdb = Betabase(self.adata, self.save_dir, gene_subset=self.gene_subset, subsample=subsample, float16=float16)
         self.ligands = list(bdb.ligands_set)
+        self.tfl_ligands = list(bdb.tfl_ligands_set)
         return bdb
     
     def _perturb_single_cell(self, gex_delta, cell_index, betas_dict):
@@ -252,11 +253,15 @@ class Prophet(BaseTravLR):
             cell_thresholds = None   
             print('warning: cell_thresholds not found in adata.uns')
 
-        weighted_ligands_0 = self.adata.uns.get('received_ligands')
-        if weighted_ligands_0 is None:
-            weighted_ligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds)
+
+        w_ligands_0 = self.adata.uns.get('received_ligands')
+        w_tfligands_0 = self.adata.uns.get('received_ligandds_tfl')
+        if w_ligands_0 is None or w_tfligands_0 is None:
+            w_ligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds, genes=self.ligands, scale_factor=1)
+            w_tfligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds=None, genes=self.tfl_ligands, scale_factor=1)
+        
+        weighted_ligands_0 = w_ligands_0.add(w_tfligands_0, fill_value=0).reindex(columns=self.adata.var_names, fill_value=0)
             
-        weighted_ligands_0 = weighted_ligands_0.reindex(columns=self.adata.var_names, fill_value=0)
 
         gene_mtx_1 = gene_mtx.copy()
         
@@ -270,23 +275,29 @@ class Prophet(BaseTravLR):
             self.update_status(f'{target} -> {gene_expr} - {n+1}/{n_propagation}', color='black_on_salmon')
 
             # weight betas by the gene expression from the previous iteration
-            beta_dict = self._get_wbetas_dict(self.beta_dict, weighted_ligands_0, gene_mtx_1, cell_thresholds)
+            beta_dict = self._get_wbetas_dict(
+                self.beta_dict, w_ligands_0, w_tfligands_0, gene_mtx_1, cell_thresholds)
 
             # get updated gene expressions
             gene_mtx_1 = gene_mtx + delta_simulated
-            weighted_ligands_1 = self._compute_weighted_ligands(gene_mtx_1, cell_thresholds)
+            w_ligands_1 = self._compute_weighted_ligands(gene_mtx_1, cell_thresholds, genes=self.ligands, scale_factor=1)
+            w_tfligands_1 = self._compute_weighted_ligands(gene_mtx_1, cell_thresholds=None, genes=self.tfl_ligands, scale_factor=1)
 
             # update deltas to reflect change in received ligands
             # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
-            weighted_ligands_1 = weighted_ligands_1.reindex(columns=self.adata.var_names, fill_value=0)
+            weighted_ligands_1 = w_ligands_1.add(w_tfligands_1, fill_value=0).reindex(columns=self.adata.var_names, fill_value=0)
             delta_weighted_ligands = weighted_ligands_1.values - weighted_ligands_0.values
+            
+            # print(delta_weighted_ligands.min(), delta_weighted_ligands.max())
 
             delta_df = pd.DataFrame(
                 delta_simulated, columns=self.adata.var_names, index=self.adata.obs_names)
-            delta_ligands = delta_df[self.ligands].reindex(
+            delta_ligands = delta_df[self.ligands].add(delta_df[self.tfl_ligands], fill_value=0).reindex(
                 columns=self.adata.var_names, fill_value=0).values
             
             delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
+            # delta_simulated = delta_simulated + delta_weighted_ligands
+            
 
             _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
             
@@ -312,7 +323,9 @@ class Prophet(BaseTravLR):
                 np.save(f'/tmp/{target}_{n+1}.npy', gene_mtx + delta_simulated)
    
             # save weighted ligand values to weight betas of next iteration
-            weighted_ligands_0 = weighted_ligands_1.copy()
+            # w_ligands_0 = w_ligands_1.copy()
+            # w_tfligands_0 = w_tfligands_1.copy()
+            # weighted_ligands_0 = weighted_ligands_1.copy()
             
             del beta_dict
             gc.collect()

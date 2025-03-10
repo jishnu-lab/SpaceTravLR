@@ -94,6 +94,8 @@ class BetaFrame(pd.DataFrame):
                 self.tfl_ligands + self.tfl_regulators)
             ]
         
+        self._ligands = np.unique(list(self.ligands))
+        self._tfl_ligands = np.unique(list(self.tfl_ligands))
         self._all_ligands = np.unique(list(self.ligands) + list(self.tfl_ligands))
 
         # self.df_lr_columns = [f'beta_{r}' for r in self.receptors]+ \
@@ -107,7 +109,7 @@ class BetaFrame(pd.DataFrame):
         self.tfl_pairs = [pair.split('#') for pair in self.tfl_pairs]
     
 
-    def splash(self, rw_ligands, gex_df):
+    def splash(self, rw_ligands, rw_ligands_tfl, gex_df):
         ## wL is the amount of ligand 'received' at each location
         ## assuming ligands and receptors expression are independent, dL/dR = 0
         ## y = b0 + b1*TF1 + b2*wL1R1 + b3*wL1R2
@@ -160,7 +162,7 @@ class BetaFrame(pd.DataFrame):
         ).astype(float)
 
         tf_tfl_derivatives = pd.DataFrame(
-            tfl_betas.values * rw_ligands[self.tfl_ligands].values,
+            tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
             index=self.index,
             columns=self.tfl_regulators
         ).astype(float)
@@ -193,7 +195,7 @@ class Betabase:
     """
     Holds a collection of BetaFrames for each gene.
     """
-    def __init__(self, adata, folder, cell_index=None, subsample=None, float16=False):
+    def __init__(self, adata, folder, gene_subset=None, cell_index=None, subsample=None, float16=False):
         assert os.path.exists(folder), f'Folder {folder} does not exist'
         # self.adata = adata
         self.xydf = pd.DataFrame(
@@ -205,6 +207,7 @@ class Betabase:
                 range(len(adata.var_names))
             )
         )
+        self.gene_subset = gene_subset
         self.beta_paths = glob.glob(f'{self.folder}/*_betadata.parquet')
         
         if subsample is not None:
@@ -212,6 +215,7 @@ class Betabase:
 
         self.data = {}
         self.ligands_set = set()
+        self.tfl_ligands_set = set()
         self.float16 = float16
         self.load_betas_from_disk(cell_index=cell_index)
 
@@ -234,8 +238,27 @@ class Betabase:
         )   
         for path in self.beta_paths:
             gene_name = path.split('/')[-1].split('_')[0]
+            if self.gene_subset is not None and gene_name not in self.gene_subset:
+                continue
             self.data[gene_name] = BetaFrame.from_path(path, cell_index=cell_index)
-            self.ligands_set.update(self.data[gene_name]._all_ligands)
+            
+            # betas_with_ligands = [i for i in self.data[gene_name].columns if '$' in i or '#' in i]
+            # _underscaled_df = self.data[gene_name][betas_with_ligands]
+            # self.data[gene_name][betas_with_ligands] = _underscaled_df * 100
+            
+            # betas_tfl = [i for i in self.data[gene_name].columns if '#' in i]
+            # _underscaled_df = self.data[gene_name][betas_tfl]
+            # self.data[gene_name][betas_tfl] = _underscaled_df * 0
+            
+            # betas_tfl = [i for i in self.data[gene_name].columns if '$' in i]
+            # _underscaled_df = self.data[gene_name][betas_tfl]
+            # self.data[gene_name][betas_tfl] = _underscaled_df * 0
+            
+            
+            
+            self.ligands_set.update(self.data[gene_name]._ligands)
+            self.tfl_ligands_set.update(self.data[gene_name]._tfl_ligands)
+
             progress_bar.update()
         
         for gene_name, betadata in self.data.items():
