@@ -26,6 +26,7 @@ from matplotlib.colors import rgb2hex
 tt = torch.tensor
 set_seed(42)
 
+
 @numba.njit(parallel=True)
 def calculate_weighted_ligands(gauss_weights, lig_df_values, u_ligands):
     n_ligands = len(u_ligands)
@@ -97,6 +98,41 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
     # return ligand_counts.reindex(genes, axis=1)
     return ligand_counts
 
+
+def init_received_ligands(adata, radius, contact_distance, cell_threshes):
+    species = 'mouse' if is_mouse_data(adata) else 'human'
+    df_ligrec = ct.pp.ligand_receptor_database(
+        database='CellChat', 
+        species=species, 
+        signaling_type=None
+    ) 
+    df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+
+    lr = expand_paired_interactions(df_ligrec)
+    lr = lr[lr.ligand.isin(adata.var_names) &\
+        (lr.receptor.isin(adata.var_names))]
+    lr['radius'] = np.where(
+        lr['signaling'] == 'Secreted Signaling', 
+        radius, contact_distance
+    )
+
+    counts_df = adata.to_df(layer='imputed_count')
+    ligands = np.unique(lr.ligand)
+
+    adata.uns['received_ligands'] = received_ligands(
+        xy=adata.obsm['spatial'], 
+        ligands_df=get_filtered_df(counts_df, cell_thresholds=cell_threshes, genes=ligands),
+        lr_info=lr
+    )
+
+    adata.uns['received_ligands_tfl'] = received_ligands(
+        xy=adata.obsm['spatial'], 
+        ligands_df=get_filtered_df(counts_df, None, genes=ligands), # Only Commot LRs should be filtered
+        lr_info=lr
+    )
+
+    return adata
+
 def create_spatial_features(x, y, celltypes, obs_index, radius=200):
     coords = np.column_stack((x, y))
     unique_celltypes = np.unique(celltypes)
@@ -114,6 +150,7 @@ def create_spatial_features(x, y, celltypes, obs_index, radius=200):
     df = pd.DataFrame(result, columns=columns, index=obs_index)
     
     return df
+
 
 
 if torch.backends.mps.is_available():
@@ -438,7 +475,16 @@ class SpatialCellularProgramsEstimator:
                 received_ligands_df.columns, regulator_gex_df.columns)], 
             index=regulator_gex_df.index
         )
+    
+    @staticmethod
+    def check_LR_properties(adata, layer):
+        counts_df = adata.to_df(layer=layer)
+        cell_thresholds = adata.uns.get('cell_thresholds', None)
 
+        if cell_thresholds is None:
+            print('warning: cell_thresholds not found in adata.uns')
+
+        return counts_df, cell_thresholds
 
     def init_data(self):
         """
@@ -446,22 +492,22 @@ class SpatialCellularProgramsEstimator:
         and ligand-regulators pairs with low std across clusters
         """
 
-        counts_df = self.adata.to_df(layer=self.layer)
-        cell_thresholds = self.adata.uns.get('cell_thresholds', None)
+        lr_info = self.check_LR_properties(self.adata, self.layer)
+        counts_df, cell_thresholds = lr_info
 
-        if cell_thresholds is None:
-            print('warning: cell_thresholds not found in adata.uns')
+        if not all(
+            hasattr(self.adata.uns, attr) 
+            for attr in ['received_ligands', 'received_ligands_tfl']
+        ):
+            self.adata = init_received_ligands(
+                self.adata,
+                radius=self.radius, 
+                contact_distance=self.contact_distance, 
+                cell_threshes=cell_thresholds
+            )
 
         if len(self.lr['pairs']) > 0:
             
-            if not hasattr(self.adata.uns, 'received_ligands'):
-                self.adata.uns['received_ligands'] = received_ligands(
-                    self.adata.obsm['spatial'], 
-                    get_filtered_df(counts_df, cell_thresholds, self.ligands),
-                    lr_info=self.lr,
-                    scale_factor=self.scale_factor 
-                )
-
             self.adata.uns['ligand_receptor'] = self.ligands_receptors_interactions(
                 self.adata.uns['received_ligands'][self.ligands], 
                 get_filtered_df(counts_df, cell_thresholds, self.receptors)[self.receptors]
@@ -473,13 +519,6 @@ class SpatialCellularProgramsEstimator:
 
 
         if len(self.tfl_pairs) > 0:
-            
-            self.adata.uns['received_ligands_tfl'] = received_ligands(
-                self.adata.obsm['spatial'], 
-                get_filtered_df(counts_df, None, self.tfl_ligands), # Only Commot LRs should be filtered
-                lr_info=self.lr,
-                scale_factor=self.scale_factor      
-            )
 
             self.adata.uns['ligand_regulator'] = self.ligand_regulators_interactions(
                 self.adata.uns['received_ligands_tfl'][self.tfl_ligands], 
@@ -501,7 +540,6 @@ class SpatialCellularProgramsEstimator:
             )
             
         self.adata.obsm['spatial_maps'] = self.spatial_maps
-
 
         self.train_df = self.adata.to_df(layer=self.layer)[
             [self.target_gene]+self.regulators] \
