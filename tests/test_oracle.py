@@ -18,8 +18,8 @@ import anndata as ad
 
 def generate_realistic_data(noise_level=0.1):
     np.random.seed(42)
-    # adata = ad.read_h5ad('./data/slideseq/day3_1.h5ad')
-    adata = ad.read_h5ad('/ix/djishnu/alw399/SpaceOracle/data/slideseq/day3_1.h5ad')
+    adata = ad.read_h5ad('./data/slideseq/day3_1.h5ad')
+    # adata = ad.read_h5ad('/ix/djishnu/alw399/SpaceOracle/data/slideseq/day3_1.h5ad')
     grn = DayThreeRegulatoryNetwork()
 
     regulators = grn.get_regulators(adata, 'Cd74')[:5]
