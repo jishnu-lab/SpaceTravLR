@@ -258,11 +258,13 @@ class Prophet(BaseTravLR):
             print('warning: cell_thresholds not found in adata.uns')
 
         w_ligands_0 = self.adata.uns.get('received_ligands')
-        w_tfligands_0 = self.adata.uns.get('received_ligandds_tfl')
+        w_tfligands_0 = self.adata.uns.get('received_ligands_tfl')
         if w_ligands_0 is None or w_tfligands_0 is None:
             w_ligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds, genes=self.ligands)
             w_tfligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds=None, genes=self.tfl_ligands)
-        
+            self.adata.uns['received_ligands'] = w_ligands_0
+            self.adata.uns['received_ligands_tfl'] = w_tfligands_0
+
         weighted_ligands_0 = pd.concat(
                 [w_ligands_0, w_tfligands_0], axis=1
             ).groupby(level=0, axis=1).max().reindex(
@@ -307,13 +309,12 @@ class Prophet(BaseTravLR):
             
             delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
             _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
-            # delta_simulated = delta_simulated + np.array(_simulated)
+            delta_simulated = np.array(_simulated)
             
             assert not np.isnan(_simulated).any(), "NaN values found in delta_simulated"
             
             # ensure values in delta_simulated match our desired KO / input
             delta_simulated = np.where(delta_input != 0, delta_input, delta_simulated)
-            print(pd.DataFrame(delta_simulated, index=self.adata.obs_names, columns=self.adata.var_names))
 
             # Don't allow simulated to exceed observed values
             gem_tmp = gene_mtx + delta_simulated
