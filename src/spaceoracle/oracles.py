@@ -13,6 +13,7 @@ import re
 import glob
 import pickle
 import io
+import json
 import warnings
 from sklearn.decomposition import PCA
 import warnings
@@ -49,7 +50,7 @@ class BaseTravLR(ABC):
     def __init__(self, adata, fields_to_keep=['rctd_cluster', 'rctd_celltypes', 'cell_thresholds']):
         assert 'normalized_count' in adata.layers
         
-        self.settings = EasyDict({})
+        self.settings = EasyDict()
         
         self.adata = adata.copy()
         # self.adata.layers['normalized_count'] = self.adata.X.copy()
@@ -246,10 +247,11 @@ class OracleQueue:
 
 class SpaceTravLR(BaseTravLR):
 
-    def __init__(self, adata, save_dir='./models', annot='cell_type_int', grn=None,
-    max_epochs=15, spatial_dim=64, learning_rate=3e-4, batch_size=256, rotate_maps=True, 
-    layer='imputed_count', alpha=0.05,
-    threshold_lambda=3e3, tf_ligand_cutoff=0.01, radius=150, contact_distance=30):
+    def __init__(
+        self, adata, save_dir='./models', annot='cell_type_int', grn=None,
+        max_epochs=50, spatial_dim=64, learning_rate=5e-3, batch_size=512, rotate_maps=True, 
+        layer='imputed_count', alpha=0.05,
+        threshold_lambda=1e-6, tf_ligand_cutoff=0.01, radius=200, contact_distance=30):
         
         super().__init__(adata, fields_to_keep=[annot, 'cell_thresholds'])
         if grn is None:
@@ -280,33 +282,25 @@ class SpaceTravLR(BaseTravLR):
 
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
-
-
-    def watch(self, sleep=20):
-        _manager = enlighten.get_manager()
-
-        gene_bar = _manager.counter(
-            total=len(self.queue.all_genes), 
-            desc=f'... initializing ...', 
-            unit='genes',
-            color='green',
-            autorefresh=True,
-        )
-
-        try:
-
-            while not self.queue.is_empty:
-                if os.path.exists(self.save_dir+'/process.kill'):
-                    print('Found death file. Killing process')
-                    break
-
-                gene_bar.count = len(self.queue.all_genes) - len(self.queue.remaining_genes)
-                gene_bar.desc = f'🕵️️ {self.queue.agents} agents'
-                gene_bar.refresh()
-                time.sleep(sleep)
-
-        except KeyboardInterrupt:
-            pass
+        
+        if not os.path.exists(self.save_dir+'/run_params.json'):
+            with open(self.save_dir+'/run_params.json', 'w') as f:
+                json.dump({
+                    'timestamp': str(datetime.datetime.now()),
+                    'max_epochs': max_epochs,
+                    'spatial_dim': spatial_dim,
+                    'learning_rate': learning_rate,
+                    'batch_size': batch_size,
+                    'rotate_maps': rotate_maps,
+                    'threshold_lambda': threshold_lambda, 
+                    'tf_ligand_cutoff': tf_ligand_cutoff,
+                    'radius': radius,
+                    'contact_distance': contact_distance,
+                    'annot': annot,
+                    'layer': layer,
+                    'save_dir': save_dir,
+                    'n_genes': len(self.genes)
+                }, f, indent=4)
 
     
     def run(self):
@@ -391,12 +385,6 @@ class SpaceTravLR(BaseTravLR):
                 n=spatial_dim,
             ).astype(np.float32)
 
-            # min_vals = np.min(sp_maps, axis=(2, 3), keepdims=True)
-            # max_vals = np.max(sp_maps, axis=(2, 3), keepdims=True)
-            # denominator = np.maximum(max_vals - min_vals, 1e-15)
-            # channel_wise_maps_norm = (sp_maps - min_vals) / denominator
-            # sp_maps = channel_wise_maps_norm
-                
         else:
             sp_maps = xyc2spatial(
                 xy[:, 0], 
@@ -411,73 +399,3 @@ class SpaceTravLR(BaseTravLR):
             return
 
         return sp_maps
-
-    # This is incorrect, needs to be cluster specific
-    # Load links from CO trained model
-    # def _get_co_betas(self, alpha=1):
-
-    #     gem = self.adata.to_df(layer='imputed_count')
-    #     genes = self.adata.var_names
-        
-    #     zero_ = pd.Series(np.zeros(len(genes)), index=genes)
-
-    #     def get_coef(target_gene):
-    #         tmp = zero_.copy()
-
-    #         reggenes = self.grn.get_regulators(self.adata, target_gene)
-
-    #         if target_gene in reggenes:
-    #             reggenes.remove(target_gene)
-    #         if len(reggenes) == 0 :
-    #             tmp[target_gene] = 0
-    #             return(tmp)
-            
-    #         Data = gem[reggenes]
-    #         Label = gem[target_gene]
-    #         model = Ridge(alpha=alpha, random_state=123)
-    #         model.fit(Data, Label)
-    #         tmp[reggenes] = model.coef_
-
-    #         return tmp
-
-    #     li = []
-    #     li_calculated = []
-    #     with tqdm(genes) as pbar:
-    #         for i in pbar:
-    #             if not i in self.queue.completed_genes:
-    #                 tmp = zero_.copy()
-    #                 tmp[i] = 0
-    #             else:
-    #                 tmp = get_coef(i)
-    #                 li_calculated.append(i)
-    #             li.append(tmp)
-    #     coef_matrix = pd.concat(li, axis=1)
-    #     coef_matrix.columns = genes
-
-    #     return coef_matrix
-
-
-    # def perturb_via_celloracle(self, gene_mtx, target, n_propagation=3):
-        
-    #     target_index = self.gene2index[target]  
-    #     simulation_input = gene_mtx.copy()
-
-    #     simulation_input[target] = 0 # ko target gene
-    #     delta_input = simulation_input - gene_mtx # get delta X
-    #     delta_simulated = delta_input.copy() 
-
-    #     if self.coef_matrix is None:
-    #         self.coef_matrix = self._get_co_betas()
-        
-    #     for i in range(n_propagation):
-    #         delta_simulated = delta_simulated.dot(self.coef_matrix)
-    #         delta_simulated[delta_input != 0] = delta_input
-    #         gem_tmp = gene_mtx + delta_simulated
-    #         gem_tmp[gem_tmp<0] = 0
-    #         delta_simulated = gem_tmp - gene_mtx
-
-    #     gem_simulated = gene_mtx + delta_simulated
-
-    #     return gem_simulated
-
-
