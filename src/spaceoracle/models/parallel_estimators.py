@@ -251,7 +251,7 @@ def init_ligands_and_receptors(
 class SpatialCellularProgramsEstimator:
     def __init__(self, adata, target_gene, spatial_dim=64, 
             cluster_annot='cell_type_int', layer='imputed_count', 
-            radius=200, contact_distance=50, use_ligands=True,
+            radius=100, contact_distance=30, use_ligands=True,
             tf_ligand_cutoff=0.01, receptor_thresh=0.1,
             regulators=None, grn=None, colinks_path=None, scale_factor=1):
         
