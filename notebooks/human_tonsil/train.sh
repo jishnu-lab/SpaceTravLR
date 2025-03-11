@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --partition=l40s
 #SBATCH --job-name=SpaceTravLR
-#SBATCH --output=train.txt
-#SBATCH --error=train.txt
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --cluster=gpu
 #SBATCH --gres=gpu:1
-#SBATCH --time=0-4:00:00
+#SBATCH --time=0-8:00:00
 
-source activate bee
+mamba activate SpaceOracle
 python train.py
