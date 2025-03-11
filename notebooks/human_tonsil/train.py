@@ -25,13 +25,13 @@ star = SpaceTravLR(
     adata=adata,
     annot='cell_type_int', 
     max_epochs=100, 
-    learning_rate=5e-4, 
+    learning_rate=5e-3, 
     spatial_dim=64,
     batch_size=512,
     grn=co_grn,
-    radius=150,
+    radius=200,
     contact_distance=30,
-    save_dir='/ix/djishnu/shared/djishnu_kor11/super_filtered_runs/human_tonsil_v5'
+    save_dir='/ix/djishnu/shared/djishnu_kor11/lasso_runs/human_tonsil'
 )
 
 star.run()
