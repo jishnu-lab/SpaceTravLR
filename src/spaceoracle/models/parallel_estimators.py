@@ -596,7 +596,7 @@ class SpatialCellularProgramsEstimator:
 
     def fit(self, num_epochs=100, threshold_lambda=1e-6, learning_rate=5e-3, batch_size=512, 
             pbar=None, estimator='lasso',
-            score_threshold=0.1):
+            score_threshold=0.2):
         
         sp_maps, X, y, cluster_labels = self.init_data()
 
