@@ -215,6 +215,29 @@ class OracleQueue:
     def delete_lock(self, gene):
         assert os.path.exists(f'{self.model_dir}/{gene}.lock')
         os.remove(f'{self.model_dir}/{gene}.lock')
+    
+    def kill_old_locks(self):
+        locked_paths = glob.glob(f'{self.model_dir}/*.lock')
+        now = datetime.datetime.now()
+
+        old_locks = []
+
+        for path in locked_paths:
+            gene = self.extract_gene_name(path)
+
+            with open(path, 'r') as f:
+                data = f.read()
+                lock_time_str = data.split(' ')[1]
+                lock_time = datetime.datetime.strptime(lock_time_str, "%H:%M:%S.%f")
+
+                lock_datetime_str = f"{now.date()} {lock_time.strftime('%H:%M:%S.%f')}"
+                lock_datetime = datetime.datetime.strptime(lock_datetime_str, "%Y-%m-%d %H:%M:%S.%f")
+
+                if (now - lock_datetime).total_seconds() > 3600: # 1 hour
+                    old_locks.append(gene)
+
+        for gene in old_locks:
+            self.delete_lock(gene)
 
     def add_orphan(self, gene):
         now = str(datetime.datetime.now())
@@ -324,6 +347,10 @@ class SpaceTravLR(BaseTravLR):
 
 
         while not self.queue.is_empty and not os.path.exists(self.save_dir+'/process.kill'):
+            
+            # Remove old locks from other models
+            self.queue.kill_old_locks()
+
             gene = next(self.queue)
 
             estimator = SpatialCellularProgramsEstimator(
