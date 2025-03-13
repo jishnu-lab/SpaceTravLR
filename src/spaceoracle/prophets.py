@@ -137,7 +137,7 @@ class Prophet(BaseTravLR):
         )[self.adata.var_names] 
         
         # out_dict = {}
-        self.update_status(f'Computing Ligand interactions', color='black_on_salmon')
+        self.update_status(f'[{self.iter}/{self.max_iter}] | Computing Ligand interactions', color='black_on_salmon')
         
         process_gene_partial = partial(
             self.process_gene, weighted_ligands=weighted_ligands, weighted_ligands_tfl=weighted_ligands_tfl, filtered_df=gex_df)
@@ -182,6 +182,7 @@ class Prophet(BaseTravLR):
     
     def _perturb_single_cell(self, gex_delta, cell_index, betas_dict):
 
+
         genes = self.adata.var_names
         
         # columns are target genes, rows are regulators
@@ -220,12 +221,10 @@ class Prophet(BaseTravLR):
         return result
 
     def perturb(self, target, gene_mtx=None, n_propagation=2, gene_expr=0, 
-                cells=None, use_optimized=True, delta_dir=None, retain_propagation=False):
+                cells=None, delta_dir=None):
 
         assert target in self.adata.var_names
         
-        if retain_propagation:
-            propagations = []
         
         if gene_mtx is None: 
             gene_mtx = self.adata.layers['imputed_count'].copy()
@@ -274,7 +273,7 @@ class Prophet(BaseTravLR):
         
         self.iter = 0
         self.max_iter = n_propagation
-        min_ = 0
+        min_ = gene_mtx.min(axis=0)
         max_ = gene_mtx.max(axis=0)
         
         ## refer: src/celloracle/trajectory/oracle_GRN.py
@@ -286,7 +285,7 @@ class Prophet(BaseTravLR):
             # weight betas by the gene expression from the previous iteration
             beta_dict = self._get_wbetas_dict(
                 self.beta_dict, w_ligands_0, w_tfligands_0, gene_mtx_1, cell_thresholds)
-
+            
             # get updated gene expressions
             gene_mtx_1 = gene_mtx + delta_simulated
             w_ligands_1 = self._compute_weighted_ligands(gene_mtx_1, cell_thresholds, genes=self.ligands)
@@ -324,10 +323,7 @@ class Prophet(BaseTravLR):
             
             if delta_dir:
                 os.makedirs(delta_dir, exist_ok=True)
-                np.save(f'{delta_dir}/{target}_{n}n_{gene_expr}x.npy', delta_simulated)
-
-            if retain_propagation:
-                propagations.append(gene_mtx + delta_simulated)
+                np.save(f'{delta_dir}/{target}_{n}n_{gene_expr}x.npy', gene_mtx + delta_simulated)
             
             del beta_dict
             gc.collect()
@@ -348,9 +344,6 @@ class Prophet(BaseTravLR):
         # print(f'Layer added: {target}_{n_propagation}n_{gene_expr}x')
         
         self.update_status(f'{target} -> {gene_expr} - {n_propagation}/{n_propagation} - Done')
-        
-        if retain_propagation:
-            return propagations
         
     
     def perturb_batch(self, target_genes, save_to=None, n_propagation=3, gene_expr=0, cells=None, delta_dir=None):
