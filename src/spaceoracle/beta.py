@@ -109,7 +109,7 @@ class BetaFrame(pd.DataFrame):
         self.tfl_pairs = [pair.split('#') for pair in self.tfl_pairs]
     
 
-    def splash(self, rw_ligands, rw_ligands_tfl, gex_df, scale_factor=1e5):
+    def splash(self, rw_ligands, rw_ligands_tfl, gex_df, scale_factor=1):
         ## wL is the amount of ligand 'received' at each location
         ## assuming ligands and receptors expression are independent, dL/dR = 0
         ## y = b0 + b1*TF1 + b2*wL1R1 + b3*wL1R2
@@ -245,6 +245,13 @@ class Betabase:
             if self.gene_subset is not None and gene_name not in self.gene_subset:
                 continue
             self.data[gene_name] = BetaFrame.from_path(path, cell_index=cell_index)
+            
+            # Zero out LR and TFL beta columns
+            # lr_tfl_cols = [col for col in self.data[gene_name].columns if '$' in col or '#' in col]
+            # if lr_tfl_cols:
+            #     self.data[gene_name][lr_tfl_cols] = 0
+            
+            
             self.ligands_set.update(self.data[gene_name]._ligands)
             self.tfl_ligands_set.update(self.data[gene_name]._tfl_ligands)
 
