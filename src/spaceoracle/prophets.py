@@ -369,7 +369,6 @@ class Prophet(BaseTravLR):
                 n_propagation=n_propagation, 
                 gene_expr=gene_expr, 
                 cells=cells, 
-                use_optimized=True,
                 delta_dir=delta_dir
             )
                      

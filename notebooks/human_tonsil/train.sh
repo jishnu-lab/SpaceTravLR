@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=l40s
-#SBATCH --job-name=SpaceTravLR
+#SBATCH --job-name=SpaceTravLR_human_tonsil
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH --nodes=1

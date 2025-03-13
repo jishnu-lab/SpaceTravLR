@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=l40s
-#SBATCH --job-name=SpaceTravLR
+#SBATCH --job-name=SpaceTravLR_mouse_kidney
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH --nodes=1
