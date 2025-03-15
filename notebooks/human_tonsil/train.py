@@ -45,7 +45,7 @@ gf = GeneFactory.from_json(
 gf.load_betas()
 
 gf.genome_screen(
-    save_to=f'/tmp/test_screen',
+    save_to=base_dir + '/genome_screens/human_tonsil',
     n_propagation=0
 )
 
