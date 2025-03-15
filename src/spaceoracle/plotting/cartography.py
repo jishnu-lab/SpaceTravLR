@@ -347,14 +347,14 @@ class Cartography:
                 y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
                 
                 ax.text(x, y, cluster, 
-                        fontsize=6, 
+                        fontsize=8, 
                         ha='center', 
                         va='center',
                         color='black',
                         bbox=dict(
                             facecolor=alt_colors[cluster],
                             alpha=1,
-                            edgecolor='black',
+                            edgecolor=None,
                             boxstyle='round'
                         ))
                 

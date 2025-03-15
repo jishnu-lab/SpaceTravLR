@@ -1,16 +1,13 @@
 #!/bin/bash
-#SBATCH --partition=preempt
-#SBATCH --job-name=SpaceTravLR
-#SBATCH --output=train.txt
+#SBATCH --partition=htc
+#SBATCH --job-name=GenomeScreen
+#SBATCH --output=/dev/null
 ##SBATCH --error=/dev/null
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --mem-per-cpu=200G
 #SBATCH --cpus-per-task=1
-#SBATCH --cluster=gpu
-#SBATCH --gres=gpu:1
-#SBATCH --time=0-2:00:00
+#SBATCH --time=0-18:00:00
 
-# mamba activate SpaceOracle
-# conda init 
-conda activate bee
+mamba activate SpaceOracle
 python train.py
