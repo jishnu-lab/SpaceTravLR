@@ -483,7 +483,7 @@ class GeneFactory(BaseTravLR):
             total=len(self.queue.all_genes), 
             desc=f'... initializing ...', 
             unit='genes',
-            color='#e28723',
+            color='orange',
             autorefresh=True,
         )
         
@@ -496,6 +496,11 @@ class GeneFactory(BaseTravLR):
             gene_bar.desc = f'🕵️️  {queue.agents+1} agents'
             gene_bar.refresh()
             
+            if os.path.exists(f'{queue.model_dir}/{target}.lock'):
+                    continue
+
+            queue.create_lock(target)
+            
             gex_out = self.perturb(
                 target=target, 
                 n_propagation=n_propagation, 
@@ -504,6 +509,8 @@ class GeneFactory(BaseTravLR):
                 delta_dir=None
             )
             
+            queue.delete_lock(target)
+        
             gene_bar.update()
 
             file_name = f'{target}_{n_propagation}n_0x'
