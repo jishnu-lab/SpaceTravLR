@@ -8,19 +8,24 @@ import gc
 from .tools.network import expand_paired_interactions
 from .models.parallel_estimators import get_filtered_df, received_ligands
 from .oracles import OracleQueue, BaseTravLR
-from .beta import Betabase
+from .beta import BetaFrame, Betabase
 from .tools.utils import is_mouse_data
 import enlighten
 from pqdm.threads import pqdm
 import os
-from .oracles import OracleQueue
 
 
-class Prophet(BaseTravLR):
-    def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30):
+            
+class GeneFactory(BaseTravLR):
+    def __init__(
+        self, 
+        adata, 
+        models_dir, 
+        annot='cell_type_int', 
+        radius=200, 
+        contact_distance=30):
         
         super().__init__(adata, fields_to_keep=[annot])
-        
         
         self.adata = adata.copy()
         self.annot = annot
@@ -34,14 +39,16 @@ class Prophet(BaseTravLR):
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
         self.beta_dict = None
+        self._name = 'GeneFactory'
 
         
         self.manager = enlighten.get_manager()
         
-        _logo = '🚀️🐭️ SpaceTravLR' if self.species == 'mouse' else '🚀️🙅‍♂️️ SpaceTravLR'
+        self._logo = '🐭️🧬️️' if self.species == 'mouse' else '🙅‍♂️🧬️️'
+        self._logo = f'{self._logo} {self._name}'
         
         self.status = self.manager.status_bar(
-            f'{_logo}: [Ready] | {adata.shape[0]} cells / {len(self.genes)} genes',
+            f'{self._logo}: [Ready] | {adata.shape[0]} cells / {len(self.genes)} genes',
             color='black_on_green',
             justify=enlighten.Justify.CENTER,
             auto_refresh=True,
@@ -71,8 +78,31 @@ class Prophet(BaseTravLR):
             self.radius, self.contact_distance
         )
         
+        
+    @classmethod
+    def from_json(cls, adata, json_path, override_params=None):
+        import json
+        
+        with open(json_path, 'r') as f:
+            params = json.load(f)
+            
+        if override_params is not None:
+            params.update(override_params)
+            
+        return cls(
+            adata, 
+            models_dir=params['save_dir'], 
+            annot=params['annot'], 
+            radius=params['radius'], 
+            contact_distance=params['contact_distance']
+        )
+        
+        
+    ## backwards compatibility
+    def compute_betas(self, **kwargs):
+        self.load_betas(**kwargs)
 
-    def compute_betas(self, subsample=None, float16=False):
+    def load_betas(self, subsample=None, float16=False):
         del self.beta_dict
         gc.collect()
         self.status.update('💾️ Loading betas from disk')
@@ -89,7 +119,8 @@ class Prophet(BaseTravLR):
     
     @staticmethod
     def load_betadata(gene, save_dir):
-        return pd.read_parquet(f'{save_dir}/{gene}_betadata.parquet')
+        # return pd.read_parquet(f'{save_dir}/{gene}_betadata.parquet')
+        return BetaFrame.from_path(f'{save_dir}/{gene}_betadata.parquet')
     
     def _compute_weighted_ligands(self, gene_mtx, cell_thresholds, genes):
         self.update_status('Computing received ligands', color='black_on_cyan')
@@ -110,22 +141,30 @@ class Prophet(BaseTravLR):
             weighted_ligands = []
         
         return weighted_ligands
-
     
     def update_status(self, msg='', color='black_on_green'):
         self.status.update(msg)
         self.status.color = color
         self.status.refresh()
-        
-        
 
-
-    def process_gene(self, item, weighted_ligands, weighted_ligands_tfl, filtered_df):
+    def _process_gene(
+        self, 
+        item, 
+        weighted_ligands, 
+        weighted_ligands_tfl, 
+        filtered_df):
+        
         gene, betadata = item
-        return gene, self._combine_gene_wbetas(weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
-            
+        return gene, self._combine_gene_wbetas(
+            weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
     
-    def _get_wbetas_dict(self, betas_dict, weighted_ligands, weighted_ligands_tfl, gene_mtx, cell_thresholds):
+    def _get_wbetas_dict(
+        self, 
+        betas_dict, 
+        weighted_ligands, 
+        weighted_ligands_tfl, 
+        gene_mtx, 
+        cell_thresholds):
 
         gex_df = get_filtered_df(       # mask out receptors too
             counts_df=pd.DataFrame(
@@ -137,11 +176,16 @@ class Prophet(BaseTravLR):
             genes=self.adata.var_names
         )[self.adata.var_names] 
         
-        # out_dict = {}
-        self.update_status(f'[{self.iter}/{self.max_iter}] | Computing Ligand interactions', color='black_on_salmon')
+        self.update_status(
+            f'[{self.iter}/{self.max_iter}] | Computing Ligand interactions', 
+            color='black_on_salmon')
         
         process_gene_partial = partial(
-            self.process_gene, weighted_ligands=weighted_ligands, weighted_ligands_tfl=weighted_ligands_tfl, filtered_df=gex_df)
+            self._process_gene, 
+            weighted_ligands=weighted_ligands, 
+            weighted_ligands_tfl=weighted_ligands_tfl, 
+            filtered_df=gex_df
+        )
         
         results = pqdm(
             betas_dict.data.items(), 
@@ -156,26 +200,13 @@ class Prophet(BaseTravLR):
         #     out_dict[gene] = self._combine_gene_wbetas(
         #         weighted_ligands, gex_df, betadata)
             
-        #     self.update_status(
-        #         f'{self.iter}/{self.max_iter} | [{i/len(betas_dict.data)*100:5.1f}%] Ligand interactions splash', 
-        #         color='black_on_salmon'
-        #     )
-            
         self.update_status(f'Ligand interactions - Done')
 
         return dict(results)
 
     def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata):
         # betas_df = betadata.splash_fast(rw_ligands, rw_ligands_tfl, gex_df) ## this works but doesn't seem faster
-        
-        if self.fast:
-            betas_df = betadata.splash_fast(
-                rw_ligands, 
-                rw_ligands_tfl, 
-                filtered_df
-            )
-        else:
-            betas_df = betadata.splash(
+        betas_df = betadata.splash(
             rw_ligands, 
             rw_ligands_tfl, 
             filtered_df
@@ -207,37 +238,39 @@ class Prophet(BaseTravLR):
 
         return gex_delta[cell_index, :].dot(gene_gene_matrix)
     
-    
     def _perturb_all_cells(self, gex_delta, betas_dict):
         n_obs, n_genes = gex_delta.shape
         result = np.zeros((n_obs, n_genes))
         n_vars = len(self.adata.var_names)
-        
-        
+
         for i, gene in enumerate(self.adata.var_names):
             self.update_status(
-                f'[{self.iter}/{self.max_iter}] | {i+1}/{n_vars} | Perturbing cells 🐝️', 
+                f'[{self.iter}/{self.max_iter}] | Perturbing 🧬️🐝️ {i+1}/{n_vars} ', 
                 color='black_on_cyan'
             )
             
             _beta_out = betas_dict.get(gene, None)
             if _beta_out is not None:
-
-                # mod_idx = np.array(_beta_out.modulator_gene_indices)
-                mod_idx = np.array(self.beta_dict.data[gene].modulator_gene_indices)
-                
+                mod_idx = self.beta_dict.data[gene].modulator_gene_indices
                 result[:, i] = np.sum(_beta_out.values * gex_delta[:, mod_idx], axis=1)
+                
+        assert not np.isnan(result).any(), "NaN values found in delta_simulated"
+        
         return result
+    
 
-    def perturb(self, target, gene_mtx=None, n_propagation=2, gene_expr=0, 
-                cells=None, delta_dir=None, fast=False):
+    def perturb(
+        self, 
+        target, 
+        n_propagation=2, 
+        gene_expr=0, 
+        save_layer=False,
+        cells=None, 
+        delta_dir=None):
 
         assert target in self.adata.var_names
-        self.fast = fast
         
-        
-        if gene_mtx is None: 
-            gene_mtx = self.adata.layers['imputed_count'].copy()
+        gene_mtx = self.adata.layers['imputed_count'].copy()
 
         if isinstance(gene_mtx, pd.DataFrame):
             gene_mtx = gene_mtx.values
@@ -255,27 +288,32 @@ class Prophet(BaseTravLR):
         delta_simulated = delta_input.copy() 
 
         if self.beta_dict is None:
-            self.beta_dict = self._get_spatial_betas_dict() # compute betas for all genes for all cells
+            # compute betas for all genes for all cells
+            self.beta_dict = self._get_spatial_betas_dict() 
 
         # get LR specific filtered gex contributions
         cell_thresholds = self.adata.uns.get('cell_thresholds')
         if cell_thresholds is not None:
-            cell_thresholds = cell_thresholds.reindex(              # Only commot LR values should be filtered
+            # Only commot LR values should be filtered
+            cell_thresholds = cell_thresholds.reindex(              
                 index=self.adata.obs_names, columns=self.adata.var_names, fill_value=1)
             self.adata.uns['cell_thresholds'] = cell_thresholds
         else:
             print('warning: cell_thresholds not found in adata.uns')
 
-        w_ligands_0 = self.adata.uns.get('received_ligands')
-        w_tfligands_0 = self.adata.uns.get('received_ligands_tfl')
-        if w_ligands_0 is None or w_tfligands_0 is None:
-            w_ligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds, genes=self.ligands)
-            w_tfligands_0 = self._compute_weighted_ligands(gene_mtx, cell_thresholds=None, genes=self.tfl_ligands)
-            self.adata.uns['received_ligands'] = w_ligands_0
-            self.adata.uns['received_ligands_tfl'] = w_tfligands_0
+        rw_ligands_0 = self.adata.uns.get('received_ligands')
+        rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl')
+        
+        if rw_ligands_0 is None or rw_tfligands_0 is None:
+            rw_ligands_0 = self._compute_weighted_ligands(
+                gene_mtx, cell_thresholds, genes=self.ligands)
+            rw_tfligands_0 = self._compute_weighted_ligands(
+                gene_mtx, cell_thresholds=None, genes=self.tfl_ligands)
+            self.adata.uns['received_ligands'] = rw_ligands_0
+            self.adata.uns['received_ligands_tfl'] = rw_tfligands_0
 
-        weighted_ligands_0 = pd.concat(
-                [w_ligands_0, w_tfligands_0], axis=1
+        rw_ligands_0 = pd.concat(
+                [rw_ligands_0, rw_tfligands_0], axis=1
             ).groupby(level=0, axis=1).max().reindex(
                 index=self.adata.obs_names, columns=self.adata.var_names, fill_value=0)
 
@@ -290,37 +328,52 @@ class Prophet(BaseTravLR):
 
         for n in range(n_propagation):
             self.iter+=1
-            self.update_status(f'{target} -> {gene_expr} - {n+1}/{n_propagation}', color='black_on_salmon')
+            self.update_status(
+                f'{target} -> {gene_expr} - {n+1}/{n_propagation}', 
+                color='black_on_salmon')
 
             # weight betas by the gene expression from the previous iteration
             beta_dict = self._get_wbetas_dict(
-                self.beta_dict, w_ligands_0, w_tfligands_0, gene_mtx_1, cell_thresholds)
+                self.beta_dict, rw_ligands_0, rw_tfligands_0, gene_mtx_1, cell_thresholds)
             
             # get updated gene expressions
             gene_mtx_1 = gene_mtx + delta_simulated
-            w_ligands_1 = self._compute_weighted_ligands(gene_mtx_1, cell_thresholds, genes=self.ligands)
-            w_tfligands_1 = self._compute_weighted_ligands(gene_mtx_1, cell_thresholds=None, genes=self.tfl_ligands)
+            w_ligands_1 = self._compute_weighted_ligands(
+                gene_mtx_1, cell_thresholds, genes=self.ligands)
+            w_tfligands_1 = self._compute_weighted_ligands(
+                gene_mtx_1, cell_thresholds=None, genes=self.tfl_ligands)
 
             # update deltas to reflect change in received ligands
             # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
-            weighted_ligands_1 = pd.concat(
-                    [w_ligands_1, w_tfligands_1], axis=1
-                ).groupby(level=0, axis=1).max().reindex(
-                    index=self.adata.obs_names, columns=self.adata.var_names, fill_value=0)
-            delta_weighted_ligands = weighted_ligands_1.values - weighted_ligands_0.values
+            rw_ligands_1 = pd.concat(
+                [w_ligands_1, w_tfligands_1], axis=1
+            ).groupby(level=0, axis=1).max().reindex(
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names, 
+                fill_value=0
+            )
+            
+            delta_rw_ligands = rw_ligands_1.values - rw_ligands_0.values
 
             delta_df = pd.DataFrame(
-                delta_simulated, columns=self.adata.var_names, index=self.adata.obs_names)
+                delta_simulated, 
+                columns=self.adata.var_names, 
+                index=self.adata.obs_names
+            )
+            
+            
             delta_ligands = pd.concat(
                     [delta_df[self.ligands], delta_df[self.tfl_ligands]], axis=1
                 ).groupby(level=0, axis=1).max().reindex(
-                    index=self.adata.obs_names, columns=self.adata.var_names, fill_value=0).values
+                    index=self.adata.obs_names, 
+                    columns=self.adata.var_names, 
+                    fill_value=0
+                ).values
             
-            delta_simulated = delta_simulated + delta_weighted_ligands - delta_ligands
+            delta_simulated = delta_simulated + delta_rw_ligands - delta_ligands
             _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
             delta_simulated = np.array(_simulated)
             
-            assert not np.isnan(_simulated).any(), "NaN values found in delta_simulated"
             
             # ensure values in delta_simulated match our desired KO / input
             delta_simulated = np.where(delta_input != 0, delta_input, delta_simulated)
@@ -333,7 +386,10 @@ class Prophet(BaseTravLR):
             
             if delta_dir:
                 os.makedirs(delta_dir, exist_ok=True)
-                np.save(f'{delta_dir}/{target}_{n}n_{gene_expr}x.npy', gene_mtx + delta_simulated)
+                np.save(
+                    f'{delta_dir}/{target}_{n}n_{gene_expr}x.npy', 
+                    gene_mtx + delta_simulated
+                )
             
             del beta_dict
             gc.collect()
@@ -341,25 +397,33 @@ class Prophet(BaseTravLR):
         gem_simulated = gene_mtx + delta_simulated
         assert gem_simulated.shape == gene_mtx.shape
 
-        # Force the gene_expr value for the target gene again
         if cells is None:
             gem_simulated[:, target_index] = gene_expr
         else:
             gem_simulated[cells, target_index] = gene_expr
 
-        # self.adata.layers['simulated_count'] = gem_simulated
-        # self.adata.layers['delta_X'] = gem_simulated - gene_mtx
-        self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
+        self.update_status(
+            f'{target} -> {gene_expr} - {n_propagation}/{n_propagation} - Done')
         
-        # print(f'Layer added: {target}_{n_propagation}n_{gene_expr}x')
-        
-        self.update_status(f'{target} -> {gene_expr} - {n_propagation}/{n_propagation} - Done')
-        
+        if save_layer:
+            self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
+            
+        gex_out = pd.DataFrame(gem_simulated, index=self.adata.obs_names, columns=self.adata.var_names)
+        gex_out.index.name = f'{target}_{n_propagation}n_{gene_expr}x'
+            
+        return gex_out
     
-    def perturb_batch(self, target_genes, save_to=None, n_propagation=3, gene_expr=0, cells=None, delta_dir=None):
+    
+    def perturb_batch(
+        self, 
+        target_genes, 
+        save_to=None, 
+        n_propagation=3, 
+        gene_expr=0, 
+        cells=None):
         
         self.update_status(f'Batch Perturbion mode: {len(target_genes)} genes')
-        
+
         progress_bar = self.manager.counter(
             total=len(target_genes), 
             desc=f'Batch Perturbions', 
@@ -374,29 +438,24 @@ class Prophet(BaseTravLR):
             progress_bar.desc = f'Batch Perturbions - {target}'
             progress_bar.refresh()
             
-            self.perturb(
+            gex_out =self.perturb(
                 target=target, 
                 n_propagation=n_propagation, 
+                save_layer=False,
                 gene_expr=gene_expr, 
                 cells=cells, 
-                delta_dir=delta_dir
             )
                      
             progress_bar.update()
-            
-            
-            file_name = f'{target}_{n_propagation}n_{gene_expr}x'
-            
+
             if save_to is not None:
-                self.adata.to_df(
-                    layer = file_name).to_parquet(
-                        f'{save_to}/{file_name}.parquet')
-                    
-                del self.adata.layers[file_name] # save memory
+                file_name = f'{target}_{n_propagation}n_{gene_expr}x'
+                gex_out.to_parquet(f'{save_to}/{file_name}.parquet')
                 
         self.update_status('Batch Perturbions: Done')
         progress_bar.close()
         
+          
     @property
     def possible_targets(self):
         return list(set.union(
@@ -417,12 +476,32 @@ class Prophet(BaseTravLR):
             lock_timeout=3600
         )
         
+        _manager = enlighten.get_manager()
+        
+        
+        gene_bar = _manager.counter(
+            total=len(self.queue.all_genes), 
+            desc=f'... initializing ...', 
+            unit='genes',
+            color='orange',
+            autorefresh=True,
+        )
+        
         queue.kill_old_locks()
         
         while not queue.is_empty:
             target = next(queue)
             
-            self.perturb(
+            gene_bar.count = len(queue.all_genes) - len(queue.remaining_genes)
+            gene_bar.desc = f'🕵️️  {queue.agents+1} agents'
+            gene_bar.refresh()
+            
+            if os.path.exists(f'{queue.model_dir}/{target}.lock'):
+                    continue
+
+            queue.create_lock(target)
+            
+            gex_out = self.perturb(
                 target=target, 
                 n_propagation=n_propagation, 
                 gene_expr=0, 
@@ -430,12 +509,11 @@ class Prophet(BaseTravLR):
                 delta_dir=None
             )
             
+            queue.delete_lock(target)
+        
+            gene_bar.update()
+
             file_name = f'{target}_{n_propagation}n_0x'
-            
-            self.adata.to_df(
-                layer = file_name).to_parquet(
-                    f'{save_to}/{file_name}.parquet')
+            gex_out.to_parquet(
+                f'{save_to}/{file_name}.parquet')
                 
-            del self.adata.layers[file_name]
-        
-        
