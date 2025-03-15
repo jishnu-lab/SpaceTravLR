@@ -219,7 +219,9 @@ class Betabase:
 
         self.data = {}
         self.ligands_set = set()
+        self.receptors_set = set()
         self.tfl_ligands_set = set()
+        self.tfs_set = set()
         self.float16 = float16
         self.load_betas_from_disk(cell_index=cell_index)
 
@@ -254,6 +256,8 @@ class Betabase:
             
             self.ligands_set.update(self.data[gene_name]._ligands)
             self.tfl_ligands_set.update(self.data[gene_name]._tfl_ligands)
+            self.receptors_set.update(self.data[gene_name].receptors)
+            self.tfs_set.update(self.data[gene_name].tfs)
 
             progress_bar.update()
         
@@ -263,3 +267,5 @@ class Betabase:
             ]
             
         progress_bar.close()
+        
+        

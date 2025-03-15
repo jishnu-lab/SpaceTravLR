@@ -420,11 +420,10 @@ class GeneFactory(BaseTravLR):
         save_to=None, 
         n_propagation=3, 
         gene_expr=0, 
-        cells=None, 
-        delta_dir=None):
+        cells=None):
         
         self.update_status(f'Batch Perturbion mode: {len(target_genes)} genes')
-        
+
         progress_bar = self.manager.counter(
             total=len(target_genes), 
             desc=f'Batch Perturbions', 
@@ -445,7 +444,6 @@ class GeneFactory(BaseTravLR):
                 save_layer=False,
                 gene_expr=gene_expr, 
                 cells=cells, 
-                delta_dir=delta_dir
             )
                      
             progress_bar.update()
@@ -456,3 +454,59 @@ class GeneFactory(BaseTravLR):
                 
         self.update_status('Batch Perturbions: Done')
         progress_bar.close()
+        
+          
+    @property
+    def possible_targets(self):
+        return list(set.union(
+            self.beta_dict.receptors_set, 
+            self.beta_dict.ligands_set, 
+            self.beta_dict.tfs_set
+        ))
+        
+        
+    def genome_screen(self, save_to, n_propagation=4):
+        """
+        Perform a genome-wide screen of the target genes
+        """
+        
+        queue = OracleQueue(
+            save_to, 
+            all_genes=self.possible_targets, 
+            lock_timeout=3600
+        )
+        
+        _manager = enlighten.get_manager()
+        
+        
+        gene_bar = _manager.counter(
+            total=len(self.queue.all_genes), 
+            desc=f'... initializing ...', 
+            unit='genes',
+            color='#e28723',
+            autorefresh=True,
+        )
+        
+        queue.kill_old_locks()
+        
+        while not queue.is_empty:
+            target = next(queue)
+            
+            gene_bar.count = len(queue.all_genes) - len(queue.remaining_genes)
+            gene_bar.desc = f'🕵️️  {queue.agents+1} agents'
+            gene_bar.refresh()
+            
+            gex_out = self.perturb(
+                target=target, 
+                n_propagation=n_propagation, 
+                gene_expr=0, 
+                cells=None, 
+                delta_dir=None
+            )
+            
+            gene_bar.update()
+
+            file_name = f'{target}_{n_propagation}n_0x'
+            gex_out.to_parquet(
+                f'{save_to}/{file_name}.parquet')
+                
