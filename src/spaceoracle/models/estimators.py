@@ -82,7 +82,6 @@ class ClusterLeastSquaredEstimator(LeastSquaredEstimator):
             self.beta_dict[cluster_label] = ols_model.betas
             self.pval_dict[cluster_label] = np.array(ols_model.t_stat)[:, 1]
 
-
     def get_betas(self, cluster_label):
         return self.beta_dict[self.betas]
 
