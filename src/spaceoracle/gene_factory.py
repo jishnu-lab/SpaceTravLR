@@ -34,7 +34,7 @@ class GeneFactory(BaseTravLR):
         self.contact_distance = contact_distance
         self.species = 'mouse' if is_mouse_data(adata) else 'human'
 
-        self.queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
+        self.screen_queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
         self.ligands = []
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
@@ -470,7 +470,7 @@ class GeneFactory(BaseTravLR):
         Perform a genome-wide screen of the target genes
         """
         
-        queue = OracleQueue(
+        screen_queue = OracleQueue(
             save_to, 
             all_genes=self.possible_targets, 
             lock_timeout=3600
@@ -480,26 +480,26 @@ class GeneFactory(BaseTravLR):
         
         
         gene_bar = _manager.counter(
-            total=len(self.queue.all_genes), 
+            total=len(screen_queue.all_genes), 
             desc=f'... initializing ...', 
             unit='genes',
             color='orange',
             autorefresh=True,
         )
         
-        queue.kill_old_locks()
+        screen_queue.kill_old_locks()
         
-        while not queue.is_empty:
-            target = next(queue)
+        while not screen_queue.is_empty:
+            target = next(screen_queue)
             
-            gene_bar.count = len(queue.all_genes) - len(queue.remaining_genes)
-            gene_bar.desc = f'🕵️️  {queue.agents+1} agents'
+            gene_bar.count = len(screen_queue.all_genes) - len(screen_queue.remaining_genes)
+            gene_bar.desc = f'🕵️️  {screen_queue.agents+1} agents'
             gene_bar.refresh()
             
-            if os.path.exists(f'{queue.model_dir}/{target}.lock'):
+            if os.path.exists(f'{screen_queue.model_dir}/{target}.lock'):
                     continue
 
-            queue.create_lock(target)
+            screen_queue.create_lock(target)
             
             gex_out = self.perturb(
                 target=target, 
@@ -509,7 +509,7 @@ class GeneFactory(BaseTravLR):
                 delta_dir=None
             )
             
-            queue.delete_lock(target)
+            screen_queue.delete_lock(target)
         
             gene_bar.update()
 
