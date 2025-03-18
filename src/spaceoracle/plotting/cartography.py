@@ -87,7 +87,7 @@ class Cartography:
         return self.compute_perturbation_corr(gene_mtx, delta_X)
     
 
-    def compute_transitions(self, corr_mtx, source_ct):
+    def compute_transitions(self, corr_mtx, source_ct, annot='cell_type'):
 
         n_cells = self.adata.shape[0]
         P = np.ones((n_cells, n_cells))
@@ -96,34 +96,34 @@ class Cartography:
         P *= np.exp(corr_mtx / T)   
         P /= P.sum(1)[:, None]
         
-        transition_df = pd.DataFrame(P[self.adata.obs.banksy_celltypes == source_ct])
+        transition_df = pd.DataFrame(P[self.adata.obs[annot] == source_ct])
         transition_df.columns = self.adata.obs_names
         transition_df.columns.name = source_ct
         return transition_df
     
     @staticmethod
-    def assess_transitions(transition_df, base_celltypes, source_ct):
-        rx = transition_df.T.join(base_celltypes).groupby('banksy_celltypes').mean()
+    def assess_transitions(transition_df, base_celltypes, source_ct, annot):
+        rx = transition_df.T.join(base_celltypes).groupby(annot).mean()
         rx.columns.name = source_ct
         range_df = pd.DataFrame([rx.min(1), rx.mean(1), rx.max(1)], index=['min', 'mean', 'max']).T
         range_df.columns.name = f'Source Cells: {source_ct}'
         range_df.index.name = 'Transition Target'
         return range_df.sort_values(by='mean', ascending=False)
     
-    def get_cellfate(self, transition_df, allowed_fates, thresh=0.0007):
+    def get_cellfate(self, transition_df, allowed_fates, thresh=0.0007, annot='cell_type'):
         source_ct = transition_df.columns.name
         assert source_ct in allowed_fates
         transitions = []
         values = []
-        base_celltypes = self.adata.obs['banksy_celltypes']
+        base_celltypes = self.adata.obs[annot]
         for ix in tqdm(range(transition_df.shape[0])):
             fate_df = transition_df.iloc[ix].to_frame().join(
-                base_celltypes).groupby('banksy_celltypes').mean().loc[allowed_fates]
+                base_celltypes).groupby(annot).mean().loc[allowed_fates]
             
             ct = fate_df.sort_values(ix, ascending=False).iloc[0].to_frame()
             
-            self_fate = fate_df.query('banksy_celltypes == @source_ct').values[0][0]
-            transition_fate = fate_df.query('banksy_celltypes == @ct.columns[0]').values[0][0]
+            self_fate = fate_df.query(f'{annot} == @source_ct').values[0][0]
+            transition_fate = fate_df.query(f'{annot} == @ct.columns[0]').values[0][0]
             
             if transition_fate >= self_fate and transition_fate >= thresh:
                 transitions.append(ct.columns[0])
@@ -134,14 +134,14 @@ class Cartography:
         print(Counter(transitions), np.mean(transition_fate))
         return transitions
     
-    def make_celltype_dict(self):
+    def make_celltype_dict(self, annot='cell_type'):
         assert 'transition' in self.adata.obs
-        assert 'banksy_celltypes' in self.adata.obs
+        assert annot in self.adata.obs
         
         ct_points_wt = {}
-        for ct in self.adata.obs['banksy_celltypes'].unique():
+        for ct in self.adata.obs[annot].unique():
             points = np.asarray(
-                self.adata[self.adata.obs['banksy_celltypes'] == ct].obsm['spatial'])
+                self.adata[self.adata.obs[annot] == ct].obsm['spatial'])
             delta = 30
             points = np.vstack(
                 (points +[-delta,delta], points +[-delta,-delta], 
@@ -181,9 +181,6 @@ class Cartography:
     
     def plot_umap(self, hue='banksy_celltypes', figsize=(5, 5), dpi=180, alpha=0.9, alt_colors=None):
         color_dict = self.color_dict.copy()
-        color_dict['GC Dark Zone'] = 'mediumpurple'
-        color_dict['GC Intermediate Zone'] = 'mediumpurple'
-        color_dict['GC Light Zone'] = 'mediumpurple'
 
         f, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
@@ -252,13 +249,17 @@ class Cartography:
             figsize=(5, 5),
             dpi=180,
             alpha=0.9,
+            betadata_path='.',
             alt_colors=None
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
         layout_embedding = self.adata.obsm['X_umap']
         
-        delta_X = self.adata.layers[perturb_target] - self.adata.layers['imputed_count']
+        perturbed_df = pd.read_parquet(
+            f'{betadata_path}/{perturb_target}_4n_0x.parquet')
+        
+        delta_X = perturbed_df.loc[self.adata.obs_names].values - self.adata.layers['imputed_count']
         
         P = self.compute_transition_probabilities(
             delta_X, 
@@ -360,9 +361,9 @@ class Cartography:
                 
         plt.title(f'{perturb_target}')
         
-        if not legend_on_loc:
-            handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
-            ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+        # if not legend_on_loc:
+        #     handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
+        #     ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
         
         return ax
     

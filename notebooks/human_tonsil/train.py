@@ -46,7 +46,7 @@ gf.load_betas()
 
 gf.genome_screen(
     save_to=base_dir + '/genome_screens/human_tonsil',
-    n_propagation=0
+    n_propagation=4
 )
 
 exit()
