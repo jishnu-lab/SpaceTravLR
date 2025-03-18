@@ -13,6 +13,8 @@ from .tools.utils import is_mouse_data
 import enlighten
 from pqdm.threads import pqdm
 import os
+import warnings
+warnings.filterwarnings('ignore')
 
 
             
@@ -34,7 +36,7 @@ class GeneFactory(BaseTravLR):
         self.contact_distance = contact_distance
         self.species = 'mouse' if is_mouse_data(adata) else 'human'
 
-        self.screen_queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
+        self.queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
         self.ligands = []
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
@@ -219,6 +221,38 @@ class GeneFactory(BaseTravLR):
         self.ligands = list(bdb.ligands_set)
         self.tfl_ligands = list(bdb.tfl_ligands_set)
         return bdb
+    
+    
+    def splash_betas(self, gene):
+        rw_ligands = self.adata.uns.get('received_ligands')
+        rw_tfligands = self.adata.uns.get('received_ligands_tfl')
+        gene_mtx = self.adata.layers['imputed_count']
+        cell_thresholds = self.adata.uns.get('cell_thresholds')
+        
+        if rw_ligands is None or rw_tfligands is None:
+            rw_ligands = self._compute_weighted_ligands(
+                gene_mtx, cell_thresholds, genes=self.ligands)
+            rw_tfligands = self._compute_weighted_ligands(
+                gene_mtx, cell_thresholds=None, genes=self.tfl_ligands)
+            self.adata.uns['received_ligands'] = rw_ligands
+            self.adata.uns['received_ligands_tfl'] = rw_tfligands
+
+        filtered_df = get_filtered_df(
+            counts_df=pd.DataFrame(
+                gene_mtx, 
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names
+            ),
+            cell_thresholds=cell_thresholds,
+            genes=self.adata.var_names
+        )[self.adata.var_names] 
+        
+        betadata = self.load_betadata(gene, self.save_dir)
+        
+        return self._combine_gene_wbetas(
+            rw_ligands, rw_tfligands, filtered_df, betadata)
+    
+
     
     def _perturb_single_cell(self, gex_delta, cell_index, betas_dict):
 
