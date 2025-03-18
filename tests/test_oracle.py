@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd 
 import os
 import sys
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 import tempfile
 import shutil
@@ -13,6 +14,7 @@ from spaceoracle.tools.network import DayThreeRegulatoryNetwork
 from spaceoracle.oracles import *
 # from spaceoracle.models.probabilistic_estimators import ProbabilisticPixelModulators
 from spaceoracle.models.parallel_estimators import received_ligands
+from spaceoracle.gene_factory import GeneFactory
 
 import anndata as ad
 
@@ -158,3 +160,57 @@ def test_lr_radius(mock_adata_with_true_betas):
         ligand_vals = bool(ligand_vals)
 
         assert raw_vals == ligand_vals, f'Failed for cell {i}'
+
+def test_genome_screen(mock_adata_with_true_betas, temp_dir):
+    adata = mock_adata_with_true_betas
+    
+    # Initialize GeneFactory
+    factory = GeneFactory(
+        adata, 
+        models_dir=temp_dir,
+        annot='rctd_cluster',
+        radius=100,
+        contact_distance=30
+    )
+    
+    # Create a few mock beta files to simulate completed genes
+    test_genes = ['Cd74', 'Il2', 'Ccl5']
+    for gene in test_genes:
+        # Create empty beta files
+        with open(os.path.join(temp_dir, f'{gene}_betadata.parquet'), 'w') as f:
+            f.write('dummy')
+    
+    # Mock the perturb method to avoid actual computation
+    with patch.object(GeneFactory, 'perturb') as mock_perturb:
+        mock_perturb.return_value = pd.DataFrame(
+            np.random.rand(adata.n_obs, adata.n_vars),
+            index=adata.obs_names,
+            columns=adata.var_names
+        )
+        
+        # Mock possible_targets property
+        with patch('spaceoracle.gene_factory.GeneFactory.possible_targets', new=test_genes):
+            # Create a subdirectory for genome screen results
+            screen_dir = os.path.join(temp_dir, 'screen_results')
+            os.makedirs(screen_dir, exist_ok=True)
+            
+            # Run genome screen
+            factory.genome_screen(screen_dir, n_propagation=2)
+            
+            # Verify perturb was called for each gene
+            assert mock_perturb.call_count == len(test_genes)
+            
+            # Verify output files were created
+            for gene in test_genes:
+                output_file = os.path.join(screen_dir, f'{gene}_2n_0x.parquet')
+                assert os.path.exists(output_file)
+                
+            # Verify perturb was called with correct parameters
+            for gene in test_genes:
+                mock_perturb.assert_any_call(
+                    target=gene,
+                    n_propagation=2,
+                    gene_expr=0,
+                    cells=None,
+                    delta_dir=None
+                )

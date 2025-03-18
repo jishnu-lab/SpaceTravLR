@@ -13,6 +13,8 @@ from .tools.utils import is_mouse_data
 import enlighten
 from pqdm.threads import pqdm
 import os
+import warnings
+warnings.filterwarnings('ignore')
 
 
             
@@ -219,6 +221,38 @@ class GeneFactory(BaseTravLR):
         self.ligands = list(bdb.ligands_set)
         self.tfl_ligands = list(bdb.tfl_ligands_set)
         return bdb
+    
+    
+    def splash_betas(self, gene):
+        rw_ligands = self.adata.uns.get('received_ligands')
+        rw_tfligands = self.adata.uns.get('received_ligands_tfl')
+        gene_mtx = self.adata.layers['imputed_count']
+        cell_thresholds = self.adata.uns.get('cell_thresholds')
+        
+        if rw_ligands is None or rw_tfligands is None:
+            rw_ligands = self._compute_weighted_ligands(
+                gene_mtx, cell_thresholds, genes=self.ligands)
+            rw_tfligands = self._compute_weighted_ligands(
+                gene_mtx, cell_thresholds=None, genes=self.tfl_ligands)
+            self.adata.uns['received_ligands'] = rw_ligands
+            self.adata.uns['received_ligands_tfl'] = rw_tfligands
+
+        filtered_df = get_filtered_df(
+            counts_df=pd.DataFrame(
+                gene_mtx, 
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names
+            ),
+            cell_thresholds=cell_thresholds,
+            genes=self.adata.var_names
+        )[self.adata.var_names] 
+        
+        betadata = self.load_betadata(gene, self.save_dir)
+        
+        return self._combine_gene_wbetas(
+            rw_ligands, rw_tfligands, filtered_df, betadata)
+    
+
     
     def _perturb_single_cell(self, gex_delta, cell_index, betas_dict):
 
@@ -470,7 +504,7 @@ class GeneFactory(BaseTravLR):
         Perform a genome-wide screen of the target genes
         """
         
-        queue = OracleQueue(
+        screen_queue = OracleQueue(
             save_to, 
             all_genes=self.possible_targets, 
             lock_timeout=3600
@@ -480,26 +514,26 @@ class GeneFactory(BaseTravLR):
         
         
         gene_bar = _manager.counter(
-            total=len(self.queue.all_genes), 
+            total=len(screen_queue.all_genes), 
             desc=f'... initializing ...', 
             unit='genes',
             color='orange',
             autorefresh=True,
         )
         
-        queue.kill_old_locks()
+        screen_queue.kill_old_locks()
         
-        while not queue.is_empty:
-            target = next(queue)
+        while not screen_queue.is_empty:
+            target = next(screen_queue)
             
-            gene_bar.count = len(queue.all_genes) - len(queue.remaining_genes)
-            gene_bar.desc = f'🕵️️  {queue.agents+1} agents'
+            gene_bar.count = len(screen_queue.all_genes) - len(screen_queue.remaining_genes)
+            gene_bar.desc = f'🕵️️  {screen_queue.agents+1} agents'
             gene_bar.refresh()
             
-            if os.path.exists(f'{queue.model_dir}/{target}.lock'):
+            if os.path.exists(f'{screen_queue.model_dir}/{target}.lock'):
                     continue
 
-            queue.create_lock(target)
+            screen_queue.create_lock(target)
             
             gex_out = self.perturb(
                 target=target, 
@@ -509,7 +543,7 @@ class GeneFactory(BaseTravLR):
                 delta_dir=None
             )
             
-            queue.delete_lock(target)
+            screen_queue.delete_lock(target)
         
             gene_bar.update()
 
