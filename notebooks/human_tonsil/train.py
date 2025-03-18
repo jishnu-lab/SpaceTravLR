@@ -7,16 +7,17 @@ import pandas as pd
 from spaceoracle import SpaceTravLR
 
 from spaceoracle.tools.network import RegulatoryFactory
+from spaceoracle.gene_factory import GeneFactory
 
+base_dir = '/ix/djishnu/shared/djishnu_kor11/'
 
 co_grn = RegulatoryFactory(
-    colinks_path='/ix/djishnu/shared/djishnu_kor11/training_data_2025/snrna_human_tonsil_colinks.pkl',
+    colinks_path=base_dir + 'training_data_2025/snrna_human_tonsil_colinks.pkl',
     annot='cell_type_int'
 )
 
-adata = sc.read_h5ad('/ix/djishnu/shared/djishnu_kor11/training_data_2025/snrna_human_tonsil.h5ad')
-
-cell_threshes = pd.read_parquet('/ix/djishnu/shared/djishnu_kor11/commot_outputs/tonsil_LRs.parquet')
+adata = sc.read_h5ad(base_dir + 'training_data_2025/snrna_human_tonsil.h5ad')
+cell_threshes = pd.read_parquet(base_dir + 'commot_outputs/tonsil_LRs.parquet')
 adata.uns['cell_thresholds'] = cell_threshes
 
 print(adata)
@@ -31,9 +32,21 @@ star = SpaceTravLR(
     grn=co_grn,
     radius=200,
     contact_distance=30,
-    save_dir='/ix/djishnu/shared/djishnu_kor11/lasso_runs/human_tonsil'
+    save_dir=base_dir + 'lasso_runs/human_tonsil'
 )
 
 star.run()
+
+gf = GeneFactory.from_json(
+    adata=star.adata, 
+    json_path=star.save_dir + '/run_params.json', 
+)
+
+gf.load_betas()
+
+gf.genome_screen(
+    save_to=base_dir + '/genome_screens/human_tonsil',
+    n_propagation=4
+)
 
 exit()
