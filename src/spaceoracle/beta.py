@@ -51,6 +51,7 @@ class BetaFrame(pd.DataFrame):
     @classmethod
     def from_path(cls, path, cell_index=None, float16=False):
         df = pd.read_parquet(path, engine='pyarrow')
+        df.index.name = path.split('/')[-1].split('_')[0]
         if float16:
             beta_cols = [col for col in df.columns if col.startswith('beta')]
             df[beta_cols] = df[beta_cols].astype(np.float16)
