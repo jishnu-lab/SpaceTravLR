@@ -1,5 +1,7 @@
 from .parallel_estimators import *
 from .pixel_attention import CellularNicheNetwork
+import torch.nn as nn 
+
 
 class PrefeaturizedTensorDataset(Dataset):
     def __init__(self, sp_maps, X_cell, y_cell):
@@ -12,6 +14,7 @@ class PrefeaturizedTensorDataset(Dataset):
 
     def __getitem__(self, idx):
         sp_map = self.sp_maps[idx, :, :]
+        sp_map = np.expand_dims(sp_map, axis=0)
 
         return (
             torch.from_numpy(sp_map.copy()).float(),
@@ -20,12 +23,29 @@ class PrefeaturizedTensorDataset(Dataset):
         )
       
 class PrefeaturizedNicheNetwork(CellularNicheNetwork):
+
+    def __init__(self, n_modulators, anchors=None, spatial_dim=64, n_clusters=7):
+        super().__init__(n_modulators, anchors, spatial_dim, n_clusters)
+        self.in_channels = 1
+        self.out_channels = 1
+        self.spatial_dim = spatial_dim
+        self.dim = n_modulators+1
+        if anchors is None:
+            anchors = np.ones(self.dim)
+
+        self.anchors = torch.from_numpy(anchors).float().to(device)
+        self.mlp = nn.Sequential(
+            nn.Linear(spatial_dim**2, 64),
+            nn.PReLU(init=0.1),
+            nn.Linear(64, self.dim)
+        )
    
     def get_betas(self, spatial_maps):
-        out = self.conv_layers(spatial_maps)
+        # out = self.conv_layers(spatial_maps)
         # sp_out = self.spatial_features_mlp(spatial_features)
         # out = out+sp_out
-        betas = self.mlp(out)
+        n_samples = spatial_maps.shape[0]
+        betas = self.mlp(spatial_maps.reshape(n_samples, self.spatial_dim**2))
         betas = self.output_activation(betas) * 1.5
 
         return betas*self.anchors
@@ -145,10 +165,11 @@ class PrefeaturizedCellularProgramsEstimator(SpatialCellularProgramsEstimator):
         return sp_maps, X, y, cluster_labels
 
     def fit(self, num_epochs=100, threshold_lambda=1e-6, learning_rate=5e-3, batch_size=512, 
-            pbar=None, estimator='lasso',
-            score_threshold=0.2):
+            pbar=None, estimator='lasso', score_threshold=0.2,
+            use_anchors=True):
         
         sp_maps, X, y, cluster_labels = self.init_data()
+        print(f'Using {self.sp_maps_key} as spatial maps')
 
 
         assert estimator in ['lasso', 'bayesian', 'ard']
@@ -179,44 +200,49 @@ class PrefeaturizedCellularProgramsEstimator(SpatialCellularProgramsEstimator):
             mask = cluster_labels == cluster
             X_cell, y_cell = self.Xn[mask], self.yn[mask]
 
-            if self.estimator == 'ard': 
-                """
-                ARD allocates a n_samples * n_samples matrix so isn't very scalable
-                """
-                m = ARDRegression(threshold_lambda=threshold_lambda)
-                m.fit(X_cell, y_cell)
-                y_pred = m.predict(X_cell)
-                r2 = r2_score(y_cell, y_pred)
-                _betas = np.hstack([m.intercept_, m.coef_])
-                coefs = None
+            if use_anchors:
 
-            elif self.estimator == 'bayesian':
-                m = BayesianRidge()
-                m.fit(X_cell, y_cell)
-                y_pred = m.predict(X_cell)
-                r2 = r2_score(y_cell, y_pred)
-                _betas = np.hstack([m.intercept_, m.coef_])
+                if self.estimator == 'ard': 
+                    """
+                    ARD allocates a n_samples * n_samples matrix so isn't very scalable
+                    """
+                    m = ARDRegression(threshold_lambda=threshold_lambda)
+                    m.fit(X_cell, y_cell)
+                    y_pred = m.predict(X_cell)
+                    r2 = r2_score(y_cell, y_pred)
+                    _betas = np.hstack([m.intercept_, m.coef_])
+                    coefs = None
 
-            elif self.estimator == 'lasso':
-                groups = [1]*len(self.regulators) + [2]*len(self.lr_pairs) + [3]*len(self.tfl_pairs)
-                groups = np.array(groups)
-                gl = GroupLasso(
-                    groups=groups,
-                    group_reg=threshold_lambda,
-                    l1_reg=1e-9,
-                    frobenius_lipschitz=True,
-                    scale_reg="inverse_group_size",
-                    # subsampling_scheme=1,
-                    # supress_warning=True,
-                    n_iter=1000,
-                    tol=1e-5,
-                )
-                gl.fit(X_cell, y_cell)
-                y_pred = gl.predict(X_cell)
-                coefs = gl.coef_.flatten()
-                _betas = np.hstack([gl.intercept_, coefs])
-                r2 = r2_score(y_cell, y_pred)
-            
+                elif self.estimator == 'bayesian':
+                    m = BayesianRidge()
+                    m.fit(X_cell, y_cell)
+                    y_pred = m.predict(X_cell)
+                    r2 = r2_score(y_cell, y_pred)
+                    _betas = np.hstack([m.intercept_, m.coef_])
+
+                elif self.estimator == 'lasso':
+                    groups = [1]*len(self.regulators) + [2]*len(self.lr_pairs) + [3]*len(self.tfl_pairs)
+                    groups = np.array(groups)
+                    gl = GroupLasso(
+                        groups=groups,
+                        group_reg=threshold_lambda,
+                        l1_reg=1e-9,
+                        frobenius_lipschitz=True,
+                        scale_reg="inverse_group_size",
+                        # subsampling_scheme=1,
+                        # supress_warning=True,
+                        n_iter=1000,
+                        tol=1e-5,
+                    )
+                    gl.fit(X_cell, y_cell)
+                    y_pred = gl.predict(X_cell)
+                    coefs = gl.coef_.flatten()
+                    _betas = np.hstack([gl.intercept_, coefs])
+                    r2 = r2_score(y_cell, y_pred)
+            else:
+                # _betas = np.hstack([0, np.ones(len(self.modulators))])
+                _betas = np.ones(len(self.modulators)+1)
+                r2 = 0
 
             loader = DataLoader(
                 PrefeaturizedTensorDataset(
@@ -249,12 +275,11 @@ class PrefeaturizedCellularProgramsEstimator(SpatialCellularProgramsEstimator):
                 for batch in loader:
                     spatial_maps, inputs, targets = [b.to(device) for b in batch]
                     
-                    import pdb; pdb.set_trace()
-
                     optimizer.zero_grad()
                     outputs = model(spatial_maps, inputs)
                     loss = criterion(outputs, targets)
-                    loss += torch.mean(outputs.mean(0) - model.anchors) * 1e-3
+                    if use_anchors:
+                        loss += torch.mean(outputs.mean(0) - model.anchors) * 1e-3
                     loss.backward()
 
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, norm_type=2)
@@ -279,3 +304,24 @@ class PrefeaturizedCellularProgramsEstimator(SpatialCellularProgramsEstimator):
                     print(f'{cluster}: {score:.4f} | {r2:.4f}')
             
             self.models[cluster] = model
+    
+    @torch.no_grad()
+    def get_betas(self):
+        index_tracker = []
+        betas = []
+        for cluster_target in np.unique(self.cluster_labels):
+            mask = self.cluster_labels == cluster_target
+            indices = self.cell_indices[mask]
+            index_tracker.extend(indices)
+            cluster_sp_maps = torch.from_numpy(
+                self.sp_maps[mask]).float().unsqueeze(1)
+            b = self.models[cluster_target].get_betas(
+                cluster_sp_maps.to(self.device),
+            ).cpu().numpy()
+            betas.extend(b)
+
+        return pd.DataFrame(
+            betas, 
+            index=index_tracker, 
+            columns=['beta0']+['beta_'+i for i in self.modulators]
+        ).reindex(self.adata.obs.index)
