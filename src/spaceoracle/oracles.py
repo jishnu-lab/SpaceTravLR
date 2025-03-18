@@ -148,13 +148,13 @@ class BaseTravLR(ABC):
 
 class OracleQueue:
 
-    def __init__(self, model_dir, all_genes):
+    def __init__(self, model_dir, all_genes, lock_timeout=3600):
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
         self.model_dir = model_dir
         self.all_genes = all_genes
         self.orphans = []
-
+        self.lock_timeout = lock_timeout
     @property
     def regulated_genes(self):
         if not self.orphans:
@@ -233,7 +233,7 @@ class OracleQueue:
                 lock_datetime_str = f"{now.date()} {lock_time.strftime('%H:%M:%S.%f')}"
                 lock_datetime = datetime.datetime.strptime(lock_datetime_str, "%Y-%m-%d %H:%M:%S.%f")
 
-                if (now - lock_datetime).total_seconds() > 3600: # 1 hour
+                if (now - lock_datetime).total_seconds() > self.lock_timeout: # 1 hour
                     old_locks.append(gene)
 
         for gene in old_locks:
@@ -251,8 +251,10 @@ class OracleQueue:
         patterns = {
             'betadata': r'([^/]+)_betadata\.parquet$',
             'lock': r'([^/]+)\.lock$',
-            'orphan': r'([^/]+)\.orphan$'
+            'orphan': r'([^/]+)\.orphan$',
+            'perturbed': r'([^/]+)_\d+n_\d+x\.parquet$'
         }
+        
         for pattern in patterns.values():
             match = re.search(pattern, path)
             if match:
@@ -399,6 +401,9 @@ class SpaceTravLR(BaseTravLR):
 
             train_bar.count = 0
             train_bar.start = time.time()
+            
+        gene_bar.desc = 'All done! 🎉️'
+        gene_bar.refresh()
 
     @staticmethod
     def imbue_adata_with_space(adata, annot='cell_type_int', spatial_dim=64, in_place=False, method='fast'):
