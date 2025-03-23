@@ -634,7 +634,7 @@ class SpatialCellularProgramsEstimator:
 
     def fit(self, num_epochs=100, threshold_lambda=1e-6, learning_rate=5e-3, batch_size=512, 
             pbar=None, estimator='lasso',
-            score_threshold=0.2):
+            score_threshold=0.2, l1_reg=1e-9):
         
         sp_maps, X, y, cluster_labels = self.init_data()
 
@@ -691,7 +691,7 @@ class SpatialCellularProgramsEstimator:
                 gl = GroupLasso(
                     groups=groups,
                     group_reg=threshold_lambda,
-                    l1_reg=1e-9,
+                    l1_reg=l1_reg,
                     frobenius_lipschitz=True,
                     scale_reg="inverse_group_size",
                     # subsampling_scheme=1,
