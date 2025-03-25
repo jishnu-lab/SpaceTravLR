@@ -424,7 +424,7 @@ class SpatialCellularProgramsEstimator:
 
         wordcloud = WordCloud(
             width=800,
-            height=400,
+            height=300,
             contour_width=1,
             contour_color='black',
             background_color='white',
@@ -694,9 +694,12 @@ class SpatialCellularProgramsEstimator:
                     l1_reg=l1_reg,
                     frobenius_lipschitz=True,
                     scale_reg="inverse_group_size",
+                    warm_start=True,
+                    random_state=42,
                     # subsampling_scheme=1,
                     # supress_warning=True,
                     n_iter=1000,
+                    # warm_start=True,
                     tol=1e-5,
                 )
                 gl.fit(X_cell, y_cell)
