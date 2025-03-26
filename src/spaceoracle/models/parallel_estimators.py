@@ -619,15 +619,13 @@ class SpatialCellularProgramsEstimator:
                 self.sp_maps[mask][:, cluster_target:cluster_target+1, :, :]).float()
             spf = torch.from_numpy(self.spatial_features.values[mask]).float()
             
-            if self.models[cluster_target] is None:
-                b = np.zeros(len(self.modulators)+1)
-            else:
-                b = self.models[cluster_target].get_betas(
-                    cluster_sp_maps.to(self.device),
-                    spf.to(self.device)
-                ).cpu().numpy()
-            
+            b = self.models[cluster_target].get_betas(
+                cluster_sp_maps.to(self.device),
+                spf.to(self.device)
+            ).cpu().numpy()
+        
             betas.extend(b)
+            
 
         return pd.DataFrame(
             betas, 
@@ -721,7 +719,15 @@ class SpatialCellularProgramsEstimator:
             self.scores[cluster] = r2
             
             if r2 < 0.15:
-                self.models[cluster] = None
+                _model = CellularNicheNetwork(
+                    n_modulators = len(self.modulators), 
+                    anchors=_betas*0,
+                    spatial_dim=self.spatial_dim,
+                    n_clusters=self.n_clusters
+                ).to(self.device)
+                
+                self.models[cluster] = _model
+                
                 print(f'{cluster}: x.xxx* | {r2:.4f}')
                 pbar.update(len(X_cell)*num_epochs)
                 continue

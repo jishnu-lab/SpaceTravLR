@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=preempt
-#SBATCH --job-name=SpaceLymph
+#SBATCH --job-name=SpaceBrain2
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH --nodes=1
