@@ -15,6 +15,9 @@ from pqdm.threads import pqdm
 import os
 from .oracles import OracleQueue
 
+import warnings
+warnings.filterwarnings("ignore", message=".*Pandas doesn't allow columns to be created via a new attribute name.*")
+
 
 class Prophet(BaseTravLR):
     def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30):
