@@ -9,8 +9,8 @@ from numba import jit, prange
 import numpy as np
 from tqdm import tqdm as tqdm_mock
 tqdm_mock.__init__ = partialmethod(tqdm_mock.__init__, disable=True)
-# import warnings
-# warnings.filterwarnings('ignore')
+import warnings
+warnings.filterwarnings('ignore')
 
 @dataclass
 class BetaOutput:
@@ -58,6 +58,26 @@ class BetaFrame(pd.DataFrame):
         if cell_index is not None:
             df = df.loc[cell_index]
         return cls(df)
+    
+    def reindex(self, *args, **kwargs):
+        result = super().reindex(*args, **kwargs)
+        result = BetaFrame(result)
+        
+        for attr, value in vars(self).items():
+            if attr != '_mgr':
+                setattr(result, attr, value)
+
+        return result
+    
+    def set_index(self, *args, **kwargs):
+        result = super().set_index(*args, **kwargs)
+        result = BetaFrame(result)
+        
+        for attr, value in vars(self).items():
+            if attr != '_mgr':
+                setattr(result, attr, value)
+
+        return result
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -134,7 +154,6 @@ class BetaFrame(pd.DataFrame):
 
         # return _df[self.modulators_genes]
         
-                
         lr_betas = self.filter(like='$', axis=1)
         tfl_betas = self.filter(like='#', axis=1)
 
