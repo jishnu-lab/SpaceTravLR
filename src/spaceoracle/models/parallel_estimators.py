@@ -27,6 +27,10 @@ tt = torch.tensor
 set_seed(42)
 
 
+import warnings
+warnings.filterwarnings('ignore')
+
+
 @numba.njit(parallel=True)
 def calculate_weighted_ligands(gauss_weights, lig_df_values, u_ligands):
     n_ligands = len(u_ligands)
@@ -424,7 +428,7 @@ class SpatialCellularProgramsEstimator:
 
         wordcloud = WordCloud(
             width=800,
-            height=400,
+            height=300,
             contour_width=1,
             contour_color='black',
             background_color='white',
@@ -563,8 +567,6 @@ class SpatialCellularProgramsEstimator:
             index=self.spatial_features.index
         )
         
-        
-        # Filter modulators
         low_std = self.train_df.join(
             self.adata.obs['cell_type_int']
         ).groupby('cell_type_int').std().max(0) < 1e-8
@@ -616,11 +618,14 @@ class SpatialCellularProgramsEstimator:
             cluster_sp_maps = torch.from_numpy(
                 self.sp_maps[mask][:, cluster_target:cluster_target+1, :, :]).float()
             spf = torch.from_numpy(self.spatial_features.values[mask]).float()
+            
             b = self.models[cluster_target].get_betas(
                 cluster_sp_maps.to(self.device),
                 spf.to(self.device)
             ).cpu().numpy()
+        
             betas.extend(b)
+            
 
         return pd.DataFrame(
             betas, 
@@ -634,7 +639,7 @@ class SpatialCellularProgramsEstimator:
 
     def fit(self, num_epochs=100, threshold_lambda=1e-6, learning_rate=5e-3, batch_size=512, 
             pbar=None, estimator='lasso',
-            score_threshold=0.2):
+            score_threshold=0.2, l1_reg=1e-9):
         
         sp_maps, X, y, cluster_labels = self.init_data()
 
@@ -662,6 +667,9 @@ class SpatialCellularProgramsEstimator:
             print(f'\t{len(self.regulators)} Transcription Factors')
             print(f'\t{len(self.lr_pairs)} Ligand-Receptor Pairs')
             print(f'\t{len(self.tfl_pairs)} TranscriptionFactor-Ligand Pairs')
+            
+            
+        self.scores = {}
 
         for cluster in np.unique(cluster_labels):
             mask = cluster_labels == cluster
@@ -691,12 +699,15 @@ class SpatialCellularProgramsEstimator:
                 gl = GroupLasso(
                     groups=groups,
                     group_reg=threshold_lambda,
-                    l1_reg=1e-9,
+                    l1_reg=l1_reg,
                     frobenius_lipschitz=True,
                     scale_reg="inverse_group_size",
+                    warm_start=True,
+                    random_state=42,
                     # subsampling_scheme=1,
-                    # supress_warning=True,
-                    n_iter=1000,
+                    supress_warning=True,
+                    n_iter=1500,
+                    # warm_start=True,
                     tol=1e-5,
                 )
                 gl.fit(X_cell, y_cell)
@@ -704,8 +715,23 @@ class SpatialCellularProgramsEstimator:
                 coefs = gl.coef_.flatten()
                 _betas = np.hstack([gl.intercept_, coefs])
                 r2 = r2_score(y_cell, y_pred)
+                
+            self.scores[cluster] = r2
             
-
+            if r2 < 0.15:
+                _model = CellularNicheNetwork(
+                    n_modulators = len(self.modulators), 
+                    anchors=_betas*0,
+                    spatial_dim=self.spatial_dim,
+                    n_clusters=self.n_clusters
+                ).to(self.device)
+                
+                self.models[cluster] = _model
+                
+                print(f'{cluster}: x.xxx* | {r2:.4f}')
+                pbar.update(len(X_cell)*num_epochs)
+                continue
+            
             loader = DataLoader(
                 RotatedTensorDataset(
                     sp_maps[mask],
@@ -729,11 +755,11 @@ class SpatialCellularProgramsEstimator:
 
             criterion = torch.nn.MSELoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0)
-
             
             for epoch in range(num_epochs):
                 model.train()
                 epoch_loss = 0
+                
                 all_y_true = []
                 all_y_pred = []
                 
@@ -762,12 +788,12 @@ class SpatialCellularProgramsEstimator:
                     # no point in predicting betas if we do it poorly
                     model.anchors = model.anchors*0.0
                     print(f'{cluster}: x.xxxx | {r2:.4f}')
-                    
-                  
+
                 else:
                     print(f'{cluster}: {score:.4f} | {r2:.4f}')
             
             self.models[cluster] = model
+
 
 
     def export(self, save_dir='./models'):
@@ -778,10 +804,13 @@ class SpatialCellularProgramsEstimator:
         # Extract state dicts and anchors from models
         model_states = {}
         for cluster, model in self.models.items():
-            model_states[cluster] = {
-                'state_dict': model.state_dict(),
-                'anchors': model.anchors
-            }
+            if model is None:
+                model_states[cluster] = None
+            else:
+                model_states[cluster] = {
+                    'state_dict': model.state_dict(),
+                    'anchors': model.anchors
+                }
         
         # Replace model objects with None before pickling
         export_obj.models = model_states
