@@ -452,7 +452,7 @@ class GeneFactory(BaseTravLR):
         self, 
         target_genes, 
         save_to=None, 
-        n_propagation=3, 
+        n_propagation=4, 
         gene_expr=0, 
         cells=None):
         

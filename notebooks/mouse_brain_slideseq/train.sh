@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=preempt
 #SBATCH --job-name=SpaceBrain2
+#SBATCH --mem=250G
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH --nodes=1
