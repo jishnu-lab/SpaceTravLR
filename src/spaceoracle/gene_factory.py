@@ -104,15 +104,23 @@ class GeneFactory(BaseTravLR):
     def compute_betas(self, **kwargs):
         self.load_betas(**kwargs)
 
-    def load_betas(self, subsample=None, float16=False):
+    def load_betas(self, subsample=None, float16=False, obs_names=None):
+        self.beta_dict = None
         del self.beta_dict
         gc.collect()
-        self.status.update('💾️ Loading betas from disk')
+        
+        obs_names = obs_names if obs_names is not None else self.adata.obs_names
+        
+        self.status.update(
+            '💾️ Loading betas from disk' + f' {len(obs_names)} cells')
         self.status.color = 'black_on_salmon'
         self.status.refresh()
 
         self.beta_dict = self._get_spatial_betas_dict(
-            subsample=subsample, float16=float16)
+            subsample=subsample, 
+            float16=float16, 
+            obs_names=obs_names
+        )
         
         self.status.update('Loading betas - Done')
         self.status.color = 'black_on_green'
@@ -120,9 +128,8 @@ class GeneFactory(BaseTravLR):
         
     
     @staticmethod
-    def load_betadata(gene, save_dir):
-        # return pd.read_parquet(f'{save_dir}/{gene}_betadata.parquet')
-        return BetaFrame.from_path(f'{save_dir}/{gene}_betadata.parquet')
+    def load_betadata(gene, save_dir, obs_names=None):
+        return BetaFrame.from_path(f'{save_dir}/{gene}_betadata.parquet', obs_names=obs_names)
     
     def _compute_weighted_ligands(self, gene_mtx, cell_thresholds, genes):
         self.update_status('Computing received ligands', color='black_on_cyan')
@@ -207,7 +214,6 @@ class GeneFactory(BaseTravLR):
         return dict(results)
 
     def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata):
-        # betas_df = betadata.splash_fast(rw_ligands, rw_ligands_tfl, gex_df) ## this works but doesn't seem faster
         betas_df = betadata.splash(
             rw_ligands, 
             rw_ligands_tfl, 
@@ -216,14 +222,14 @@ class GeneFactory(BaseTravLR):
         
         return betas_df
         
-    def _get_spatial_betas_dict(self, subsample=None, float16=False):
-        bdb = Betabase(self.adata, self.save_dir, subsample=subsample, float16=float16)
+    def _get_spatial_betas_dict(self, subsample=None, float16=False, obs_names=None):
+        bdb = Betabase(self.adata, self.save_dir, subsample=subsample, float16=float16, obs_names=obs_names)
         self.ligands = list(bdb.ligands_set)
         self.tfl_ligands = list(bdb.tfl_ligands_set)
         return bdb
     
     
-    def splash_betas(self, gene):
+    def splash_betas(self, gene, obs_names=None):
         rw_ligands = self.adata.uns.get('received_ligands')
         rw_tfligands = self.adata.uns.get('received_ligands_tfl')
         gene_mtx = self.adata.layers['imputed_count']
@@ -247,7 +253,7 @@ class GeneFactory(BaseTravLR):
             genes=self.adata.var_names
         )[self.adata.var_names] 
         
-        betadata = self.load_betadata(gene, self.save_dir)
+        betadata = self.load_betadata(gene, self.save_dir, obs_names=obs_names)
         
         return self._combine_gene_wbetas(
             rw_ligands, rw_tfligands, filtered_df, betadata)
@@ -266,8 +272,9 @@ class GeneFactory(BaseTravLR):
             _beta_out = betas_dict.get(gene, None)
             
             if _beta_out is not None:
-                # r = np.array(_beta_out.modulator_gene_indices)
+                
                 r = np.array(self.beta_dict.data[gene].modulator_gene_indices)
+                
                 gene_gene_matrix[r, i] = _beta_out.values[cell_index]
 
         return gex_delta[cell_index, :].dot(gene_gene_matrix)

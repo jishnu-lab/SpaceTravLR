@@ -49,14 +49,16 @@ def compute_all_derivatives(tf_vals, lr_betas, lr_ligs, lr_recs, tfl_betas, tfl_
 class BetaFrame(pd.DataFrame):
 
     @classmethod
-    def from_path(cls, path, cell_index=None, float16=False):
+    def from_path(cls, path, obs_names=None, float16=False):
         df = pd.read_parquet(path, engine='pyarrow')
         df.index.name = path.split('/')[-1].split('_')[0]
+        
         if float16:
-            beta_cols = [col for col in df.columns if col.startswith('beta')]
-            df[beta_cols] = df[beta_cols].astype(np.float16)
-        if cell_index is not None:
-            df = df.loc[cell_index]
+            df = df.astype(np.float16)
+        
+        if obs_names is not None:
+            df = df.loc[obs_names]
+            
         return cls(df)
 
     def __init__(self, *args, **kwargs):
@@ -200,7 +202,7 @@ class Betabase:
     """
     Holds a collection of BetaFrames for each gene.
     """
-    def __init__(self, adata, folder, gene_subset=None, cell_index=None, subsample=None, float16=False):
+    def __init__(self, adata, folder, gene_subset=None, subsample=None, float16=False, obs_names=None):
         assert os.path.exists(folder), f'Folder {folder} does not exist'
         # self.adata = adata
         self.xydf = pd.DataFrame(
@@ -224,7 +226,7 @@ class Betabase:
         self.tfl_ligands_set = set()
         self.tfs_set = set()
         self.float16 = float16
-        self.load_betas_from_disk(cell_index=cell_index)
+        self.load_betas_from_disk(obs_names=obs_names)
 
     def __len__(self):
         return len(self.data)
@@ -233,7 +235,9 @@ class Betabase:
         return self.data.get(gene_name, None)
 
 
-    def load_betas_from_disk(self, cell_index):
+    def load_betas_from_disk(self, obs_names=None):
+        "obs_names are the str cell index from adata.obs_names"
+        
         import enlighten
         manager = enlighten.get_manager()
         progress_bar = manager.counter(
@@ -247,7 +251,7 @@ class Betabase:
             gene_name = path.split('/')[-1].split('_')[0]
             if self.gene_subset is not None and gene_name not in self.gene_subset:
                 continue
-            self.data[gene_name] = BetaFrame.from_path(path, cell_index=cell_index)
+            self.data[gene_name] = BetaFrame.from_path(path, obs_names=obs_names)
             
             # Zero out LR and TFL beta columns
             # lr_tfl_cols = [col for col in self.data[gene_name].columns if '$' in col or '#' in col]
