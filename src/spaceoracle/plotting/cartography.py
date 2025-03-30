@@ -61,6 +61,30 @@ def xy_from_adata(adata):
         columns=['x', 'y'], 
         index=adata.obs_names
     )
+
+def get_cells_within_radius(df, indices, radius):
+    result_indices = set()
+    for idx in indices:
+        x, y = df.loc[idx, ['x', 'y']]
+        distances = np.sqrt((df['x'] - x) ** 2 + (df['y'] - y) ** 2)
+        within_radius = df[distances <= radius].index
+        result_indices.update(within_radius)
+    return list(result_indices)
+
+def plot_cells(df, indices, radius):
+    cells_within_radius = get_cells_within_radius(df, indices, radius)
+    
+    plt.scatter(df['x'], df['y'], color='grey', s=4, label='NA')
+    plt.scatter(df.loc[cells_within_radius, 'x'], 
+                df.loc[cells_within_radius, 'y'], color='red', s=4, label='Within Radius')
+    plt.scatter(df.loc[indices, 'x'], df.loc[indices, 'y'], color='blue', s=4, label='Given Indices')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.legend()
+    plt.show()
+    
+    return cells_within_radius
+    
     
 class Cartography:
     def __init__(self, adata, color_dict, base_layer='imputed_count'):
