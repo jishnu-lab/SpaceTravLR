@@ -213,8 +213,11 @@ class OracleQueue:
             f.write(f'{now} {pid}')
 
     def delete_lock(self, gene):
-        assert os.path.exists(f'{self.model_dir}/{gene}.lock')
-        os.remove(f'{self.model_dir}/{gene}.lock')
+        try:
+            assert os.path.exists(f'{self.model_dir}/{gene}.lock')
+            os.remove(f'{self.model_dir}/{gene}.lock')
+        except Exception as e:
+            print(f'Error deleting lock for {gene}: {e}')
     
     def kill_old_locks(self):
         locked_paths = glob.glob(f'{self.model_dir}/*.lock')
