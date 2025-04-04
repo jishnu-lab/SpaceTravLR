@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --cluster=gpu
 #SBATCH --gres=gpu:1
-#SBATCH --time=0-12:00:00
+#SBATCH --time=3-00:00:00
 
 mamba activate SpaceOracle
 python train.py

@@ -506,14 +506,18 @@ class GeneFactory(BaseTravLR):
         ))
         
         
-    def genome_screen(self, save_to, n_propagation=4):
+    def genome_screen(self, save_to, n_propagation=4, priority_genes=None):
         """
         Perform a genome-wide screen of the target genes
         """
         
+        if priority_genes is not None:
+            priority_genes = np.intersect1d(priority_genes, self.possible_targets)
+        
         screen_queue = OracleQueue(
             save_to, 
-            all_genes=self.possible_targets, 
+            all_genes=self.possible_targets,
+            priority_genes=priority_genes,
             lock_timeout=3600
         )
         
@@ -538,7 +542,7 @@ class GeneFactory(BaseTravLR):
             gene_bar.refresh()
             
             if os.path.exists(f'{screen_queue.model_dir}/{target}.lock'):
-                    continue
+                continue
 
             screen_queue.create_lock(target)
             
