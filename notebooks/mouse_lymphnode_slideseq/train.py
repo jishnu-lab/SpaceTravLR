@@ -43,7 +43,12 @@ gf.load_betas()
 
 gf.genome_screen(
     save_to=base_dir + '/genome_screens/slideseq_mouse_lymphnode',
-    n_propagation=4
+    n_propagation = 4,
+    priority_genes = [
+        'Il2', 'Il4',  'Il6st', 'Gzma', 'Il2ra', 
+        'Cxcr4', 'Ccr4', 'Il4ra', 'Gata3', 'Gata2', 
+        'Pax5', 'Stat4', 'Foxp3', 'Bcl6'
+    ]
 )
 
 exit()

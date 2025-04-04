@@ -269,27 +269,32 @@ class Cartography:
             grid_scale=1, 
             vector_scale=1,
             scatter_size=5,
-            legend_on_loc=False, 
+            legend_on_loc=False,
+            legend_fontsize=8,
             figsize=(5, 5),
             dpi=180,
             alpha=0.9,
             betadata_path='.',
-            alt_colors=None
+            alt_colors=None,
+            remove_null=True,
+            perturbed_df = None
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
         layout_embedding = self.adata.obsm['X_umap']
         
-        perturbed_df = pd.read_parquet(
-            f'{betadata_path}/{perturb_target}_4n_0x.parquet')
+        if perturbed_df is None:
+            perturbed_df = pd.read_parquet(
+                f'{betadata_path}/{perturb_target}_4n_0x.parquet')
+            
         
         delta_X = perturbed_df.loc[self.adata.obs_names].values - self.adata.layers['imputed_count']
-        
+            
         P = self.compute_transition_probabilities(
             delta_X, 
             layout_embedding, 
             n_neighbors=n_neighbors, 
-            remove_null=True
+            remove_null=remove_null
         )
         
         V_simulated = project_probabilities(P, layout_embedding, normalize=normalize)
@@ -372,7 +377,7 @@ class Cartography:
                 y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
                 
                 ax.text(x, y, cluster, 
-                        fontsize=8, 
+                        fontsize=legend_fontsize, 
                         ha='center', 
                         va='center',
                         color='black',

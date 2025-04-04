@@ -9,8 +9,8 @@ from numba import jit, prange
 import numpy as np
 from tqdm import tqdm as tqdm_mock
 tqdm_mock.__init__ = partialmethod(tqdm_mock.__init__, disable=True)
-# import warnings
-# warnings.filterwarnings('ignore')
+import warnings
+warnings.filterwarnings('ignore')
 
 @dataclass
 class BetaOutput:
@@ -176,12 +176,13 @@ class BetaFrame(pd.DataFrame):
 
         _df = pd.concat(
             [
-                rec_derivatives, 
-                lig_lr_derivatives, 
-                lig_tfl_derivatives,
+                rec_derivatives*1e-3, 
+                lig_lr_derivatives*1e-3, 
+                lig_tfl_derivatives*1e-3,
                 tf_derivatives,
-                tf_tfl_derivatives
+                tf_tfl_derivatives*1e-3
             ], axis=1).groupby(level=0, axis=1).sum()
+
 
         _df.columns = 'beta_' + _df.columns.astype(str)
         return _df[self.modulators_genes]
@@ -255,8 +256,9 @@ class Betabase:
             
             # Zero out LR and TFL beta columns
             # lr_tfl_cols = [col for col in self.data[gene_name].columns if '$' in col or '#' in col]
-            # if lr_tfl_cols:
-            #     self.data[gene_name][lr_tfl_cols] = 0
+            
+#             if lr_tfl_cols:
+#                 self.data[gene_name][lr_tfl_cols] = 0
             
             
             self.ligands_set.update(self.data[gene_name]._ligands)

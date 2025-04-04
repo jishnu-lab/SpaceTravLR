@@ -148,13 +148,16 @@ class BaseTravLR(ABC):
 
 class OracleQueue:
 
-    def __init__(self, model_dir, all_genes, lock_timeout=3600):
+    def __init__(self, model_dir, all_genes, priority_genes=None,lock_timeout=3600):
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
+            
         self.model_dir = model_dir
         self.all_genes = all_genes
         self.orphans = []
         self.lock_timeout = lock_timeout
+        self.priority_genes = priority_genes or []
+        
     @property
     def regulated_genes(self):
         if not self.orphans:
@@ -170,6 +173,10 @@ class OracleQueue:
     def __next__(self):
         if self.is_empty:
             raise StopIteration
+        
+        if self.priority_genes:
+            return self.priority_genes.pop(0)
+        
         return np.random.choice(self.remaining_genes)
 
     def __len__(self):
