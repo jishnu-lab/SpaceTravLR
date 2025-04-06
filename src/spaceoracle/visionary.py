@@ -46,10 +46,12 @@ class Visionary(GeneFactory):
 
         if prematching is None:
             self.load_embeds(ref_embed, test_embed, method=matching_method)
-
             self.match_embeddings()
         else:
             self.matching = prematching
+            self.adata.obs['reference_cell'] = prematching['reference_cell'].reindex(
+                self.adata.obs.index, axis=0
+            ).values
             
         self.reformat()
         self.compute_betas(subsample=subsample)
@@ -99,7 +101,7 @@ class Visionary(GeneFactory):
         return banksy_matrix.to_df()
         
     @staticmethod
-    def compute_covet_embed(ref_adata, test_adata, k=15):
+    def compute_covet_embed(ref_adata, test_adata, k=12):
         import scenvi 
 
         test_coords = test_adata.obsm['spatial'].copy()
@@ -188,26 +190,24 @@ class Visionary(GeneFactory):
 
     @staticmethod
     def match_cells_cosine(test_embed, ref_embed):
-
-        cos_sim_matrix = cosine_similarity(test_embed, ref_embed)
+        cos_sim_matrix = cosine_similarity(test_embed, ref_embed) # this is already of shape (n_test, n_ref)
+        # cos_sim_matrix = cos_sim_matrix[:len(test_embed), :len(ref_embed)]
         closest_indices = np.argmax(cos_sim_matrix, axis=1)
         matched_refs = ref_embed.iloc[closest_indices]
         matched = matched_refs.index
-
         return matched
     
     @staticmethod
     def match_cells_spearman(test_embed, ref_embed):
         spearman_matrix, _ = spearmanr(test_embed, ref_embed, axis=1)
+        spearman_matrix = spearman_matrix[:len(test_embed), len(test_embed):]
         closest_indices = np.argmax(spearman_matrix, axis=1)
         matched_refs = ref_embed.iloc[closest_indices]
         matched = matched_refs.index
         return matched
 
-    
     @staticmethod
     def match_cells_difference(test_embed, ref_embed):
-
         diff_matrix = np.abs(
             test_embed.values.astype(np.float16)[:, None] - ref_embed.values.astype(np.float16))
         closest_indices = np.argmin(
@@ -219,10 +219,8 @@ class Visionary(GeneFactory):
 
         return matched
     
-
     @staticmethod
     def match_cells_bipartite(test_embed, ref_embed):
-        
         matching = pd.DataFrame(index=test_embed.index, columns=['reference_cell'])
         
         spatial_corr = np.corrcoef(test_embed.values, ref_embed.values)
@@ -248,18 +246,45 @@ class Visionary(GeneFactory):
 
         return matching['reference_cell']
 
+    def match_cells_custom(self, test_embed, ref_embed):
 
+        spearman_matrix, _ = spearmanr(test_embed, ref_embed, axis=1)
+        spearman_matrix = spearman_matrix[:len(test_embed), len(test_embed):]
+        
+        max_values = np.max(spearman_matrix, axis=1)
+
+        test_gex = self.adata.to_df(layer=self.layer)[self.markers]
+        ref_gex = self.ref_adata.to_df(layer=self.layer)[self.markers]
+
+        ref_cells = list(ref_gex.index)
+        matched = pd.DataFrame(index=test_embed.index, columns=['reference_cell'])
+        for i in range(spearman_matrix.shape[0]):
+            max_indices = np.where(spearman_matrix[i] == max_values[i])[0]
+            
+            # If there are ties for spatial feature correlation, select high gex correlation
+            if len(max_indices) > 1:
+                chosen = self.match_cells_spearman(
+                    test_gex.iloc[i].values.reshape(1, -1), 
+                    ref_gex.iloc[max_indices])[0]
+            else:
+                chosen = ref_cells[max_indices[0]]
+            
+            matched.iloc[i, 0] = chosen
+        
+        return matched['reference_cell']
+            
     def match_cells(self, test_embed, ref_embed):
         '''Return an index of the reference cells matching the test cell order'''
         if self.method == 'covet':
             return self.match_cells_difference(test_embed, ref_embed)
         elif self.method == 'banksy':
-            # return self.match_cells_spearman(test_embed, ref_embed)
             # return self.match_cells_cosine(test_embed, ref_embed)
-            return self.match_cells_bipartite(test_embed, ref_embed)
+            # return self.match_cells_bipartite(test_embed, ref_embed)
+            return self.match_cells_spearman(test_embed, ref_embed)
         elif self.method == 'cnn':
             # return self.match_cells_spearman(test_embed, ref_embed)
-            return self.match_cells_bipartite(test_embed, ref_embed)
+            # return self.match_cells_bipartite(test_embed, ref_embed)
+            return self.match_cells_custom(test_embed, ref_embed)
         else:
             raise ValueError('Please choose a valid method')
 
