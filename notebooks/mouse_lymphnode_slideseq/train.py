@@ -47,7 +47,8 @@ gf.genome_screen(
     priority_genes = [
         'Il2', 'Il4',  'Il6st', 'Gzma', 'Il2ra', 
         'Cxcr4', 'Ccr4', 'Il4ra', 'Gata3', 'Gata2', 
-        'Pax5', 'Stat4', 'Foxp3', 'Bcl6'
+        'Pax5', 'Stat4', 'Foxp3', 'Bcl6', 'Ccl20', 
+        'Ccr7', 'Il21r', 'Il21'
     ]
 )
 
