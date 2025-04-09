@@ -277,7 +277,8 @@ class Cartography:
             betadata_path='.',
             alt_colors=None,
             remove_null=True,
-            perturbed_df = None
+            perturbed_df = None,
+            rescale=1
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
@@ -291,7 +292,7 @@ class Cartography:
         delta_X = perturbed_df.loc[self.adata.obs_names].values - self.adata.layers['imputed_count']
             
         P = self.compute_transition_probabilities(
-            delta_X, 
+            delta_X * rescale, 
             layout_embedding, 
             n_neighbors=n_neighbors, 
             remove_null=remove_null
@@ -323,10 +324,17 @@ class Cartography:
             grid_idx_x, grid_idx_y = np.unravel_index(idx, (size_x, size_y))
             vector_field[grid_idx_x, grid_idx_y] = nbr_vector
 
+
+
         vector_field = vector_field.reshape(-1, 2)
         
         vector_scale = vector_scale / np.max(vector_field)
         vector_field *= vector_scale
+        
+        
+        
+        
+        
         
             
         f, ax = plt.subplots(figsize=figsize, dpi=dpi)
@@ -390,6 +398,9 @@ class Cartography:
                 
         plt.title(f'{perturb_target}')
         
+        return grid_points, vector_field
+        
+        
         # if not legend_on_loc:
         #     handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
         #     ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
@@ -433,5 +444,4 @@ class Cartography:
         self.adata.obs.index.name = None
         
         return vector_field_df
-        
-        
+    

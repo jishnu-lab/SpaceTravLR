@@ -156,7 +156,18 @@ class OracleQueue:
         self.all_genes = all_genes
         self.orphans = []
         self.lock_timeout = lock_timeout
-        self.priority_genes = priority_genes or []
+        self.priority_genes = priority_genes
+        
+        self.created_on = datetime.datetime.now()
+        self.last_refresh_on = datetime.datetime.now()
+        
+    @property
+    def age(self):
+        return (datetime.datetime.now() - self.created_on).total_seconds()
+    
+    def last_refresh_age(self):
+        return (datetime.datetime.now() - self.last_refresh_on).total_seconds()
+    
         
     @property
     def regulated_genes(self):
@@ -174,8 +185,11 @@ class OracleQueue:
         if self.is_empty:
             raise StopIteration
         
-        if self.priority_genes:
-            return self.priority_genes.pop(0)
+        if self.priority_genes is not None:
+            self.priority_genes = np.intersect1d(self.priority_genes, self.remaining_genes)
+        
+            if len(self.priority_genes) > 0:
+                return self.priority_genes[0]
         
         return np.random.choice(self.remaining_genes)
 
@@ -228,26 +242,18 @@ class OracleQueue:
     
     def kill_old_locks(self):
         locked_paths = glob.glob(f'{self.model_dir}/*.lock')
-        now = datetime.datetime.now()
-
-        old_locks = []
 
         for path in locked_paths:
-            gene = self.extract_gene_name(path)
-
             with open(path, 'r') as f:
                 data = f.read()
-                lock_time_str = data.split(' ')[1]
-                lock_time = datetime.datetime.strptime(lock_time_str, "%H:%M:%S.%f")
+                lock = datetime.datetime.strptime(
+                    ' '.join(data.split()[:2]), "%Y-%m-%d %H:%M:%S.%f")
 
-                lock_datetime_str = f"{now.date()} {lock_time.strftime('%H:%M:%S.%f')}"
-                lock_datetime = datetime.datetime.strptime(lock_datetime_str, "%Y-%m-%d %H:%M:%S.%f")
+                if (datetime.datetime.now() - lock).total_seconds() > self.lock_timeout:
+                    gene = self.extract_gene_name(path)
+                    self.delete_lock(gene)
+                    print(f'Deleted lock for {gene} after {self.lock_timeout} seconds')
 
-                if (now - lock_datetime).total_seconds() > self.lock_timeout: # 1 hour
-                    old_locks.append(gene)
-
-        for gene in old_locks:
-            self.delete_lock(gene)
 
     def add_orphan(self, gene):
         now = str(datetime.datetime.now())
@@ -405,6 +411,10 @@ class SpaceTravLR(BaseTravLR):
 
                 self.trained_genes.append(gene)
                 self.queue.delete_lock(gene)
+                if self.queue.last_refresh_age() > self.queue.lock_timeout:
+                    self.queue.kill_old_locks()
+                    self.queue.last_refresh_on = datetime.datetime.now()
+                    
 
             gene_bar.count = len(self.queue.all_genes) - len(self.queue.remaining_genes)
             gene_bar.refresh()

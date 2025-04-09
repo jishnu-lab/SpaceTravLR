@@ -12,6 +12,7 @@ from .beta import BetaFrame, Betabase
 from .tools.utils import is_mouse_data
 import enlighten
 from pqdm.threads import pqdm
+import datetime
 import os
 import warnings
 warnings.filterwarnings('ignore')
@@ -303,29 +304,43 @@ class GeneFactory(BaseTravLR):
     def perturb(
         self, 
         target, 
-        n_propagation=2, 
+        n_propagation=4, 
         gene_expr=0, 
         save_layer=False,
         cells=None, 
         delta_dir=None):
-
-        assert target in self.adata.var_names
+        
+        payload_dict = {}
+        
+        
+        if isinstance(target, str):
+            assert isinstance(gene_expr, (int, float))
+            payload_dict[target] = gene_expr
+        elif isinstance(target, list) and isinstance(gene_expr, list):
+            assert len(target) == len(gene_expr)
+            payload_dict = {t: g for t, g in zip(target, gene_expr)}
+        else:
+            raise ValueError(f'Invalid target info')
         
         gene_mtx = self.adata.layers['imputed_count'].copy()
+        self.payload_dict = payload_dict
 
         if isinstance(gene_mtx, pd.DataFrame):
             gene_mtx = gene_mtx.values
-
-        target_index = self.gene2index[target]  
+            
         simulation_input = gene_mtx.copy()
 
-        # perturb target gene
-        if cells is None:
-            simulation_input[:, target_index] = gene_expr   
-        else:
-            simulation_input[cells, target_index] = gene_expr
+        for target, gene_expr in self.payload_dict.items():
+            assert gene_expr >= 0
+            assert target in self.adata.var_names
+            target_index = self.gene2index[target]  
+
+            if cells is None:
+                simulation_input[:, target_index] = gene_expr   
+            else:
+                simulation_input[cells, target_index] = gene_expr
         
-        delta_input = simulation_input - gene_mtx       # get delta X
+        delta_input = simulation_input - gene_mtx
         delta_simulated = delta_input.copy() 
 
         if self.beta_dict is None:
@@ -438,13 +453,16 @@ class GeneFactory(BaseTravLR):
         gem_simulated = gene_mtx + delta_simulated
         assert gem_simulated.shape == gene_mtx.shape
 
-        if cells is None:
-            gem_simulated[:, target_index] = gene_expr
-        else:
-            gem_simulated[cells, target_index] = gene_expr
+        for target_name, target_gene_expr in self.payload_dict.items():
+            target_index = self.gene2index[target_name]  
 
-        self.update_status(
-            f'{target} -> {gene_expr} - {n_propagation}/{n_propagation} - Done')
+            if cells is None:
+                gem_simulated[:, target_index] = target_gene_expr   
+            else:
+                gem_simulated[cells, target_index] = target_gene_expr
+
+            self.update_status(
+                f'{target_name} -> {target_gene_expr} - {n_propagation}/{n_propagation} - Done')
         
         if save_layer:
             self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
@@ -463,11 +481,11 @@ class GeneFactory(BaseTravLR):
         gene_expr=0, 
         cells=None):
         
-        self.update_status(f'Batch Perturbion mode: {len(target_genes)} genes')
+        self.update_status(f'Batch Perturbation mode: {len(target_genes)} genes')
 
         progress_bar = self.manager.counter(
             total=len(target_genes), 
-            desc=f'Batch Perturbions', 
+            desc=f'Batch Perturbations', 
             unit='genes',
             color='orange',
             autorefresh=True,
@@ -476,7 +494,7 @@ class GeneFactory(BaseTravLR):
         os.makedirs(save_to, exist_ok=True)
         
         for target in target_genes:
-            progress_bar.desc = f'Batch Perturbions - {target}'
+            progress_bar.desc = f'Batch Perturbation - {target}'
             progress_bar.refresh()
             
             gex_out =self.perturb(
@@ -493,7 +511,7 @@ class GeneFactory(BaseTravLR):
                 file_name = f'{target}_{n_propagation}n_{gene_expr}x'
                 gex_out.to_parquet(f'{save_to}/{file_name}.parquet')
                 
-        self.update_status('Batch Perturbions: Done')
+        self.update_status('Batch Perturbation: Done')
         progress_bar.close()
         
           
@@ -512,7 +530,7 @@ class GeneFactory(BaseTravLR):
         """
         
         if priority_genes is not None:
-            priority_genes = np.intersect1d(priority_genes, self.possible_targets)
+            priority_genes = list(np.intersect1d(priority_genes, self.possible_targets))
         
         screen_queue = OracleQueue(
             save_to, 
@@ -542,6 +560,7 @@ class GeneFactory(BaseTravLR):
             gene_bar.refresh()
             
             if os.path.exists(f'{screen_queue.model_dir}/{target}.lock'):
+                print(f'Found duplicate lock for {target} - skipping')
                 continue
 
             screen_queue.create_lock(target)
@@ -555,6 +574,9 @@ class GeneFactory(BaseTravLR):
             )
             
             screen_queue.delete_lock(target)
+            if screen_queue.last_refresh_age() > screen_queue.lock_timeout:
+                screen_queue.kill_old_locks()
+                screen_queue.last_refresh_on = datetime.datetime.now()
         
             gene_bar.update()
 
