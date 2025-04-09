@@ -176,8 +176,8 @@ class BetaFrame(pd.DataFrame):
 
         _df = pd.concat(
             [
-                rec_derivatives*1e-3, 
-                lig_lr_derivatives*1e-3, 
+                rec_derivatives*1, 
+                lig_lr_derivatives*1e-1, 
                 lig_tfl_derivatives*1e-3,
                 tf_derivatives,
                 tf_tfl_derivatives*1e-3
