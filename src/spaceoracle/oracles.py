@@ -22,6 +22,7 @@ from sklearn.neighbors import NearestNeighbors
 
 from .tools.network import DayThreeRegulatoryNetwork
 from .tools.knn_smooth import knn_smoothing
+from .tools.utils import deprecated
 from .models.spatial_map import xyc2spatial, xyc2spatial_fast
 from .models.parallel_estimators import SpatialCellularProgramsEstimator
 
@@ -77,9 +78,32 @@ class BaseTravLR(ABC):
         n_comps = np.where(np.diff(np.diff(np.cumsum(pca.explained_variance_ratio_))>0.002))[0][0]
 
         return pcs[:, :n_comps]
-
-    ## cannibalized from CellOracle
+    
+    
     @staticmethod
+    def impute_clusterwise(adata, layer='normalized_count'):
+        import magic
+        X = _adata_to_matrix(adata, layer)
+        X = X.T
+        X = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names)
+
+        X_magic_list = []
+
+        for cell_type in tqdm(adata.obs.cell_type.unique(), desc='Imputing clusterwise'):
+            magic_operator = magic.MAGIC(verbose=0)
+            
+            mask = adata.obs.cell_type == cell_type
+            X_subset = X.loc[mask]
+            X_magic_subset = magic_operator.fit_transform(X_subset, genes='all_genes')
+            X_magic_list.append(X_magic_subset)
+
+        X_magic = pd.concat(X_magic_list)
+        X_magic = X_magic.loc[adata.obs_names]
+        
+        adata.layers['imputed_count'] = X_magic.values
+
+    @staticmethod
+    @deprecated(instructions="Use impute_clusterwise instead")
     def knn_imputation(adata, pcs, k=None, metric="euclidean", diag=1,
                        n_pca_dims=50, maximum=False,
                        balanced=True, b_sight=None, b_maxl=None,
@@ -406,8 +430,11 @@ class SpaceTravLR(BaseTravLR):
                     batch_size=self.batch_size,
                     pbar=train_bar
                 )
-
-                estimator.betadata.to_parquet(f'{self.save_dir}/{gene}_betadata.parquet')
+                
+                ## filter out columns with all zeros
+                betadata = estimator.betadata
+                betadata.loc[:, (betadata != 0).any(axis=0)].to_parquet(
+                    f'{self.save_dir}/{gene}_betadata.parquet')
 
                 self.trained_genes.append(gene)
                 self.queue.delete_lock(gene)

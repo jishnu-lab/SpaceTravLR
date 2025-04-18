@@ -739,7 +739,7 @@ class SpatialCellularProgramsEstimator:
                     y_cell,
                     cluster,
                     self.spatial_features.iloc[mask].values,
-                    rotate_maps=False
+                    rotate_maps=True
                 ),
                 batch_size=batch_size, shuffle=True
             )

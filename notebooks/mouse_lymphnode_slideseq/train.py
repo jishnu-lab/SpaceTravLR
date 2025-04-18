@@ -7,7 +7,7 @@ from spaceoracle import SpaceTravLR
 from spaceoracle.tools.network import RegulatoryFactory
 from spaceoracle.gene_factory import GeneFactory
 
-base_dir = '/ix/djishnu/shared/djishnu_kor11/'
+base_dir = '/ix1/ylee/kor11/djishnu_kor11/'
 
 co_grn = RegulatoryFactory(
     colinks_path=base_dir + 'training_data_2025/slideseq_mouse_lymphnode_colinks.pkl',
@@ -27,8 +27,8 @@ star = SpaceTravLR(
     spatial_dim=64,
     batch_size=512,
     grn=co_grn,
-    radius=200,
-    contact_distance=30,
+    radius=800,
+    contact_distance=50,
     save_dir=base_dir + 'lasso_runs/slideseq_mouse_lymphnode'
 )
 
@@ -48,7 +48,7 @@ gf.genome_screen(
         'Il2', 'Il4',  'Il6st', 'Gzma', 'Il2ra', 
         'Cxcr4', 'Ccr4', 'Il4ra', 'Gata3', 'Gata2', 
         'Pax5', 'Stat4', 'Foxp3', 'Bcl6', 'Ccl20', 
-        'Ccr7', 'Il21r', 'Il21'
+        'Ccr7', 'Il21r', 'Il21', 'Ccl5'
     ]
 )
 

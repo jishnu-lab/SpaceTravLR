@@ -168,6 +168,7 @@ class GeneFactory(BaseTravLR):
         return gene, self._combine_gene_wbetas(
             weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
     
+    
     def _get_wbetas_dict(
         self, 
         betas_dict, 
@@ -190,29 +191,35 @@ class GeneFactory(BaseTravLR):
             f'[{self.iter}/{self.max_iter}] | Computing Ligand interactions', 
             color='black_on_salmon')
         
-        process_gene_partial = partial(
-            self._process_gene, 
-            weighted_ligands=weighted_ligands, 
-            weighted_ligands_tfl=weighted_ligands_tfl, 
-            filtered_df=gex_df
-        )
+        # process_gene_partial = partial(
+        #     self._process_gene, 
+        #     weighted_ligands=weighted_ligands, 
+        #     weighted_ligands_tfl=weighted_ligands_tfl, 
+        #     filtered_df=gex_df
+        # )
         
-        results = pqdm(
-            betas_dict.data.items(), 
-            process_gene_partial, 
-            n_jobs=8, 
-            tqdm_class=tqdm
-        )
+        # results = pqdm(
+        #     betas_dict.data.items(), 
+        #     process_gene_partial, 
+        #     n_jobs=8, 
+        #     tqdm_class=tqdm
+        # )
+
+        out_dict = {}
         
-        # for i, (gene, betadata) in enumerate(betas_dict.data.items()):
-        #     # betas_dict.data[gene].wbetas = self._combine_gene_wbetas(
-        #     #     weighted_ligands, gex_df, betadata)
-        #     out_dict[gene] = self._combine_gene_wbetas(
-        #         weighted_ligands, gex_df, betadata)
+        for i, (gene, betadata) in enumerate(betas_dict.data.items()):
+            out_dict[gene] = self._combine_gene_wbetas(
+                weighted_ligands, weighted_ligands_tfl, gex_df, betadata)
+            
+            self.update_status(
+                f'{self.current_target} | {i}/{len(betas_dict.data)} | [{self.iter}/{self.max_iter}] | Computing Ligand interactions', color='black_on_salmon')
             
         self.update_status(f'Ligand interactions - Done')
 
-        return dict(results)
+        # return dict(results)
+        return out_dict
+
+
 
     def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata):
         betas_df = betadata.splash(
@@ -311,16 +318,25 @@ class GeneFactory(BaseTravLR):
         delta_dir=None):
         
         payload_dict = {}
+        output_name = None
         
         
         if isinstance(target, str):
             assert isinstance(gene_expr, (int, float))
+            assert target in self.adata.var_names
             payload_dict[target] = gene_expr
+            output_name = f'{target}_{n_propagation}n_{gene_expr}x'
+            
         elif isinstance(target, list) and isinstance(gene_expr, list):
             assert len(target) == len(gene_expr)
             payload_dict = {t: g for t, g in zip(target, gene_expr)}
+            output_name = '_'.join([f'{t}_{n_propagation}n_{g}x' for t, g in zip(target, gene_expr)])
         else:
             raise ValueError(f'Invalid target info')
+        
+        print(output_name)
+        
+        self.current_target = ''
         
         gene_mtx = self.adata.layers['imputed_count'].copy()
         self.payload_dict = payload_dict
@@ -465,10 +481,10 @@ class GeneFactory(BaseTravLR):
                 f'{target_name} -> {target_gene_expr} - {n_propagation}/{n_propagation} - Done')
         
         if save_layer:
-            self.adata.layers[f'{target}_{n_propagation}n_{gene_expr}x'] = gem_simulated
+            self.adata.layers[output_name] = gem_simulated
             
         gex_out = pd.DataFrame(gem_simulated, index=self.adata.obs_names, columns=self.adata.var_names)
-        gex_out.index.name = f'{target}_{n_propagation}n_{gene_expr}x'
+        gex_out.index.name = output_name
             
         return gex_out
     
