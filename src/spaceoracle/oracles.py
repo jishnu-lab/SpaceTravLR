@@ -226,7 +226,6 @@ class OracleQueue:
 
     @property
     def completed_genes(self):
-        # completed_paths = glob.glob(f'{self.model_dir}/*.pkl')
         completed_paths = glob.glob(f'{self.model_dir}/*.parquet')
         return list(filter(None, map(self.extract_gene_name, completed_paths)))
 
@@ -240,18 +239,16 @@ class OracleQueue:
     
     @property
     def remaining_genes(self):
-        # completed_paths = glob.glob(f'{self.model_dir}/*.pkl')
-        # completed_paths = glob.glob(f'{self.model_dir}/*.csv')
         completed_paths = glob.glob(f'{self.model_dir}/*.parquet')
         locked_paths = glob.glob(f'{self.model_dir}/*.lock')
         orphan_paths = glob.glob(f'{self.model_dir}/*.orphan')
         completed_genes = list(filter(None, map(self.extract_gene_name, completed_paths)))
         locked_genes = list(filter(None, map(self.extract_gene_name, locked_paths)))
         orphan_genes = list(filter(None, map(self.extract_gene_name, orphan_paths)))
-        return list(set(self.regulated_genes).difference(set(completed_genes+locked_genes+orphan_genes)))
+        return list(set(self.regulated_genes).difference(
+            set(completed_genes+locked_genes+orphan_genes)))
 
     def create_lock(self, gene):
-        # assert not os.path.exists(f'{self.model_dir}/{gene}.lock')
         now = str(datetime.datetime.now())
         pid = os.getpid()
         with open(f'{self.model_dir}/{gene}.lock', 'w') as f:
@@ -433,11 +430,15 @@ class SpaceTravLR(BaseTravLR):
                 
                 ## filter out columns with all zeros
                 betadata = estimator.betadata
-                betadata.loc[:, (betadata != 0).any(axis=0)].to_parquet(
-                    f'{self.save_dir}/{gene}_betadata.parquet')
+                if betadata.shape[1] > 1:   
+                    betadata.loc[:, (betadata != 0).any(axis=0)].to_parquet(
+                        f'{self.save_dir}/{gene}_betadata.parquet')
+                else:
+                    self.queue.add_orphan(gene)
 
                 self.trained_genes.append(gene)
                 self.queue.delete_lock(gene)
+                
                 if self.queue.last_refresh_age() > self.queue.lock_timeout:
                     self.queue.kill_old_locks()
                     self.queue.last_refresh_on = datetime.datetime.now()
@@ -453,7 +454,8 @@ class SpaceTravLR(BaseTravLR):
         gene_bar.refresh()
 
     @staticmethod
-    def imbue_adata_with_space(adata, annot='cell_type_int', spatial_dim=64, in_place=False, method='fast'):
+    def imbue_adata_with_space(adata, annot='cell_type_int', 
+            spatial_dim=64, in_place=False, method='fast'):
         clusters = np.array(adata.obs[annot])
         xy = np.array(adata.obsm['spatial'])
 
