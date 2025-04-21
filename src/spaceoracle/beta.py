@@ -174,13 +174,14 @@ class BetaFrame(pd.DataFrame):
             columns=self.tfl_regulators
         ).astype(float) * scale_factor
 
+        ## this might been some weighting factor(s)
         _df = pd.concat(
             [
-                rec_derivatives*1, 
-                lig_lr_derivatives*1e-1, 
-                lig_tfl_derivatives*1e-3,
+                rec_derivatives, 
+                lig_lr_derivatives, 
+                lig_tfl_derivatives,
                 tf_derivatives,
-                tf_tfl_derivatives*1e-3
+                tf_tfl_derivatives
             ], axis=1).groupby(level=0, axis=1).sum()
 
 
