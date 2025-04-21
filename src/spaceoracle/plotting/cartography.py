@@ -356,7 +356,7 @@ class Cartography:
             alpha=alpha,
             edgecolor='black',
             linewidth=0.1,
-            palette=color_dict,
+            # palette=color_dict,
             legend=not legend_on_loc
         )
 
