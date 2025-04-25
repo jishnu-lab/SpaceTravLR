@@ -84,7 +84,7 @@ def plot_cells(df, indices, radius):
     plt.show()
     
     return cells_within_radius
-    
+
     
 class Cartography:
     def __init__(self, adata, color_dict, base_layer='imputed_count'):
@@ -94,27 +94,65 @@ class Cartography:
         self.unperturbed_expression = adata.to_df(layer=base_layer)
         self.color_dict = color_dict
                 
-    @staticmethod
-    def compute_perturbation_corr(gene_mtx, delta_X):
-        corr = colDeltaCor(
-            np.ascontiguousarray(gene_mtx.T), 
-            np.ascontiguousarray(delta_X.T), 
-        )
+    def compute_perturbation_corr(self, gene_mtx, delta_X, embedding=None, k=200):
+        if embedding is None:
+            
+            corr = colDeltaCor(
+                np.ascontiguousarray(gene_mtx.T), 
+                np.ascontiguousarray(delta_X.T), 
+            )
+        
+        else:
+            nn = NearestNeighbors(n_neighbors=k+1)
+            nn.fit(embedding)
+            _, indices = nn.kneighbors(embedding)
+
+            indices = indices[:, 1:] # remove self transition
+
+            corr = colDeltaCorpartial(
+                np.ascontiguousarray(gene_mtx.T), 
+                np.ascontiguousarray(delta_X.T), 
+                indices
+            )
+
+            self.nn_indices = indices
+       
         corr = np.nan_to_num(corr, nan=1)
         return corr
+
+
+    def load_perturbation(self, perturb_target, betadata_path):
+        perturbed_df = pd.read_parquet(
+            f'{betadata_path}/{perturb_target}_4n_0x.parquet')
+        self.adata.layers[perturb_target] = perturbed_df.loc[self.adata.obs.index, self.adata.var.index].values
     
     
-    def get_corr(self, perturb_target):
+    def get_corr(self, perturb_target, embedding_label=None, k=200):
         assert perturb_target in self.adata.layers
         delta_X = (self.adata.to_df(layer=perturb_target) - self.unperturbed_expression).values
         gene_mtx = self.unperturbed_expression.values
-        return self.compute_perturbation_corr(gene_mtx, delta_X)
+
+        if embedding_label is not None:
+            assert embedding_label in self.adata.obsm
+            embedding = self.adata.obsm[embedding_label]
+        else:
+            embedding = None
+
+        return self.compute_perturbation_corr(gene_mtx, delta_X, embedding, k)
     
 
     def compute_transitions(self, corr_mtx, source_ct, annot='cell_type'):
 
         n_cells = self.adata.shape[0]
-        P = np.ones((n_cells, n_cells))
+
+        if hasattr(self, "nn_indices"):
+            P = np.zeros((n_cells, n_cells))
+            row_idx = np.repeat(np.arange(n_cells), self.nn_indices.shape[1])
+            col_idx = self.nn_indices.ravel()
+            P[row_idx, col_idx] = 1
+        else:
+            P = np.ones((n_cells, n_cells))
+
         T = 0.05
         np.fill_diagonal(P, 0)
         P *= np.exp(corr_mtx / T)   
@@ -137,6 +175,7 @@ class Cartography:
     def get_cellfate(self, transition_df, allowed_fates, thresh=0.0007, annot='cell_type'):
         source_ct = transition_df.columns.name
         assert source_ct in allowed_fates
+
         transitions = []
         values = []
         base_celltypes = self.adata.obs[annot]
@@ -155,8 +194,30 @@ class Cartography:
                 transitions.append(source_ct)
             values.append((transition_fate, self_fate))
         
-        print(Counter(transitions), np.mean(transition_fate))
+        print(f'source ct {source_ct}', Counter(transitions), np.mean(transition_fate))
         return transitions
+
+    def get_transition_annot(self, corr, allowed_fates, thresh=0.0002, annot='leiden'):
+        
+        all_fates = []
+
+        for source_ct in self.adata.obs[annot].unique():
+
+            transition_df = self.compute_transitions(corr, source_ct=source_ct, annot=annot)
+
+            fates = self.get_cellfate(transition_df, 
+                    allowed_fates=allowed_fates, thresh=thresh, annot=annot)
+
+            ct_df = pd.DataFrame(
+                fates, 
+                index=self.adata.obs[self.adata.obs[annot] == source_ct].index,
+                columns=['transition'])
+            all_fates.append(ct_df)
+        
+        all_fates = pd.concat(all_fates, axis=0)
+        self.adata.obs = pd.concat([self.adata.obs, all_fates], axis=1)
+
+
     
     def make_celltype_dict(self, annot='cell_type'):
         assert 'transition' in self.adata.obs
@@ -277,7 +338,7 @@ class Cartography:
             betadata_path='.',
             alt_colors=None,
             remove_null=True,
-            perturbed_df = None
+            perturbed_df=None
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
@@ -296,7 +357,7 @@ class Cartography:
             n_neighbors=n_neighbors, 
             remove_null=remove_null
         )
-        
+
         V_simulated = project_probabilities(P, layout_embedding, normalize=normalize)
         
         grid_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))

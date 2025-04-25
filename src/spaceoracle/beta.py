@@ -12,6 +12,10 @@ tqdm_mock.__init__ = partialmethod(tqdm_mock.__init__, disable=True)
 import warnings
 warnings.filterwarnings('ignore')
 
+import warnings
+warnings.filterwarnings("ignore", message="Pandas doesn't allow columns to be created via a new attribute name")
+
+
 @dataclass
 class BetaOutput:
     betas: np.ndarray
@@ -60,6 +64,26 @@ class BetaFrame(pd.DataFrame):
             df = df.loc[obs_names]
             
         return cls(df)
+        
+    def reindex(self, *args, **kwargs):
+        result = super().reindex(*args, **kwargs)
+        result = BetaFrame(result)
+        
+        for attr, value in vars(self).items():
+            if attr != '_mgr':
+                setattr(result, attr, value)
+
+        return result
+    
+    def set_index(self, *args, **kwargs):
+        result = super().set_index(*args, **kwargs)
+        result = BetaFrame(result)
+        
+        for attr, value in vars(self).items():
+            if attr != '_mgr':
+                setattr(result, attr, value)
+
+        return result
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

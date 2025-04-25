@@ -291,6 +291,7 @@ class GeneFactory(BaseTravLR):
             )
             
             _beta_out = betas_dict.get(gene, None)
+
             if _beta_out is not None:
                 mod_idx = self.beta_dict.data[gene].modulator_gene_indices
                 result[:, i] = np.sum(_beta_out.values * gex_delta[:, mod_idx], axis=1)
@@ -434,7 +435,7 @@ class GeneFactory(BaseTravLR):
             
             del beta_dict
             gc.collect()
-        
+
         gem_simulated = gene_mtx + delta_simulated
         assert gem_simulated.shape == gene_mtx.shape
 
