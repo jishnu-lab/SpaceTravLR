@@ -289,7 +289,7 @@ class OracleQueue:
             'betadata': r'([^/]+)_betadata\.parquet$',
             'lock': r'([^/]+)\.lock$',
             'orphan': r'([^/]+)\.orphan$',
-            'perturbed': r'([^/]+)_\d+n_\d+x\.parquet$'
+            'perturbed': r'([^/]+)_\d+n_[\d\.]+x\.parquet$'
         }
         
         for pattern in patterns.values():
