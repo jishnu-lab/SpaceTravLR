@@ -1,3 +1,4 @@
+from collections import defaultdict
 from functools import partialmethod
 import os
 import pandas as pd
@@ -10,6 +11,8 @@ import numpy as np
 from tqdm import tqdm as tqdm_mock
 tqdm_mock.__init__ = partialmethod(tqdm_mock.__init__, disable=True)
 import warnings
+import enlighten
+
 warnings.filterwarnings('ignore')
 
 @dataclass
@@ -204,7 +207,7 @@ class Betabase:
     """
     Holds a collection of BetaFrames for each gene.
     """
-    def __init__(self, adata, folder, gene_subset=None, subsample=None, float16=False, obs_names=None):
+    def __init__(self, adata, folder, gene_subset=None, subsample=None, float16=False, obs_names=None, auto_load=True):
         assert os.path.exists(folder), f'Folder {folder} does not exist'
         # self.adata = adata
         self.xydf = pd.DataFrame(
@@ -217,6 +220,7 @@ class Betabase:
             )
         )
         self.gene_subset = gene_subset
+        self.obs = adata.obs.copy()
         self.beta_paths = glob.glob(f'{self.folder}/*_betadata.parquet')
         
         if subsample is not None:
@@ -228,19 +232,66 @@ class Betabase:
         self.tfl_ligands_set = set()
         self.tfs_set = set()
         self.float16 = float16
-        self.load_betas_from_disk(obs_names=obs_names)
+        
+        if auto_load:
+            self.load_betas_from_disk(obs_names=obs_names)
 
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, gene_name):
         return self.data.get(gene_name, None)
+    
+    
+    def collect_interactions(self, cell_type, annot='cell_type'):
+        assert cell_type in self.obs[annot].unique()
+        
+        beta_lr = defaultdict(list)
+        beta_tfl = defaultdict(list)
+        
+        manager = enlighten.get_manager()
+        progress_bar = manager.counter(
+            total=len(self.beta_paths),
+            desc=f'Unraveling genes in {cell_type}',
+            unit='parquet',
+            color='orange',
+            autorefresh=True,
+        )   
+        
+        for j, f in enumerate(self.beta_paths):
+            gene_name = f.split('/')[-1].replace('_betadata.parquet', '')
+            beta = pd.read_parquet(f)
+            beta = beta.join(self.obs[annot]).query(f'{annot}==@cell_type').drop(columns=[annot])
+            
+            for k, v in beta[[i for i in beta.columns if '$' in i]].mean().to_dict().items():
+                if abs(v) > 0:
+                    beta_lr[k].append((gene_name, v))
+        
+            for k, v in beta[[i for i in beta.columns if '#' in i]].mean().to_dict().items():
+                if abs(v) > 0:
+                    beta_tfl[k].append((gene_name, v))
+                    
+            progress_bar.update()
+            
+        beta_lr_out = pd.DataFrame(
+        [(k, gene, beta) for k, gene_beta_pairs in beta_lr.items() for gene, beta in gene_beta_pairs], 
+                columns=['interaction', 'gene', 'beta'])
+        beta_lr_out.index.name = cell_type
+        beta_lr_out['interaction_type'] = 'ligand-receptor'
+        
+        beta_tfl_out = pd.DataFrame(
+        [(k, gene, beta) for k, gene_beta_pairs in beta_tfl.items() for gene, beta in gene_beta_pairs], 
+                columns=['interaction', 'gene', 'beta'])
+        beta_tfl_out.index.name = cell_type
+        beta_tfl_out['interaction_type'] = 'ligand-tf'
+        
+        return pd.concat([beta_lr_out, beta_tfl_out])
+        
 
 
     def load_betas_from_disk(self, obs_names=None):
         "obs_names are the str cell index from adata.obs_names"
         
-        import enlighten
         manager = enlighten.get_manager()
         progress_bar = manager.counter(
             total=len(self.beta_paths),

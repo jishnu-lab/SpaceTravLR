@@ -330,19 +330,10 @@ class Cartography:
         
         vector_scale = vector_scale / np.max(vector_field)
         vector_field *= vector_scale
-        
-        
-        
-        
-        
-        
             
         f, ax = plt.subplots(figsize=figsize, dpi=dpi)
         
         color_dict = self.color_dict.copy()
-        # color_dict['GC Dark Zone'] = 'mediumpurple'
-        # color_dict['GC Intermediate Zone'] = 'mediumpurple'
-        # color_dict['GC Light Zone'] = 'mediumpurple'
 
         sns.scatterplot(
             data = pd.DataFrame(
@@ -356,7 +347,7 @@ class Cartography:
             alpha=alpha,
             edgecolor='black',
             linewidth=0.1,
-            # palette=color_dict,
+            palette=color_dict,
             legend=not legend_on_loc
         )
 

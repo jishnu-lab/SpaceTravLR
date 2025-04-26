@@ -1,5 +1,7 @@
 
+from collections import defaultdict
 from functools import partial
+import glob
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -100,7 +102,6 @@ class GeneFactory(BaseTravLR):
             contact_distance=params['contact_distance']
         )
         
-        
     ## backwards compatibility
     def compute_betas(self, **kwargs):
         self.load_betas(**kwargs)
@@ -127,13 +128,12 @@ class GeneFactory(BaseTravLR):
         self.status.color = 'black_on_green'
         self.status.refresh()
         
-    
     @staticmethod
     def load_betadata(gene, save_dir, obs_names=None):
         return BetaFrame.from_path(f'{save_dir}/{gene}_betadata.parquet', obs_names=obs_names)
     
     def _compute_weighted_ligands(self, gene_mtx, cell_thresholds, genes):
-        self.update_status('Computing received ligands', color='black_on_cyan')
+        self.update_status(f'{self.current_target} >> Computing received ligands', color='black_on_cyan')
         gex_df = pd.DataFrame(
             gene_mtx, 
             index=self.adata.obs_names, 
@@ -157,16 +157,16 @@ class GeneFactory(BaseTravLR):
         self.status.color = color
         self.status.refresh()
 
-    def _process_gene(
-        self, 
-        item, 
-        weighted_ligands, 
-        weighted_ligands_tfl, 
-        filtered_df):
+    # def _process_gene(
+    #     self, 
+    #     item, 
+    #     weighted_ligands, 
+    #     weighted_ligands_tfl, 
+    #     filtered_df):
         
-        gene, betadata = item
-        return gene, self._combine_gene_wbetas(
-            weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
+    #     gene, betadata = item
+    #     return gene, self._combine_gene_wbetas(
+    #         weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
     
     
     def _get_wbetas_dict(
@@ -219,8 +219,6 @@ class GeneFactory(BaseTravLR):
         # return dict(results)
         return out_dict
 
-
-
     def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata):
         betas_df = betadata.splash(
             rw_ligands, 
@@ -235,7 +233,6 @@ class GeneFactory(BaseTravLR):
         self.ligands = list(bdb.ligands_set)
         self.tfl_ligands = list(bdb.tfl_ligands_set)
         return bdb
-    
     
     def splash_betas(self, gene, obs_names=None):
         rw_ligands = self.adata.uns.get('received_ligands')
@@ -265,8 +262,6 @@ class GeneFactory(BaseTravLR):
         
         return self._combine_gene_wbetas(
             rw_ligands, rw_tfligands, filtered_df, betadata)
-    
-
     
     def _perturb_single_cell(self, gex_delta, cell_index, betas_dict):
 
@@ -306,7 +301,6 @@ class GeneFactory(BaseTravLR):
         assert not np.isnan(result).any(), "NaN values found in delta_simulated"
         
         return result
-    
 
     def perturb(
         self, 
@@ -320,23 +314,20 @@ class GeneFactory(BaseTravLR):
         payload_dict = {}
         output_name = None
         
-        
         if isinstance(target, str):
             assert isinstance(gene_expr, (int, float))
             assert target in self.adata.var_names
             payload_dict[target] = gene_expr
-            output_name = f'{target}_{n_propagation}n_{gene_expr}x'
+            output_name = f'{target}_{n_propagation}n_{round(gene_expr, 2)}x'
             
         elif isinstance(target, list) and isinstance(gene_expr, list):
             assert len(target) == len(gene_expr)
             payload_dict = {t: g for t, g in zip(target, gene_expr)}
-            output_name = '_'.join([f'{t}_{n_propagation}n_{g}x' for t, g in zip(target, gene_expr)])
+            output_name = '_'.join([f'{t}_{n_propagation}n_{round(g, 2)}x' for t, g in zip(target, gene_expr)])
         else:
             raise ValueError(f'Invalid target info')
         
-        print(output_name)
-        
-        self.current_target = ''
+        self.current_target = output_name
         
         gene_mtx = self.adata.layers['imputed_count'].copy()
         self.payload_dict = payload_dict
@@ -488,7 +479,6 @@ class GeneFactory(BaseTravLR):
             
         return gex_out
     
-    
     def perturb_batch(
         self, 
         target_genes, 
@@ -530,7 +520,6 @@ class GeneFactory(BaseTravLR):
         self.update_status('Batch Perturbation: Done')
         progress_bar.close()
         
-          
     @property
     def possible_targets(self):
         return list(set.union(
@@ -539,11 +528,13 @@ class GeneFactory(BaseTravLR):
             self.beta_dict.tfs_set
         ))
         
+    def genome_screen(
+        self, save_to, n_propagation=4, priority_genes=None, mode='knockout'):
+        """
+        Perform a genome-wide knockout or overexpression of the target genes
+        """
         
-    def genome_screen(self, save_to, n_propagation=4, priority_genes=None):
-        """
-        Perform a genome-wide screen of the target genes
-        """
+        assert mode in ['knockout', 'overexpress']
         
         if priority_genes is not None:
             priority_genes = list(np.intersect1d(priority_genes, self.possible_targets))
@@ -568,6 +559,8 @@ class GeneFactory(BaseTravLR):
         
         screen_queue.kill_old_locks()
         
+        max_expr = self.adata.to_df(layer='imputed_count').max().to_dict()
+        
         while not screen_queue.is_empty:
             target = next(screen_queue)
             
@@ -584,7 +577,7 @@ class GeneFactory(BaseTravLR):
             gex_out = self.perturb(
                 target=target, 
                 n_propagation=n_propagation, 
-                gene_expr=0, 
+                gene_expr=0 if mode == 'knockout' else max_expr[target], 
                 cells=None, 
                 delta_dir=None
             )
@@ -596,7 +589,8 @@ class GeneFactory(BaseTravLR):
         
             gene_bar.update()
 
-            file_name = f'{target}_{n_propagation}n_0x'
+            suffix = '0x' if mode == 'knockout' else f'{round(max_expr[target], 2)}x'
+            file_name = f'{target}_{n_propagation}n_{suffix}'
             gex_out.to_parquet(
                 f'{save_to}/{file_name}.parquet')
                 
