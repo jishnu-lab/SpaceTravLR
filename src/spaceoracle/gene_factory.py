@@ -263,24 +263,6 @@ class GeneFactory(BaseTravLR):
         return self._combine_gene_wbetas(
             rw_ligands, rw_tfligands, filtered_df, betadata)
     
-    def _perturb_single_cell(self, gex_delta, cell_index, betas_dict):
-
-
-        genes = self.adata.var_names
-        
-        # columns are target genes, rows are regulators
-        gene_gene_matrix = np.zeros((len(genes), len(genes))) 
-
-        for i, gene in enumerate(genes):
-            _beta_out = betas_dict.get(gene, None)
-            
-            if _beta_out is not None:
-                
-                r = np.array(self.beta_dict.data[gene].modulator_gene_indices)
-                
-                gene_gene_matrix[r, i] = _beta_out.values[cell_index]
-
-        return gex_delta[cell_index, :].dot(gene_gene_matrix)
     
     def _perturb_all_cells(self, gex_delta, betas_dict):
         n_obs, n_genes = gex_delta.shape
@@ -351,11 +333,10 @@ class GeneFactory(BaseTravLR):
         delta_simulated = delta_input.copy() 
 
         if self.beta_dict is None:
-            # compute betas for all genes for all cells
             self.beta_dict = self._get_spatial_betas_dict() 
 
         # get LR specific filtered gex contributions
-        cell_thresholds = self.adata.uns.get('cell_thresholds')
+        cell_thresholds = self.adata.uns.get('cell_thresholds').loc[self.adata.obs_names]
         if cell_thresholds is not None:
             # Only commot LR values should be filtered
             cell_thresholds = cell_thresholds.reindex(              
@@ -364,8 +345,8 @@ class GeneFactory(BaseTravLR):
         else:
             print('warning: cell_thresholds not found in adata.uns')
 
-        rw_ligands_0 = self.adata.uns.get('received_ligands')
-        rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl')
+        rw_ligands_0 = self.adata.uns.get('received_ligands').loc[self.adata.obs_names]
+        rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl').loc[self.adata.obs_names]
         
         if rw_ligands_0 is None or rw_tfligands_0 is None:
             rw_ligands_0 = self._compute_weighted_ligands(
@@ -378,7 +359,17 @@ class GeneFactory(BaseTravLR):
         rw_ligands_0 = pd.concat(
                 [rw_ligands_0, rw_tfligands_0], axis=1
             ).groupby(level=0, axis=1).max().reindex(
-                index=self.adata.obs_names, columns=self.adata.var_names, fill_value=0)
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names, fill_value=0)
+
+        
+        all_ligands = list(set(self.ligands) | set(self.tfl_ligands))
+        ligands_0 = self.adata.to_df(layer='imputed_count')[all_ligands].reindex(
+            index=self.adata.obs_names, 
+            columns=self.adata.var_names, 
+            fill_value=0
+        )
+
 
         gene_mtx_1 = gene_mtx.copy()
         
@@ -396,7 +387,7 @@ class GeneFactory(BaseTravLR):
                 color='black_on_salmon')
 
             # weight betas by the gene expression from the previous iteration
-            beta_dict = self._get_wbetas_dict(
+            splashed_beta_dict = self._get_wbetas_dict(
                 self.beta_dict, rw_ligands_0, rw_tfligands_0, gene_mtx_1, cell_thresholds)
             
             # get updated gene expressions
@@ -418,23 +409,40 @@ class GeneFactory(BaseTravLR):
             
             delta_rw_ligands = rw_ligands_1.values - rw_ligands_0.values
 
-            delta_df = pd.DataFrame(
-                delta_simulated, 
-                columns=self.adata.var_names, 
+            # get the change in ligand expression within the gene_df that should be replaced with rw_ligand
+            gene_df_1 = pd.DataFrame(
+                gene_mtx_1,
+                columns=self.adata.var_names,
                 index=self.adata.obs_names
             )
+
+            ligands_1 = pd.concat(
+                [gene_df_1[self.ligands], gene_df_1[self.tfl_ligands]], axis=1
+            ).groupby(level=0, axis=1).max().reindex(
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names, 
+                fill_value=0
+            )
+
+            delta_ligands = ligands_1.values - ligands_0.values
+
+            # delta_df = pd.DataFrame(
+            #     delta_simulated, 
+            #     columns=self.adata.var_names, 
+            #     index=self.adata.obs_names
+            # )
             
             
-            delta_ligands = pd.concat(
-                    [delta_df[self.ligands], delta_df[self.tfl_ligands]], axis=1
-                ).groupby(level=0, axis=1).max().reindex(
-                    index=self.adata.obs_names, 
-                    columns=self.adata.var_names, 
-                    fill_value=0
-                ).values
+            # delta_ligands = pd.concat(
+            #         [delta_df[self.ligands], delta_df[self.tfl_ligands]], axis=1
+            #     ).groupby(level=0, axis=1).max().reindex(
+            #         index=self.adata.obs_names, 
+            #         columns=self.adata.var_names, 
+            #         fill_value=0
+            #     ).values
             
             delta_simulated = delta_simulated + delta_rw_ligands - delta_ligands
-            _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
+            _simulated = self._perturb_all_cells(delta_simulated, splashed_beta_dict)
             delta_simulated = np.array(_simulated)
             
             
@@ -454,7 +462,7 @@ class GeneFactory(BaseTravLR):
                     gene_mtx + delta_simulated
                 )
             
-            del beta_dict
+            del splashed_beta_dict
             gc.collect()
         
         gem_simulated = gene_mtx + delta_simulated

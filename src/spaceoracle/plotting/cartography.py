@@ -14,7 +14,7 @@ from scipy.spatial import KDTree
 import cellrank as cr
 from spaceoracle.plotting.shift import estimate_transition_probabilities, project_probabilities
 from spaceoracle.plotting.layout import get_grid_layout, plot_quiver
-
+import glob
 
 # def alpha_shape(points, alpha, only_outer=True):
 #     assert points.shape[0] > 3, "Need at least four points"
@@ -278,16 +278,20 @@ class Cartography:
             alt_colors=None,
             remove_null=True,
             perturbed_df = None,
-            rescale=1
+            rescale=1,
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
         layout_embedding = self.adata.obsm['X_umap']
         
         if perturbed_df is None:
-            perturbed_df = pd.read_parquet(
-                f'{betadata_path}/{perturb_target}_4n_0x.parquet')
             
+            pattern = f'{betadata_path}/{perturb_target}_*n_*x.parquet'
+            matching_files = glob.glob(pattern)
+            if matching_files:
+                perturbed_df = pd.read_parquet(matching_files[0])
+            else:
+                raise FileNotFoundError(f"No perturbed data file found for {perturb_target}")
         
         delta_X = perturbed_df.loc[self.adata.obs_names].values - self.adata.layers['imputed_count']
             
@@ -389,14 +393,11 @@ class Cartography:
                 
         plt.title(f'{perturb_target}')
         
+        if not legend_on_loc:
+            handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
+            legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=legend_fontsize)
+        
         return grid_points, vector_field
-        
-        
-        # if not legend_on_loc:
-        #     handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
-        #     ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
-        
-        return ax
     
     
     def get_grids(self, P, projection_params):
