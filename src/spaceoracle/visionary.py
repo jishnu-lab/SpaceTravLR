@@ -174,6 +174,7 @@ class CyberBoss(Visionary):
             pbar.update()
 
         self.beta_dict.data = test_beta_dict_data
+
     
     def reformat(self):
         # Create cell_thresholds for test adata

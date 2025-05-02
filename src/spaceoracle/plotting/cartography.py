@@ -172,7 +172,7 @@ class Cartography:
         range_df.index.name = 'Transition Target'
         return range_df.sort_values(by='mean', ascending=False)
     
-    def get_cellfate(self, transition_df, allowed_fates, thresh=0.0007, annot='cell_type'):
+    def get_cellfate(self, transition_df, allowed_fates, thresh=0.002, annot='cell_type', null_ct='null'):
         source_ct = transition_df.columns.name
         assert source_ct in allowed_fates
 
@@ -190,6 +190,8 @@ class Cartography:
             
             if transition_fate >= self_fate and transition_fate >= thresh:
                 transitions.append(ct.columns[0])
+            elif self_fate < thresh:
+                transitions.append(null_ct)
             else:
                 transitions.append(source_ct)
             values.append((transition_fate, self_fate))
@@ -200,6 +202,9 @@ class Cartography:
     def get_transition_annot(self, corr, allowed_fates, thresh=0.0002, annot='leiden'):
         
         all_fates = []
+
+        if thresh is None:
+            thresh = np.median(corr)
 
         for source_ct in self.adata.obs[annot].unique():
 

@@ -359,6 +359,13 @@ class GeneFactory(BaseTravLR):
             ).groupby(level=0, axis=1).max().reindex(
                 index=self.adata.obs_names, columns=self.adata.var_names, fill_value=0)
 
+        all_ligands = list(set(self.ligands) | set(self.tfl_ligands))
+        ligands_0 = self.adata.to_df(layer='imputed_count')[all_ligands].reindex(
+            index=self.adata.obs_names, 
+            columns=self.adata.var_names, 
+            fill_value=0
+        )
+
         gene_mtx_1 = gene_mtx.copy()
         
         self.iter = 0
@@ -386,7 +393,7 @@ class GeneFactory(BaseTravLR):
                 gene_mtx_1, cell_thresholds=None, genes=self.tfl_ligands)
 
             # update deltas to reflect change in received ligands
-            # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
+            # we consider dy/dwL: we replace delta l with delta wL in delta_simulated
             rw_ligands_1 = pd.concat(
                 [w_ligands_1, w_tfligands_1], axis=1
             ).groupby(level=0, axis=1).max().reindex(
@@ -394,23 +401,25 @@ class GeneFactory(BaseTravLR):
                 columns=self.adata.var_names, 
                 fill_value=0
             )
-            
+
             delta_rw_ligands = rw_ligands_1.values - rw_ligands_0.values
 
-            delta_df = pd.DataFrame(
-                delta_simulated, 
-                columns=self.adata.var_names, 
+            # get the change in ligand expression within the gene_df that should be replaced with rw_ligand
+            gene_df_1 = pd.DataFrame(
+                gene_mtx_1,
+                columns=self.adata.var_names,
                 index=self.adata.obs_names
             )
-            
-            
-            delta_ligands = pd.concat(
-                    [delta_df[self.ligands], delta_df[self.tfl_ligands]], axis=1
-                ).groupby(level=0, axis=1).max().reindex(
-                    index=self.adata.obs_names, 
-                    columns=self.adata.var_names, 
-                    fill_value=0
-                ).values
+
+            ligands_1 = pd.concat(
+                [gene_df_1[self.ligands], gene_df_1[self.tfl_ligands]], axis=1
+            ).groupby(level=0, axis=1).max().reindex(
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names, 
+                fill_value=0
+            )
+
+            delta_ligands = ligands_1.values - ligands_0.values
             
             delta_simulated = delta_simulated + delta_rw_ligands - delta_ligands
             _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
