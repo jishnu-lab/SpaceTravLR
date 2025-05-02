@@ -22,6 +22,7 @@ from sklearn.neighbors import NearestNeighbors
 
 from .tools.network import DayThreeRegulatoryNetwork
 from .tools.knn_smooth import knn_smoothing
+from .tools.utils import deprecated
 from .models.spatial_map import xyc2spatial, xyc2spatial_fast
 from .models.parallel_estimators import SpatialCellularProgramsEstimator
 
@@ -77,9 +78,32 @@ class BaseTravLR(ABC):
         n_comps = np.where(np.diff(np.diff(np.cumsum(pca.explained_variance_ratio_))>0.002))[0][0]
 
         return pcs[:, :n_comps]
-
-    ## cannibalized from CellOracle
+    
+    
     @staticmethod
+    def impute_clusterwise(adata, layer='normalized_count'):
+        import magic
+        X = _adata_to_matrix(adata, layer)
+        X = X.T
+        X = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names)
+
+        X_magic_list = []
+
+        for cell_type in tqdm(adata.obs.cell_type.unique(), desc='Imputing clusterwise'):
+            magic_operator = magic.MAGIC(verbose=0)
+            
+            mask = adata.obs.cell_type == cell_type
+            X_subset = X.loc[mask]
+            X_magic_subset = magic_operator.fit_transform(X_subset, genes='all_genes')
+            X_magic_list.append(X_magic_subset)
+
+        X_magic = pd.concat(X_magic_list)
+        X_magic = X_magic.loc[adata.obs_names]
+        
+        adata.layers['imputed_count'] = X_magic.values
+
+    @staticmethod
+    @deprecated(instructions="Use impute_clusterwise instead")
     def knn_imputation(adata, pcs, k=None, metric="euclidean", diag=1,
                        n_pca_dims=50, maximum=False,
                        balanced=True, b_sight=None, b_maxl=None,
@@ -156,7 +180,18 @@ class OracleQueue:
         self.all_genes = all_genes
         self.orphans = []
         self.lock_timeout = lock_timeout
-        self.priority_genes = priority_genes or []
+        self.priority_genes = priority_genes
+        
+        self.created_on = datetime.datetime.now()
+        self.last_refresh_on = datetime.datetime.now()
+        
+    @property
+    def age(self):
+        return (datetime.datetime.now() - self.created_on).total_seconds()
+    
+    def last_refresh_age(self):
+        return (datetime.datetime.now() - self.last_refresh_on).total_seconds()
+    
         
     @property
     def regulated_genes(self):
@@ -174,8 +209,11 @@ class OracleQueue:
         if self.is_empty:
             raise StopIteration
         
-        if self.priority_genes:
-            return self.priority_genes.pop(0)
+        if self.priority_genes is not None:
+            self.priority_genes = np.intersect1d(self.priority_genes, self.remaining_genes)
+        
+            if len(self.priority_genes) > 0:
+                return self.priority_genes[0]
         
         return np.random.choice(self.remaining_genes)
 
@@ -188,7 +226,6 @@ class OracleQueue:
 
     @property
     def completed_genes(self):
-        # completed_paths = glob.glob(f'{self.model_dir}/*.pkl')
         completed_paths = glob.glob(f'{self.model_dir}/*.parquet')
         return list(filter(None, map(self.extract_gene_name, completed_paths)))
 
@@ -202,18 +239,16 @@ class OracleQueue:
     
     @property
     def remaining_genes(self):
-        # completed_paths = glob.glob(f'{self.model_dir}/*.pkl')
-        # completed_paths = glob.glob(f'{self.model_dir}/*.csv')
         completed_paths = glob.glob(f'{self.model_dir}/*.parquet')
         locked_paths = glob.glob(f'{self.model_dir}/*.lock')
         orphan_paths = glob.glob(f'{self.model_dir}/*.orphan')
         completed_genes = list(filter(None, map(self.extract_gene_name, completed_paths)))
         locked_genes = list(filter(None, map(self.extract_gene_name, locked_paths)))
         orphan_genes = list(filter(None, map(self.extract_gene_name, orphan_paths)))
-        return list(set(self.regulated_genes).difference(set(completed_genes+locked_genes+orphan_genes)))
+        return list(set(self.regulated_genes).difference(
+            set(completed_genes+locked_genes+orphan_genes)))
 
     def create_lock(self, gene):
-        # assert not os.path.exists(f'{self.model_dir}/{gene}.lock')
         now = str(datetime.datetime.now())
         pid = os.getpid()
         with open(f'{self.model_dir}/{gene}.lock', 'w') as f:
@@ -228,26 +263,18 @@ class OracleQueue:
     
     def kill_old_locks(self):
         locked_paths = glob.glob(f'{self.model_dir}/*.lock')
-        now = datetime.datetime.now()
-
-        old_locks = []
 
         for path in locked_paths:
-            gene = self.extract_gene_name(path)
-
             with open(path, 'r') as f:
                 data = f.read()
-                lock_time_str = data.split(' ')[1]
-                lock_time = datetime.datetime.strptime(lock_time_str, "%H:%M:%S.%f")
+                lock = datetime.datetime.strptime(
+                    ' '.join(data.split()[:2]), "%Y-%m-%d %H:%M:%S.%f")
 
-                lock_datetime_str = f"{now.date()} {lock_time.strftime('%H:%M:%S.%f')}"
-                lock_datetime = datetime.datetime.strptime(lock_datetime_str, "%Y-%m-%d %H:%M:%S.%f")
+                if (datetime.datetime.now() - lock).total_seconds() > self.lock_timeout:
+                    gene = self.extract_gene_name(path)
+                    self.delete_lock(gene)
+                    print(f'Deleted lock for {gene} after {self.lock_timeout} seconds')
 
-                if (now - lock_datetime).total_seconds() > self.lock_timeout: # 1 hour
-                    old_locks.append(gene)
-
-        for gene in old_locks:
-            self.delete_lock(gene)
 
     def add_orphan(self, gene):
         now = str(datetime.datetime.now())
@@ -400,11 +427,22 @@ class SpaceTravLR(BaseTravLR):
                     batch_size=self.batch_size,
                     pbar=train_bar
                 )
-
-                estimator.betadata.to_parquet(f'{self.save_dir}/{gene}_betadata.parquet')
+                
+                ## filter out columns with all zeros
+                betadata = estimator.betadata
+                if betadata.shape[1] > 1:   
+                    betadata.loc[:, (betadata != 0).any(axis=0)].to_parquet(
+                        f'{self.save_dir}/{gene}_betadata.parquet')
+                else:
+                    self.queue.add_orphan(gene)
 
                 self.trained_genes.append(gene)
                 self.queue.delete_lock(gene)
+                
+                if self.queue.last_refresh_age() > self.queue.lock_timeout:
+                    self.queue.kill_old_locks()
+                    self.queue.last_refresh_on = datetime.datetime.now()
+                    
 
             gene_bar.count = len(self.queue.all_genes) - len(self.queue.remaining_genes)
             gene_bar.refresh()
@@ -416,7 +454,8 @@ class SpaceTravLR(BaseTravLR):
         gene_bar.refresh()
 
     @staticmethod
-    def imbue_adata_with_space(adata, annot='cell_type_int', spatial_dim=64, in_place=False, method='fast'):
+    def imbue_adata_with_space(adata, annot='cell_type_int', 
+            spatial_dim=64, in_place=False, method='fast'):
         clusters = np.array(adata.obs[annot])
         xy = np.array(adata.obsm['spatial'])
 
