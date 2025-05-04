@@ -427,7 +427,7 @@ class GeneFactory(BaseTravLR):
             # we consider dy/dwL: we replace delta l with delta wL in delta_simulated
             rw_ligands_1 = pd.concat(
                 [w_ligands_1, w_tfligands_1], axis=1
-            ).groupby(level=0, axis=1).max().reindex(
+            ).groupby(level=0, axis=1).max().reindex(      # w_ligands <= w_tfligands because of cell_thresholds
                 index=self.adata.obs_names, 
                 columns=self.adata.var_names, 
                 fill_value=0

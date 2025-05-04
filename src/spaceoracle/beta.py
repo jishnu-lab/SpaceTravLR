@@ -160,7 +160,6 @@ class BetaFrame(pd.DataFrame):
 
         # return _df[self.modulators_genes]
         
-                
         lr_betas = self.filter(like='$', axis=1)
         tfl_betas = self.filter(like='#', axis=1)
 
