@@ -36,7 +36,7 @@ from .tools.utils import (
 )
 
 import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore")
 
 
 class CPU_Unpickler(pickle.Unpickler):
@@ -48,7 +48,7 @@ class CPU_Unpickler(pickle.Unpickler):
 
 class BaseTravLR(ABC):
     
-    def __init__(self, adata, fields_to_keep=['rctd_cluster', 'rctd_celltypes', 'cell_thresholds']):
+    def __init__(self, adata, fields_to_keep=['cell_type', 'cell_type_int', 'cell_thresholds']):
         assert 'normalized_count' in adata.layers
         
         self.settings = EasyDict()
@@ -81,26 +81,38 @@ class BaseTravLR(ABC):
     
     
     @staticmethod
-    def impute_clusterwise(adata, layer='normalized_count'):
+    def impute_clusterwise(adata, annot='cell_type', layer='normalized_count', layer_added='imputed_count'):
         import magic
+        import warnings
+        import enlighten
+        warnings.filterwarnings("ignore")
+        
         X = _adata_to_matrix(adata, layer)
         X = X.T
         X = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names)
 
         X_magic_list = []
+        pbar = enlighten.get_manager().counter(
+            total=len(adata.obs[annot].unique()),
+            desc='Imputing clusterwise',
+            unit='clusters',
+            color='green',
+            auto_refresh=True
+        )
 
-        for cell_type in tqdm(adata.obs.cell_type.unique(), desc='Imputing clusterwise'):
+        for cell_type in adata.obs[annot].unique():
             magic_operator = magic.MAGIC(verbose=0)
             
-            mask = adata.obs.cell_type == cell_type
+            mask = adata.obs[annot] == cell_type
             X_subset = X.loc[mask]
             X_magic_subset = magic_operator.fit_transform(X_subset, genes='all_genes')
             X_magic_list.append(X_magic_subset)
-
+            pbar.update()
+            
         X_magic = pd.concat(X_magic_list)
         X_magic = X_magic.loc[adata.obs_names]
         
-        adata.layers['imputed_count'] = X_magic.values
+        adata.layers[layer_added] = X_magic.values
 
     @staticmethod
     @deprecated(instructions="Use impute_clusterwise instead")
@@ -289,7 +301,8 @@ class OracleQueue:
             'betadata': r'([^/]+)_betadata\.parquet$',
             'lock': r'([^/]+)\.lock$',
             'orphan': r'([^/]+)\.orphan$',
-            'perturbed': r'([^/]+)_\d+n_\d+x\.parquet$'
+            'perturbed': r'([^/]+)_\d+n_[\d\.]+x\.parquet$',
+            'maxx': r'([^/]+)_\d+n_maxx\.parquet$'
         }
         
         for pattern in patterns.values():

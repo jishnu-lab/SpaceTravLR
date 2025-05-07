@@ -14,7 +14,7 @@ from scipy.spatial import KDTree
 import cellrank as cr
 from spaceoracle.plotting.shift import estimate_transition_probabilities, project_probabilities
 from spaceoracle.plotting.layout import get_grid_layout, plot_quiver
-
+import glob
 
 # def alpha_shape(points, alpha, only_outer=True):
 #     assert points.shape[0] > 3, "Need at least four points"
@@ -87,12 +87,13 @@ def plot_cells(df, indices, radius):
     
     
 class Cartography:
-    def __init__(self, adata, color_dict, base_layer='imputed_count'):
+    def __init__(self, adata, color_dict, base_layer='imputed_count', annot='cell_type'):
         self.adata = adata
         self.xy = xy_from_adata(adata)
         self.base_layer = base_layer
         self.unperturbed_expression = adata.to_df(layer=base_layer)
         self.color_dict = color_dict
+        self.annot = annot
                 
     @staticmethod
     def compute_perturbation_corr(gene_mtx, delta_X):
@@ -274,22 +275,30 @@ class Cartography:
             figsize=(5, 5),
             dpi=180,
             alpha=0.9,
+            linewidth=0.1,
             betadata_path='.',
+            show_grid=True,
             alt_colors=None,
             remove_null=True,
             perturbed_df = None,
-            rescale=1
+            rescale=1,
+            ax=None,
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
         layout_embedding = self.adata.obsm['X_umap']
         
         if perturbed_df is None:
-            perturbed_df = pd.read_parquet(
-                f'{betadata_path}/{perturb_target}_4n_0x.parquet')
             
+            pattern = f'{betadata_path}/{perturb_target}_*n_*x.parquet'
+            matching_files = glob.glob(pattern)
+            if matching_files:
+                perturbed_df = pd.read_parquet(matching_files[0])
+            else:
+                raise FileNotFoundError(f"No perturbed data file found for {perturb_target}")
         
         delta_X = perturbed_df.loc[self.adata.obs_names].values - self.adata.layers['imputed_count']
+        delta_X = delta_X.round(3)
             
         P = self.compute_transition_probabilities(
             delta_X * rescale, 
@@ -327,22 +336,13 @@ class Cartography:
 
 
         vector_field = vector_field.reshape(-1, 2)
-        
         vector_scale = vector_scale / np.max(vector_field)
         vector_field *= vector_scale
         
-        
-        
-        
-        
-        
-            
-        f, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        if ax is None:
+            f, ax = plt.subplots(figsize=figsize, dpi=dpi)
         
         color_dict = self.color_dict.copy()
-        # color_dict['GC Dark Zone'] = 'mediumpurple'
-        # color_dict['GC Intermediate Zone'] = 'mediumpurple'
-        # color_dict['GC Light Zone'] = 'mediumpurple'
 
         sns.scatterplot(
             data = pd.DataFrame(
@@ -355,12 +355,25 @@ class Cartography:
             ax=ax,
             alpha=alpha,
             edgecolor='black',
-            linewidth=0.1,
-            # palette=color_dict,
+            linewidth=linewidth,
+            palette=color_dict,
             legend=not legend_on_loc
         )
+        
 
         plot_quiver(grid_points, vector_field, background=None, ax=ax)
+         
+        if show_grid:
+            ax.scatter(
+                grid_points[:, 0], 
+                grid_points[:, 1], 
+                color='black', 
+                marker='.',
+                s=1, 
+                alpha=0.05, 
+                zorder=1
+            )
+            
 
         ax.set_frame_on(False)
         ax.set_xticks([])
@@ -398,14 +411,11 @@ class Cartography:
                 
         plt.title(f'{perturb_target}')
         
+        if not legend_on_loc:
+            handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
+            legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=legend_fontsize)
+        
         return grid_points, vector_field
-        
-        
-        # if not legend_on_loc:
-        #     handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
-        #     ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
-        
-        return ax
     
     
     def get_grids(self, P, projection_params):

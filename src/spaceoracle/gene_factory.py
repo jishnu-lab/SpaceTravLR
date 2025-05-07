@@ -1,5 +1,7 @@
 
+from collections import defaultdict
 from functools import partial
+import glob
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -100,10 +102,9 @@ class GeneFactory(BaseTravLR):
             contact_distance=params['contact_distance']
         )
         
-        
-    ## backwards compatibility
-    def compute_betas(self, **kwargs):
-        self.load_betas(**kwargs)
+    # ## backwards compatibility
+    # def compute_betas(self, **kwargs):
+    #     self.load_betas(**kwargs)
 
     def load_betas(self, subsample=None, float16=False, obs_names=None):
         self.beta_dict = None
@@ -127,13 +128,12 @@ class GeneFactory(BaseTravLR):
         self.status.color = 'black_on_green'
         self.status.refresh()
         
-    
     @staticmethod
     def load_betadata(gene, save_dir, obs_names=None):
         return BetaFrame.from_path(f'{save_dir}/{gene}_betadata.parquet', obs_names=obs_names)
     
     def _compute_weighted_ligands(self, gene_mtx, cell_thresholds, genes):
-        self.update_status('Computing received ligands', color='black_on_cyan')
+        self.update_status(f'{self.current_target} >> Computing received ligands', color='black_on_cyan')
         gex_df = pd.DataFrame(
             gene_mtx, 
             index=self.adata.obs_names, 
@@ -157,16 +157,16 @@ class GeneFactory(BaseTravLR):
         self.status.color = color
         self.status.refresh()
 
-    def _process_gene(
-        self, 
-        item, 
-        weighted_ligands, 
-        weighted_ligands_tfl, 
-        filtered_df):
+    # def _process_gene(
+    #     self, 
+    #     item, 
+    #     weighted_ligands, 
+    #     weighted_ligands_tfl, 
+    #     filtered_df):
         
-        gene, betadata = item
-        return gene, self._combine_gene_wbetas(
-            weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
+    #     gene, betadata = item
+    #     return gene, self._combine_gene_wbetas(
+    #         weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
     
     
     def _get_wbetas_dict(
@@ -219,8 +219,6 @@ class GeneFactory(BaseTravLR):
         # return dict(results)
         return out_dict
 
-
-
     def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata):
         betas_df = betadata.splash(
             rw_ligands, 
@@ -236,56 +234,32 @@ class GeneFactory(BaseTravLR):
         self.tfl_ligands = list(bdb.tfl_ligands_set)
         return bdb
     
-    
     def splash_betas(self, gene, obs_names=None):
-        rw_ligands = self.adata.uns.get('received_ligands')
-        rw_tfligands = self.adata.uns.get('received_ligands_tfl')
-        gene_mtx = self.adata.layers['imputed_count']
-        cell_thresholds = self.adata.uns.get('cell_thresholds')
         
-        if rw_ligands is None or rw_tfligands is None:
-            rw_ligands = self._compute_weighted_ligands(
-                gene_mtx, cell_thresholds, genes=self.ligands)
-            rw_tfligands = self._compute_weighted_ligands(
-                gene_mtx, cell_thresholds=None, genes=self.tfl_ligands)
-            self.adata.uns['received_ligands'] = rw_ligands
-            self.adata.uns['received_ligands_tfl'] = rw_tfligands
-
+        assert gene in self.adata.var_names
+        if obs_names is None:
+            obs_names = self.adata.obs_names
+        
+        rw_ligands = self.adata.uns.get('received_ligands').loc[obs_names]
+        rw_tfligands = self.adata.uns.get('received_ligands_tfl').loc[obs_names]
+        gene_mtx = self.adata.to_df(layer='imputed_count').loc[obs_names].values
+        cell_thresholds = self.adata.uns.get('cell_thresholds').loc[obs_names]
+        
         filtered_df = get_filtered_df(
             counts_df=pd.DataFrame(
                 gene_mtx, 
-                index=self.adata.obs_names, 
+                index=obs_names, 
                 columns=self.adata.var_names
             ),
             cell_thresholds=cell_thresholds,
             genes=self.adata.var_names
-        )[self.adata.var_names] 
+        )[self.adata.var_names].loc[obs_names]
         
         betadata = self.load_betadata(gene, self.save_dir, obs_names=obs_names)
         
         return self._combine_gene_wbetas(
             rw_ligands, rw_tfligands, filtered_df, betadata)
     
-
-    
-    def _perturb_single_cell(self, gex_delta, cell_index, betas_dict):
-
-
-        genes = self.adata.var_names
-        
-        # columns are target genes, rows are regulators
-        gene_gene_matrix = np.zeros((len(genes), len(genes))) 
-
-        for i, gene in enumerate(genes):
-            _beta_out = betas_dict.get(gene, None)
-            
-            if _beta_out is not None:
-                
-                r = np.array(self.beta_dict.data[gene].modulator_gene_indices)
-                
-                gene_gene_matrix[r, i] = _beta_out.values[cell_index]
-
-        return gex_delta[cell_index, :].dot(gene_gene_matrix)
     
     def _perturb_all_cells(self, gex_delta, betas_dict):
         n_obs, n_genes = gex_delta.shape
@@ -306,7 +280,6 @@ class GeneFactory(BaseTravLR):
         assert not np.isnan(result).any(), "NaN values found in delta_simulated"
         
         return result
-    
 
     def perturb(
         self, 
@@ -320,23 +293,20 @@ class GeneFactory(BaseTravLR):
         payload_dict = {}
         output_name = None
         
-        
         if isinstance(target, str):
             assert isinstance(gene_expr, (int, float))
             assert target in self.adata.var_names
             payload_dict[target] = gene_expr
-            output_name = f'{target}_{n_propagation}n_{gene_expr}x'
+            output_name = f'{target}_{n_propagation}n_{round(gene_expr, 2)}x'
             
         elif isinstance(target, list) and isinstance(gene_expr, list):
             assert len(target) == len(gene_expr)
             payload_dict = {t: g for t, g in zip(target, gene_expr)}
-            output_name = '_'.join([f'{t}_{n_propagation}n_{g}x' for t, g in zip(target, gene_expr)])
+            output_name = '_'.join([f'{t}_{n_propagation}n_{round(g, 2)}x' for t, g in zip(target, gene_expr)])
         else:
             raise ValueError(f'Invalid target info')
         
-        print(output_name)
-        
-        self.current_target = ''
+        self.current_target = output_name
         
         gene_mtx = self.adata.layers['imputed_count'].copy()
         self.payload_dict = payload_dict
@@ -360,11 +330,10 @@ class GeneFactory(BaseTravLR):
         delta_simulated = delta_input.copy() 
 
         if self.beta_dict is None:
-            # compute betas for all genes for all cells
             self.beta_dict = self._get_spatial_betas_dict() 
 
         # get LR specific filtered gex contributions
-        cell_thresholds = self.adata.uns.get('cell_thresholds')
+        cell_thresholds = self.adata.uns.get('cell_thresholds').loc[self.adata.obs_names]
         if cell_thresholds is not None:
             # Only commot LR values should be filtered
             cell_thresholds = cell_thresholds.reindex(              
@@ -387,7 +356,17 @@ class GeneFactory(BaseTravLR):
         rw_ligands_0 = pd.concat(
                 [rw_ligands_0, rw_tfligands_0], axis=1
             ).groupby(level=0, axis=1).max().reindex(
-                index=self.adata.obs_names, columns=self.adata.var_names, fill_value=0)
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names, fill_value=0)
+
+        
+        all_ligands = list(set(self.ligands) | set(self.tfl_ligands))
+        ligands_0 = self.adata.to_df(layer='imputed_count')[all_ligands].reindex(
+            index=self.adata.obs_names, 
+            columns=self.adata.var_names, 
+            fill_value=0
+        )
+
 
         gene_mtx_1 = gene_mtx.copy()
         
@@ -405,7 +384,7 @@ class GeneFactory(BaseTravLR):
                 color='black_on_salmon')
 
             # weight betas by the gene expression from the previous iteration
-            beta_dict = self._get_wbetas_dict(
+            splashed_beta_dict = self._get_wbetas_dict(
                 self.beta_dict, rw_ligands_0, rw_tfligands_0, gene_mtx_1, cell_thresholds)
             
             # get updated gene expressions
@@ -427,23 +406,40 @@ class GeneFactory(BaseTravLR):
             
             delta_rw_ligands = rw_ligands_1.values - rw_ligands_0.values
 
-            delta_df = pd.DataFrame(
-                delta_simulated, 
-                columns=self.adata.var_names, 
+            # get the change in ligand expression within the gene_df that should be replaced with rw_ligand
+            gene_df_1 = pd.DataFrame(
+                gene_mtx_1,
+                columns=self.adata.var_names,
                 index=self.adata.obs_names
             )
+
+            ligands_1 = pd.concat(
+                [gene_df_1[self.ligands], gene_df_1[self.tfl_ligands]], axis=1
+            ).groupby(level=0, axis=1).max().reindex(
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names, 
+                fill_value=0
+            )
+
+            delta_ligands = ligands_1.values - ligands_0.values
+
+            # delta_df = pd.DataFrame(
+            #     delta_simulated, 
+            #     columns=self.adata.var_names, 
+            #     index=self.adata.obs_names
+            # )
             
             
-            delta_ligands = pd.concat(
-                    [delta_df[self.ligands], delta_df[self.tfl_ligands]], axis=1
-                ).groupby(level=0, axis=1).max().reindex(
-                    index=self.adata.obs_names, 
-                    columns=self.adata.var_names, 
-                    fill_value=0
-                ).values
+            # delta_ligands = pd.concat(
+            #         [delta_df[self.ligands], delta_df[self.tfl_ligands]], axis=1
+            #     ).groupby(level=0, axis=1).max().reindex(
+            #         index=self.adata.obs_names, 
+            #         columns=self.adata.var_names, 
+            #         fill_value=0
+            #     ).values
             
             delta_simulated = delta_simulated + delta_rw_ligands - delta_ligands
-            _simulated = self._perturb_all_cells(delta_simulated, beta_dict)
+            _simulated = self._perturb_all_cells(delta_simulated, splashed_beta_dict)
             delta_simulated = np.array(_simulated)
             
             
@@ -463,7 +459,7 @@ class GeneFactory(BaseTravLR):
                     gene_mtx + delta_simulated
                 )
             
-            del beta_dict
+            del splashed_beta_dict
             gc.collect()
         
         gem_simulated = gene_mtx + delta_simulated
@@ -487,7 +483,6 @@ class GeneFactory(BaseTravLR):
         gex_out.index.name = output_name
             
         return gex_out
-    
     
     def perturb_batch(
         self, 
@@ -530,7 +525,6 @@ class GeneFactory(BaseTravLR):
         self.update_status('Batch Perturbation: Done')
         progress_bar.close()
         
-          
     @property
     def possible_targets(self):
         return list(set.union(
@@ -539,11 +533,13 @@ class GeneFactory(BaseTravLR):
             self.beta_dict.tfs_set
         ))
         
+    def genome_screen(
+        self, save_to, n_propagation=4, priority_genes=None, mode='knockout'):
+        """
+        Perform a genome-wide knockout or overexpression of the target genes
+        """
         
-    def genome_screen(self, save_to, n_propagation=4, priority_genes=None):
-        """
-        Perform a genome-wide screen of the target genes
-        """
+        assert mode in ['knockout', 'overexpress']
         
         if priority_genes is not None:
             priority_genes = list(np.intersect1d(priority_genes, self.possible_targets))
@@ -568,6 +564,8 @@ class GeneFactory(BaseTravLR):
         
         screen_queue.kill_old_locks()
         
+        max_expr = self.adata.to_df(layer='imputed_count').max().to_dict()
+        
         while not screen_queue.is_empty:
             target = next(screen_queue)
             
@@ -584,7 +582,7 @@ class GeneFactory(BaseTravLR):
             gex_out = self.perturb(
                 target=target, 
                 n_propagation=n_propagation, 
-                gene_expr=0, 
+                gene_expr=0 if mode == 'knockout' else max_expr[target], 
                 cells=None, 
                 delta_dir=None
             )
@@ -596,7 +594,9 @@ class GeneFactory(BaseTravLR):
         
             gene_bar.update()
 
-            file_name = f'{target}_{n_propagation}n_0x'
+            # suffix = '0x' if mode == 'knockout' else f'{round(max_expr[target], 2)}x'
+            suffix = '0x' if mode == 'knockout' else 'maxx'
+            file_name = f'{target}_{n_propagation}n_{suffix}'
             gex_out.to_parquet(
                 f'{save_to}/{file_name}.parquet')
                 
