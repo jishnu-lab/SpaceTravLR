@@ -3,13 +3,12 @@ sys.path.append('../../src')
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 import scanpy as sc
-import pandas as pd
 from spaceoracle import SpaceTravLR
 
 from spaceoracle.tools.network import RegulatoryFactory
 from spaceoracle.gene_factory import GeneFactory
 
-base_dir = '/ix/djishnu/shared/djishnu_kor11/'
+base_dir = '/ix1/ylee/kor11/djishnu_kor11/'
 
 co_grn = RegulatoryFactory(
     colinks_path=base_dir + 'training_data_2025/snrna_human_tonsil_colinks.pkl',
@@ -53,7 +52,7 @@ gf.genome_screen(
        'CXCL13', 'CXCL14', 'CXCR4', 'CXCR5', 'EBI3', 'EGR1', 'EGR2',
        'EGR3', 'EPCAM', 'FOXO1', 'FOXP3', 'GATA3', 'ICAM1', 'ICAM2',
        'ICAM3', 'ICOS', 'ICOSLG', 'ID2', 'IL4', 'IL6', 'IL6R', 'IL6ST',
-       'IRF4', 'IRF8', 'ITGA5', 'ITGAM', 'ITGB1', 'ITGB2', 'LGALS9',
+       'IRF4', 'IRF8', 'ITGA5', 'ITGAM', 'ITGB1', 'ITGB2', 'LGALS9', 'IL7', 'IL7R',
        'LMO2', 'MICOS10', 'MICOS13', 'NFKB1', 'NFKB2', 'NFKBIA', 'NFKBIB',
        'NFKBID', 'NFKBIE', 'NFKBIL1', 'NFKBIZ', 'PAX5', 'PDCD1', 'PDCD11',
        'PDCD1LG2', 'PRDM1', 'S1PR1', 'S1PR2', 'S1PR3', 'S1PR4', 'SATB1',
