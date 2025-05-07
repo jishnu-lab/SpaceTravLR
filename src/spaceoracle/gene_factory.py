@@ -102,9 +102,9 @@ class GeneFactory(BaseTravLR):
             contact_distance=params['contact_distance']
         )
         
-    ## backwards compatibility
-    def compute_betas(self, **kwargs):
-        self.load_betas(**kwargs)
+    # ## backwards compatibility
+    # def compute_betas(self, **kwargs):
+    #     self.load_betas(**kwargs)
 
     def load_betas(self, subsample=None, float16=False, obs_names=None):
         self.beta_dict = None
@@ -235,28 +235,25 @@ class GeneFactory(BaseTravLR):
         return bdb
     
     def splash_betas(self, gene, obs_names=None):
-        rw_ligands = self.adata.uns.get('received_ligands')
-        rw_tfligands = self.adata.uns.get('received_ligands_tfl')
-        gene_mtx = self.adata.layers['imputed_count']
-        cell_thresholds = self.adata.uns.get('cell_thresholds')
         
-        if rw_ligands is None or rw_tfligands is None:
-            rw_ligands = self._compute_weighted_ligands(
-                gene_mtx, cell_thresholds, genes=self.ligands)
-            rw_tfligands = self._compute_weighted_ligands(
-                gene_mtx, cell_thresholds=None, genes=self.tfl_ligands)
-            self.adata.uns['received_ligands'] = rw_ligands
-            self.adata.uns['received_ligands_tfl'] = rw_tfligands
-
+        assert gene in self.adata.var_names
+        if obs_names is None:
+            obs_names = self.adata.obs_names
+        
+        rw_ligands = self.adata.uns.get('received_ligands').loc[obs_names]
+        rw_tfligands = self.adata.uns.get('received_ligands_tfl').loc[obs_names]
+        gene_mtx = self.adata.to_df(layer='imputed_count').loc[obs_names].values
+        cell_thresholds = self.adata.uns.get('cell_thresholds').loc[obs_names]
+        
         filtered_df = get_filtered_df(
             counts_df=pd.DataFrame(
                 gene_mtx, 
-                index=self.adata.obs_names, 
+                index=obs_names, 
                 columns=self.adata.var_names
             ),
             cell_thresholds=cell_thresholds,
             genes=self.adata.var_names
-        )[self.adata.var_names] 
+        )[self.adata.var_names].loc[obs_names]
         
         betadata = self.load_betadata(gene, self.save_dir, obs_names=obs_names)
         
@@ -345,8 +342,8 @@ class GeneFactory(BaseTravLR):
         else:
             print('warning: cell_thresholds not found in adata.uns')
 
-        rw_ligands_0 = self.adata.uns.get('received_ligands').loc[self.adata.obs_names]
-        rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl').loc[self.adata.obs_names]
+        rw_ligands_0 = self.adata.uns.get('received_ligands')
+        rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl')
         
         if rw_ligands_0 is None or rw_tfligands_0 is None:
             rw_ligands_0 = self._compute_weighted_ligands(
@@ -597,7 +594,8 @@ class GeneFactory(BaseTravLR):
         
             gene_bar.update()
 
-            suffix = '0x' if mode == 'knockout' else f'{round(max_expr[target], 2)}x'
+            # suffix = '0x' if mode == 'knockout' else f'{round(max_expr[target], 2)}x'
+            suffix = '0x' if mode == 'knockout' else 'maxx'
             file_name = f'{target}_{n_propagation}n_{suffix}'
             gex_out.to_parquet(
                 f'{save_to}/{file_name}.parquet')
