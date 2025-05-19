@@ -93,7 +93,6 @@ random_neighbors=False, annot=None, T=0.05, n_jobs=1):
             cols = indices.flatten()
             P[rows, cols] = 1
         
-
         gene_mtx = gene_mtx.astype('float64')
         corr = colDeltaCorpartial(
             np.ascontiguousarray(gene_mtx.T), 

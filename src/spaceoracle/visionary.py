@@ -181,10 +181,12 @@ class CyberBoss(Visionary):
         test_thresholds = []
         ref_thresholds = self.ref_adata.uns['cell_thresholds']
 
-        for test_cell, row in self.matching.iterrows():
-            test_thresholds.append(
-                ref_thresholds.loc[self.matching.loc[test_cell]].sum(axis=0) 
-            )
+        # for test_cell, row in self.matching.iterrows():
+        #     test_thresholds.append(
+        #         ref_thresholds.loc[self.matching.loc[test_cell]].sum(axis=0) 
+        #     )
+        test_thresholds = ref_thresholds.loc[self.matching.values.flatten()].groupby(level=0).sum()
+        
 
         test_thresholds = pd.DataFrame(test_thresholds, index=self.matching.index)
         test_thresholds.columns = ref_thresholds.columns

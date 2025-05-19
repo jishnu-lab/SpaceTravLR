@@ -158,6 +158,9 @@ class Cartography:
         np.fill_diagonal(P, 0)
         P *= np.exp(corr_mtx / T)   
         P /= P.sum(1)[:, None]
+
+        mask = np.where(corr_mtx <= 0, 0, 1) # if corr was negative or zero, it should not be a transition
+        P *= mask
         
         transition_df = pd.DataFrame(P[self.adata.obs[annot] == source_ct])
         transition_df.columns = self.adata.obs_names
@@ -173,31 +176,37 @@ class Cartography:
         range_df.index.name = 'Transition Target'
         return range_df.sort_values(by='mean', ascending=False)
     
-    def get_cellfate(self, transition_df, allowed_fates, thresh=0.002, annot='cell_type', null_ct='null'):
+    def get_cellfate(self, transition_df, allowed_fates, thresh=0.002, annot='cell_type', null_ct='null', self_thresh=0):
         source_ct = transition_df.columns.name
         assert source_ct in allowed_fates
 
         transitions = []
-        values = []
+
         base_celltypes = self.adata.obs[annot]
+
         for ix in tqdm(range(transition_df.shape[0])):
+
             fate_df = transition_df.iloc[ix].to_frame().join(
                 base_celltypes).groupby(annot).mean().loc[allowed_fates]
             
             ct = fate_df.sort_values(ix, ascending=False).iloc[0].to_frame()
-            
+
             self_fate = fate_df.query(f'{annot} == @source_ct').values[0][0]
             transition_fate = fate_df.query(f'{annot} == @ct.columns[0]').values[0][0]
-            
-            if transition_fate >= self_fate and transition_fate >= thresh:
+        
+            if (
+                (transition_fate > self_fate)
+                and (transition_fate > thresh)
+                and (transition_fate > self_thresh)
+            ):
                 transitions.append(ct.columns[0])
             elif self_fate < thresh:
                 transitions.append(null_ct)
             else:
                 transitions.append(source_ct)
-            values.append((transition_fate, self_fate))
+
         
-        print(f'source ct {source_ct}', Counter(transitions), np.mean(transition_fate))
+        print(f'source ct {source_ct}', Counter(transitions), np.mean(transition_fate), self_thresh)
         return transitions
 
     def get_transition_annot(self, corr, allowed_fates, thresh=0.0002, annot='leiden'):
@@ -211,8 +220,11 @@ class Cartography:
 
             transition_df = self.compute_transitions(corr, source_ct=source_ct, annot=annot)
 
+            range_df = self.assess_transitions(transition_df, self.adata.obs[annot], source_ct, annot)
+            self_thresh = range_df.loc[source_ct, 'min'] # transition should exceed the minimum self transition
+ 
             fates = self.get_cellfate(transition_df, 
-                    allowed_fates=allowed_fates, thresh=thresh, annot=annot)
+                    allowed_fates=allowed_fates, thresh=thresh, annot=annot, self_thresh=self_thresh)
 
             ct_df = pd.DataFrame(
                 fates, 
@@ -225,28 +237,30 @@ class Cartography:
 
 
     
-    def make_celltype_dict(self, annot='cell_type'):
+    def make_celltype_dict(self, annot='cell_type', basis='spatial'):
         assert 'transition' in self.adata.obs
         assert annot in self.adata.obs
         
         ct_points_wt = {}
         for ct in self.adata.obs[annot].unique():
             points = np.asarray(
-                self.adata[self.adata.obs[annot] == ct].obsm['spatial'])
-            delta = 30
-            points = np.vstack(
-                (points +[-delta,delta], points +[-delta,-delta], 
-                points +[delta,delta], points +[delta,-delta]))
+                self.adata[self.adata.obs[annot] == ct].obsm[basis])
+            if basis == 'spatial':
+                delta = 30
+                points = np.vstack(
+                    (points +[-delta,delta], points +[-delta,-delta], 
+                    points +[delta,delta], points +[delta,-delta]))
             ct_points_wt[ct] = points
 
         ct_points_ko = {}
         for ct in self.adata.obs['transition'].unique():
             points = np.asarray(
-                self.adata[self.adata.obs['transition'] == ct].obsm['spatial'])
-            delta = 30
-            points = np.vstack(
-                (points +[-delta,delta], points +[-delta,-delta], 
-                points +[delta,delta], points +[delta,-delta]))
+                self.adata[self.adata.obs['transition'] == ct].obsm[basis])
+            if basis == 'spatial':
+                delta = 30
+                points = np.vstack(
+                    (points +[-delta,delta], points +[-delta,-delta], 
+                    points +[delta,delta], points +[delta,-delta]))
             ct_points_ko[ct] = points
             
         return ct_points_wt, ct_points_ko
@@ -458,7 +472,7 @@ class Cartography:
 
 
         if legend_on_loc:
-            for cluster in all_cts.unique():
+            for cluster in sorted(all_cts.unique()):
                 cluster_cells = all_cts == cluster
                 x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
                 y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
@@ -478,7 +492,7 @@ class Cartography:
         plt.title(f'{perturb_target}')
         
         if not legend_on_loc:
-            handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
+            handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in sorted(all_cts.unique())]
             legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=legend_fontsize)
         
         return grid_points, vector_field

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=l40s
+#SBATCH --partition=preempt
 #SBATCH --job-name=SpaceTravLR
 #SBATCH --output=train_COVET.txt
 ##SBATCH --error=/dev/null

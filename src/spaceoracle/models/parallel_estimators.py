@@ -769,8 +769,7 @@ class SpatialCellularProgramsEstimator:
                     optimizer.zero_grad()
                     outputs = model(spatial_maps, inputs, spatial_features)
                     loss = criterion(outputs, targets)
-                    if use_anchors:
-                        loss += torch.mean(outputs.mean(0) - model.anchors) * 1e-3
+                    loss += torch.mean(outputs.mean(0) - model.anchors) * 1e-3
                     loss.backward()
 
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, norm_type=2)
@@ -843,33 +842,3 @@ class SpatialCellularProgramsEstimator:
             ).to(self.device)
             model.load_state_dict(state)
             self.models[cluster] = model
-
-    def get_scores(self):
-        scores = []
-        for cluster in np.unique(self.cluster_labels):
-            mask = self.cluster_labels == cluster
-            X_cell, y_cell = self.Xn[mask], self.yn[mask]
-            loader = DataLoader(
-                RotatedTensorDataset(
-                    self.sp_maps[mask],
-                    X_cell,
-                    y_cell,
-                    cluster,
-                    self.spatial_features.iloc[mask].values,
-                    rotate_maps=False
-                ),
-                batch_size=512, shuffle=False
-            )
-
-            model = self.models[cluster]
-            model.eval()
-
-            all_y_true = []
-            all_y_pred = []
-            for batch in loader:
-                spatial_maps, inputs, targets, spatial_features = [b.to(device) for b in batch]
-                outputs = model(spatial_maps, inputs, spatial_features)
-                all_y_true.extend(targets.cpu().detach().numpy())
-                all_y_pred.extend(outputs.cpu().detach().numpy())
-            scores.append(r2_score(all_y_true, all_y_pred))
-        return scores

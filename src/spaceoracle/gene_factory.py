@@ -102,9 +102,9 @@ class GeneFactory(BaseTravLR):
             contact_distance=params['contact_distance']
         )
         
-    # ## backwards compatibility
-    # def compute_betas(self, **kwargs):
-    #     self.load_betas(**kwargs)
+    ## backwards compatibility
+    def compute_betas(self, **kwargs):
+        self.load_betas(**kwargs)
 
     def load_betas(self, subsample=None, float16=False, obs_names=None):
         self.beta_dict = None
@@ -325,6 +325,7 @@ class GeneFactory(BaseTravLR):
             if cells is None:
                 simulation_input[:, target_index] = gene_expr   
             else:
+                # cells is a list of cell indices
                 simulation_input[cells, target_index] = gene_expr
         
         delta_input = simulation_input - gene_mtx
