@@ -2,6 +2,7 @@
 from collections import defaultdict
 from functools import partial
 import glob
+import statistics
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -483,6 +484,41 @@ class GeneFactory(BaseTravLR):
         gex_out.index.name = output_name
             
         return gex_out
+    
+    @staticmethod
+    def get_ko_data(perturb_dir, adata):
+        files = [i.split('/')[-1].split('_')[0] for i in glob.glob(
+            f'{perturb_dir}/*.parquet')]
+        
+        ko_data = []
+        
+        pbar = enlighten.get_manager().counter(
+            total=len(files), 
+            desc='Getting KO data', 
+            unit='genes',
+            color='orange',
+            autorefresh=True,
+        )
+
+        for kotarget in files:
+            pbar.desc = f'Getting KO data - {kotarget}'
+            pbar.refresh()
+            data = pd.read_parquet(f'{perturb_dir}/{kotarget}_4n_0x.parquet')
+            data = data.loc[adata.obs_names] - adata.to_df(layer='imputed_count')
+            data = data.join(adata.obs.cell_type).groupby('cell_type').mean().abs().mean(axis=1)
+
+            ds = {}
+            for k, v in data.sort_values(ascending=False).to_dict().items():
+                ds[k] = v
+
+            data = pd.DataFrame.from_dict(ds, orient='index')
+            data.columns = [kotarget]
+            ko_data.append(data)
+            pbar.update()
+            
+        pbar.close()
+        
+        return pd.concat(ko_data, axis=1)
     
     def perturb_batch(
         self, 
