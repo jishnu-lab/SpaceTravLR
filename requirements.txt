@@ -22,7 +22,7 @@ scipy==1.12
 torch
 torchvision
 tqdm==4.66.4
-pyarrow==17.0.0
+pyarrow
 enlighten
 pyro-ppl
 commot
