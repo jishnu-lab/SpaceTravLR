@@ -6,14 +6,14 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     strategy:
-      max-parallel: 5
+      max-parallel: 8
 
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python 3.9.19
       uses: actions/setup-python@v3
       with:
-        python-version: '3.10'
+        python-version: '3.9.19'
     - name: Add conda to system path
       run: |
         # $CONDA is an environment variable pointing to the root of the miniconda directory
