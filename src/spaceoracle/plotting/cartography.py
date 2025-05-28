@@ -235,7 +235,9 @@ class Cartography:
             rename=None,
             ax=None,
             curve=True,
+            grey_out=True,
             highlight_clusters=None,
+            limit_clusters=False,
             arrow_alpha_non_highlighted=0.3,
         ):
         assert 'X_umap' in self.adata.obsm
@@ -254,8 +256,16 @@ class Cartography:
             else:
                 raise FileNotFoundError(f"No perturbed data file found for {perturb_target}")
         
-        delta_X = perturbed_df.loc[self.adata.obs_names].values - self.adata.layers['imputed_count']
+        
+        perturbed_df = perturbed_df.loc[self.adata.obs_names]
+        
+        if limit_clusters and highlight_clusters is not None:
+            mask = ~self.adata.obs[hue].isin(highlight_clusters)
+            perturbed_df.loc[mask] = self.adata.to_df(layer='imputed_count').loc[mask]
+
+        delta_X = perturbed_df.values - self.adata.layers['imputed_count']
         delta_X = delta_X.round(3)
+            
             
         P = self.compute_transition_probabilities(
             delta_X * rescale, 
@@ -312,6 +322,10 @@ class Cartography:
             highlight_color_dict = {ct: 'lightgrey' for ct in color_dict}
             for ct in highlight_clusters:
                 if ct in color_dict:
+                    highlight_color_dict[ct] = color_dict[ct]
+                    
+            if not grey_out:
+                for ct in color_dict:
                     highlight_color_dict[ct] = color_dict[ct]
                     
             # Create a mask for highlighted cells
