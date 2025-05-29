@@ -1,24 +1,24 @@
-anndata>=0.7.6
-anndata2ri==1.0.6
-cython==0.29.24
-karateclub==1.2.2
-leidenalg==0.8.4
+anndata
+anndata2ri
+cython
+karateclub
+leidenalg
 # networkx==2.5.1
 # pandas==1.4.1
-pandas==2.2.2
-plotly==5.3.1
-pot==0.8.2
-pysal==2.6.0
+pandas
+plotly
+pot
+pysal
 igraph
-python-louvain==0.15
-rpy2==3.4.2
-scikit-learn==1.0.2
-easydict==1.13
-enlighten==1.12.4
+python-louvain
+rpy2
+scikit-learn
+easydict
+enlighten
 # group_lasso==1.5.0
 # joblib==1.4.2
 # jscatter==1.7.5
-matplotlib==3.10.3
+matplotlib
 networkx==3.2.1
 numpy>=1.24.0
 # plotly==5.23.0
@@ -26,9 +26,9 @@ numpy>=1.24.0
 # pysankeybeta==1.4.2
 # python_magic==0.4.27
 scanpy
-scipy==1.15.3
-seaborn==0.13.2
-tqdm==4.67.1
+scipy
+seaborn
+tqdm
 # wordcloud==1.9.3
 commot
 # numba
