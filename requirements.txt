@@ -24,7 +24,7 @@ numpy>=1.24.0
 # pqdm==0.2.0
 # pysankeybeta==1.4.2
 # python_magic==0.4.27
-scanpy
+scanpy==1.10.2
 scipy==1.15.3
 seaborn==0.13.2
 tqdm==4.67.1
