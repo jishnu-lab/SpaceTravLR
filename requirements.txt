@@ -8,7 +8,7 @@ matplotlib==3.10.3
 networkx==3.2.1
 numpy>=1.24.0
 pandas==2.2.3
-plotly==5.23.0
+# plotly==5.23.0
 pqdm==0.2.0
 pysankeybeta==1.4.2
 python_magic==0.4.27
