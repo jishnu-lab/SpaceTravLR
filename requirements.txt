@@ -11,7 +11,7 @@ pot
 pysal
 igraph
 python-louvain
-rpy2
+# rpy2
 scikit-learn
 easydict
 enlighten
