@@ -31,7 +31,21 @@ seaborn
 tqdm
 # wordcloud==1.9.3
 commot
-# numba
-# torch
-# torchvision
-# torchaudio
+group-lasso
+pqdm
+magic-impute
+wordcloud
+pysankeybeta
+easydict
+# velocyto==0.17.17
+shiny>=0.6.0
+scanpy>=1.10.0
+pandas>=2.0.0
+numpy>=1.24.0
+anndata==0.10.8
+matplotlib>=3.7.0
+altair>=5.0.0
+liana
+tangram-sc
+squidpy
+decoupler
