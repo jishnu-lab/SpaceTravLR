@@ -13,7 +13,7 @@ class PrefeaturizedTensorDataset(Dataset):
         return len(self.X_cell)
 
     def __getitem__(self, idx):
-        sp_map = self.sp_maps[idx, :, :]
+        sp_map = self.sp_maps[idx, :]
         sp_map = np.expand_dims(sp_map, axis=0)
 
         return (
@@ -24,7 +24,7 @@ class PrefeaturizedTensorDataset(Dataset):
       
 class PrefeaturizedNicheNetwork(CellularNicheNetwork):
 
-    def __init__(self, n_modulators, anchors=None, spatial_dim=64, n_clusters=7):
+    def __init__(self, n_modulators, anchors=None, spatial_dim=64**2, n_clusters=7):
         super().__init__(n_modulators, anchors, spatial_dim, n_clusters)
         self.in_channels = 1
         self.out_channels = 1
@@ -35,7 +35,7 @@ class PrefeaturizedNicheNetwork(CellularNicheNetwork):
 
         self.anchors = torch.from_numpy(anchors).float().to(device)
         self.mlp = nn.Sequential(
-            nn.Linear(spatial_dim**2, 64),
+            nn.Linear(spatial_dim, 64),
             nn.PReLU(init=0.1),
             nn.Linear(64, self.dim)
         )
@@ -45,7 +45,7 @@ class PrefeaturizedNicheNetwork(CellularNicheNetwork):
         # sp_out = self.spatial_features_mlp(spatial_features)
         # out = out+sp_out
         n_samples = spatial_maps.shape[0]
-        betas = self.mlp(spatial_maps.reshape(n_samples, self.spatial_dim**2))
+        betas = self.mlp(spatial_maps.reshape(n_samples, self.spatial_dim))
         betas = self.output_activation(betas) * 1.5
 
         return betas*self.anchors
@@ -66,7 +66,7 @@ class PrefeaturizedCellularProgramsEstimator(SpatialCellularProgramsEstimator):
             sp_maps_key='COVET_SQRT'):
 
         assert sp_maps_key in adata.obsm.keys(), f'adata.obsm does not contain {sp_maps_key}'
-        sp_maps = adata.obsm[sp_maps_key]
+        sp_maps = adata.obsm[sp_maps_key].reshape(adata.n_obs, -1)
 
         super().__init__(adata, target_gene, spatial_dim=sp_maps.shape[1], 
             cluster_annot=cluster_annot, layer=layer, 
@@ -166,7 +166,7 @@ class PrefeaturizedCellularProgramsEstimator(SpatialCellularProgramsEstimator):
 
     def fit(self, num_epochs=100, threshold_lambda=1e-6, learning_rate=5e-3, batch_size=512, 
             pbar=None, estimator='lasso', score_threshold=0.2,
-            use_anchors=True):
+            use_anchors=False):
         
         sp_maps, X, y, cluster_labels = self.init_data()
         print(f'Using {self.sp_maps_key} as spatial maps')
@@ -229,9 +229,9 @@ class PrefeaturizedCellularProgramsEstimator(SpatialCellularProgramsEstimator):
                         l1_reg=1e-9,
                         frobenius_lipschitz=True,
                         scale_reg="inverse_group_size",
-                        # subsampling_scheme=1,
-                        # supress_warning=True,
-                        n_iter=1000,
+                        random_state=42,
+                        supress_warning=True,
+                        n_iter=1500,
                         tol=1e-5,
                     )
                     gl.fit(X_cell, y_cell)
@@ -243,6 +243,20 @@ class PrefeaturizedCellularProgramsEstimator(SpatialCellularProgramsEstimator):
                 # _betas = np.hstack([0, np.ones(len(self.modulators))])
                 _betas = np.ones(len(self.modulators)+1)
                 r2 = 0
+            
+            if r2 < 0.15:
+                _model = PrefeaturizedNicheNetwork(
+                    n_modulators = len(self.modulators), 
+                    anchors=_betas*0,
+                    spatial_dim=self.spatial_dim,
+                    n_clusters=self.n_clusters
+                ).to(self.device)
+                
+                self.models[cluster] = _model
+                
+                print(f'{cluster}: x.xxx* | {r2:.4f}')
+                pbar.update(len(X_cell)*num_epochs)
+                continue
 
             loader = DataLoader(
                 PrefeaturizedTensorDataset(
