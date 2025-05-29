@@ -1,6 +1,6 @@
 anndata==0.11.4
-# easydict==1.13
-# enlighten==1.12.4
+easydict==1.13
+enlighten==1.12.4
 # group_lasso==1.5.0
 # joblib==1.4.2
 # jscatter==1.7.5
@@ -18,7 +18,7 @@ scipy==1.15.3
 seaborn==0.13.2
 tqdm==4.67.1
 # wordcloud==1.9.3
-# commot
+commot
 # numba
 # torch
 # torchvision
