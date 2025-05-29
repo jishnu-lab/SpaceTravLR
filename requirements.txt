@@ -24,7 +24,4 @@ seaborn==0.13.2
 torch==2.4.0
 torchvision==0.19.0
 tqdm==4.67.1
-# umap_learn==0.5.7
-# velocyto==0.17.17
 wordcloud==1.9.3
-
