@@ -12,7 +12,6 @@ pysal==2.6.0
 igraph
 python-louvain==0.15
 rpy2==3.4.2
-scanpy==1.8.2
 scikit-learn==1.0.2
 easydict==1.13
 enlighten==1.12.4
@@ -27,7 +26,7 @@ pandas==2.2.3
 # pqdm==0.2.0
 # pysankeybeta==1.4.2
 # python_magic==0.4.27
-scanpy==1.11.2
+scanpy
 scipy==1.15.3
 seaborn==0.13.2
 tqdm==4.67.1
