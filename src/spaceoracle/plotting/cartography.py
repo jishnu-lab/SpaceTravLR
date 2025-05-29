@@ -12,9 +12,13 @@ from tqdm import tqdm
 import seaborn as sns
 from scipy.spatial import KDTree
 import cellrank as cr
-from spaceoracle.plotting.shift import estimate_transition_probabilities, project_probabilities
-from spaceoracle.plotting.layout import get_grid_layout, plot_quiver
+from .shift import estimate_transition_probabilities, project_probabilities
+from .layout import get_grid_layout, plot_quiver
 import glob
+from .modplot import velovect, animate_velovect
+from scipy.interpolate import griddata
+
+
 
 # def alpha_shape(points, alpha, only_outer=True):
 #     assert points.shape[0] > 3, "Need at least four points"
@@ -203,61 +207,6 @@ class Cartography:
         return P
     
     
-    def plot_umap(self, hue='banksy_celltypes', figsize=(5, 5), dpi=180, alpha=0.9, alt_colors=None):
-        color_dict = self.color_dict.copy()
-
-        f, ax = plt.subplots(figsize=figsize, dpi=dpi)
-
-        sns.scatterplot(
-            data = pd.DataFrame(
-                self.adata.obsm['X_umap'], 
-                columns=['x', 'y'], 
-                index=self.adata.obs_names).join(self.adata.obs),
-            x='x', y='y',
-            hue=hue, 
-            s=15,
-            ax=ax,
-            alpha=alpha,
-            edgecolor='black',
-            linewidth=0.1,
-            palette=color_dict,
-            legend=False
-        )
-
-
-        ax.set_frame_on(False)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_xlabel('')
-        ax.set_ylabel('')
-        ax.set_title('')
-        
-        if alt_colors is None:
-            alt_colors = self.color_dict
-            
-        if 'alt_labels' in self.adata.obs:
-            all_cts = self.adata.obs['alt_labels']
-        else:
-            all_cts = self.adata.obs[hue]
-
-        for cluster in all_cts.unique():
-            cluster_cells = all_cts == cluster
-            x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
-            y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
-            
-            ax.text(x, y, cluster, 
-                    fontsize=6, 
-                    ha='center', 
-                    va='center',
-                    color='black',
-                    bbox=dict(
-                        facecolor=alt_colors[cluster],
-                        alpha=1,
-                        edgecolor='black',
-                        boxstyle='round'
-                    ))
-            
-        return ax
     
     
     def plot_umap_quiver(
@@ -265,24 +214,37 @@ class Cartography:
             perturb_target, 
             hue='cell_type',
             normalize=False, 
-            n_neighbors=200, 
+            n_neighbors=150, 
             grid_scale=1, 
-            vector_scale=1,
-            scatter_size=5,
+            vector_scale=0.85,
+            scatter_size=25,
             legend_on_loc=False,
-            legend_fontsize=8,
+            legend_fontsize=7,
             figsize=(5, 5),
-            dpi=180,
-            alpha=0.9,
+            dpi=300,
+            alpha=0.8,
+            linewidth=0.1,
             betadata_path='.',
             alt_colors=None,
             remove_null=True,
             perturbed_df = None,
             rescale=1,
+            scale=5,
+            grains=20,
+            rename=None,
+            ax=None,
+            curve=True,
+            grey_out=True,
+            highlight_clusters=None,
+            limit_clusters=False,
+            arrow_alpha_non_highlighted=0.3,
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
         layout_embedding = self.adata.obsm['X_umap']
+        
+        if rename is None:
+            rename = {}
         
         if perturbed_df is None:
             
@@ -293,7 +255,16 @@ class Cartography:
             else:
                 raise FileNotFoundError(f"No perturbed data file found for {perturb_target}")
         
-        delta_X = perturbed_df.loc[self.adata.obs_names].values - self.adata.layers['imputed_count']
+        
+        perturbed_df = perturbed_df.loc[self.adata.obs_names]
+        
+        if limit_clusters and highlight_clusters is not None:
+            mask = ~self.adata.obs[hue].isin(highlight_clusters)
+            perturbed_df.loc[mask] = self.adata.to_df(layer='imputed_count').loc[mask]
+
+        delta_X = perturbed_df.values - self.adata.layers['imputed_count']
+        delta_X = delta_X.round(3)
+            
             
         P = self.compute_transition_probabilities(
             delta_X * rescale, 
@@ -338,35 +309,150 @@ class Cartography:
         f, ax = plt.subplots(figsize=figsize, dpi=dpi)
         
         color_dict = self.color_dict.copy()
-
-        sns.scatterplot(
-            data = pd.DataFrame(
-                self.adata.obsm['X_umap'], 
-                columns=['x', 'y'], 
-                index=self.adata.obs_names).join(self.adata.obs),
-            x='x', y='y',
-            hue=hue, 
-            s=scatter_size,
-            ax=ax,
-            alpha=alpha,
-            edgecolor='black',
-            linewidth=0.1,
-            palette=color_dict,
-            legend=not legend_on_loc
-        )
-
-        plot_quiver(grid_points, vector_field, background=None, ax=ax)
         
-        ax.scatter(
-            grid_points[:, 0], 
-            grid_points[:, 1], 
-            color='black', 
-            marker='.',
-            s=1, 
-            alpha=0.05, 
-            zorder=1
-        )
+        # Create a modified color dictionary if highlighting specific clusters
+        plot_df = pd.DataFrame(
+            self.adata.obsm['X_umap'], 
+            columns=['x', 'y'], 
+            index=self.adata.obs_names).join(self.adata.obs)
+        
+        if highlight_clusters is not None:
+            # Create a copy of the data with modified colors
+            highlight_color_dict = {ct: 'lightgrey' for ct in color_dict}
+            for ct in highlight_clusters:
+                if ct in color_dict:
+                    highlight_color_dict[ct] = color_dict[ct]
+                    
+            if not grey_out:
+                for ct in color_dict:
+                    highlight_color_dict[ct] = color_dict[ct]
+                    
+            # Create a mask for highlighted cells
+            plot_df['highlighted'] = plot_df[hue].isin(highlight_clusters)
+            
+            sns.scatterplot(
+                data=plot_df,
+                x='x', y='y',
+                hue=hue, 
+                s=scatter_size,
+                ax=ax,
+                alpha=alpha,
+                edgecolor='black',
+                linewidth=linewidth,
+                palette=highlight_color_dict,
+                legend=not legend_on_loc
+            )
+        else:
+            # Standard plotting
+            plot_df['highlighted'] = True
+            
+            sns.scatterplot(
+                data=plot_df,
+                x='x', y='y',
+                hue=hue, 
+                s=scatter_size,
+                ax=ax,
+                alpha=alpha,
+                edgecolor='black',
+                linewidth=linewidth,
+                palette=color_dict,
+                legend=not legend_on_loc
+            )
+            
 
+        
+        
+        if highlight_clusters is not None:
+            highlighted_regions = np.zeros(len(grid_points), dtype=bool)
+            
+            for i, grid_point in enumerate(grid_points):
+                indices = get_neighborhood(grid_point, layout_embedding)
+                if len(indices) > 0:
+                    cell_indices = self.adata.obs_names[indices]
+                    if plot_df.loc[cell_indices, 'highlighted'].any():
+                        highlighted_regions[i] = True
+            
+            highlighted_points = grid_points[highlighted_regions]
+            highlighted_vectors = vector_field[highlighted_regions]
+            
+            
+            non_highlighted_points = grid_points[~highlighted_regions]
+            non_highlighted_vectors = vector_field[~highlighted_regions]
+            
+            
+            if len(highlighted_points) > 0:
+                if curve:
+                        sort_idx = np.argsort(grid_points[:, 0])
+                        x_ = grid_points[sort_idx, 0]
+                        y_ = grid_points[sort_idx, 1]
+                        u_ = vector_field[sort_idx, 0] 
+                        v_ = vector_field[sort_idx, 1]
+                        xi = np.linspace(x_.min(), x_.max(), 100)
+                        yi = np.linspace(y_.min(), y_.max(), 100)
+                        xi, yi = np.meshgrid(xi, yi)
+                        ui = griddata((x_, y_), u_, (xi, yi), method='linear')
+                        vi = griddata((x_, y_), v_, (xi, yi), method='linear')
+                        
+                        alpha_values = np.full_like(ui, 0.15)
+                        for i in range(len(xi)):
+                            for j in range(len(yi)):
+                                point = np.array([xi[i,j], yi[i,j]])
+                                indices = get_neighborhood(point, layout_embedding)
+                                if len(indices) > 0:
+                                    cell_indices = self.adata.obs_names[indices]
+                                    if plot_df.loc[cell_indices, 'highlighted'].any():
+                                        alpha_values[i,j] = 1.0
+
+                        velovect(ax, 
+                            xi[0,:], yi[:,0], ui, vi,
+                            arrowstyle='fancy',
+                            color='black',
+                            arrowsize=0.5,
+                            linewidth=0.55,
+                            alpha=alpha_values,
+                            scale=scale, grains=grains)
+                        
+                        # anim = animate_velovect(ax, 
+                        #     xi[0,:], yi[:,0], ui, vi,
+                        #     arrowstyle='fancy',
+                        #     color='black',
+                        #     arrowsize=0.5,
+                        #     linewidth=0.55,
+                        #     # alpha=alpha_values,
+                        #     interval=100,
+                        #     scale=scale, grains=grains)
+                        
+                        # anim.save(f'{perturb_target}_quiver.gif', writer='pillow')
+                else:
+                    ax.quiver(
+                        highlighted_points[:, 0], highlighted_points[:, 1],   
+                        highlighted_vectors[:, 0], highlighted_vectors[:, 1], 
+                        angles='xy', scale_units='xy', scale=1, 
+                        headwidth=3, headlength=3, headaxislength=3,
+                        width=0.002, alpha=0.9
+                    )
+                    
+                
+            
+            if len(non_highlighted_points) > 0:
+                
+                if curve:
+                    pass
+                    
+                else:
+                    ax.quiver(
+                        non_highlighted_points[:, 0], non_highlighted_points[:, 1],   
+                        non_highlighted_vectors[:, 0], non_highlighted_vectors[:, 1], 
+                        angles='xy', scale_units='xy', scale=1, 
+                        headwidth=3, headlength=3, headaxislength=3,
+                        width=0.002, alpha=arrow_alpha_non_highlighted
+                    )
+                
+
+        else:
+            plot_quiver(grid_points, vector_field, background=None, ax=ax)
+         
+         
         ax.set_frame_on(False)
         ax.set_xticks([])
         ax.set_yticks([])
@@ -374,14 +460,8 @@ class Cartography:
         ax.set_ylabel('')
         ax.set_title('')
         
-        if alt_colors is None:
-            alt_colors = self.color_dict
-            
-        if 'alt_labels' in self.adata.obs:
-            all_cts = self.adata.obs['alt_labels']
-        else:
-            all_cts = self.adata.obs[hue]
-
+        alt_colors = self.color_dict
+        all_cts = self.adata.obs[hue]
 
         if legend_on_loc:
             for cluster in all_cts.unique():
@@ -389,23 +469,42 @@ class Cartography:
                 x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
                 y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
                 
-                ax.text(x, y, cluster, 
+                # Use the appropriate color
+                if highlight_clusters is not None and cluster not in highlight_clusters:
+                    color = 'lightgrey'
+                else:
+                    color = alt_colors[cluster]
+                
+                ax.text(x, y, rename.get(cluster, cluster), 
                         fontsize=legend_fontsize, 
                         ha='center', 
                         va='center',
                         color='black',
                         bbox=dict(
-                            facecolor=alt_colors[cluster],
+                            facecolor=color,
                             alpha=1,
                             edgecolor=None,
-                            boxstyle='round'
+                            boxstyle='round',
+                            linewidth=0.15
                         ))
                 
         plt.title(f'{perturb_target}')
         
         if not legend_on_loc:
-            handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in all_cts.unique()]
-            legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=legend_fontsize)
+            if highlight_clusters is not None:
+                handles = []
+                for label in all_cts.unique():
+                    if label in highlight_clusters:
+                        color = alt_colors[label]
+                    else:
+                        color = 'lightgrey'
+                    handles.append(plt.scatter([], [], c=color, label=label))
+            else:
+                handles = [plt.scatter([], [], c=alt_colors[label], label=label) 
+                           for label in all_cts.unique()]
+                
+            legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', 
+                               borderaxespad=0., fontsize=legend_fontsize)
         
         return grid_points, vector_field, P
     
@@ -446,4 +545,141 @@ class Cartography:
         self.adata.obs.index.name = None
         
         return vector_field_df
+    
+    
+    
+    
+    def plot_umap(
+            self, 
+            hue='cell_type',
+            basis='X_umap',
+            figsize=(5, 5),
+            dpi=180,
+            alpha=0.9,
+            scatter_size=5,
+            linewidth=0.1,
+            legend_on_loc=True,
+            legend_fontsize=8,
+            highlight_clusters=None,
+            alt_colors=None,
+            rename=None,
+            adata=None,
+            ax=None,
+            color_dict=None,
+        ):
+        if adata is None:
+            adata = self.adata
+            
+        assert basis in adata.obsm
+        
+        if rename is None:
+            rename = {}
+            
+        if ax is None:
+            f, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        
+        if color_dict is None:
+            color_dict = self.color_dict.copy()
+        
+        # Create a modified color dictionary if highlighting specific clusters
+        plot_df = pd.DataFrame(
+            adata.obsm[basis], 
+            columns=['x', 'y'], 
+            index=adata.obs_names).join(adata.obs)
+        
+        if highlight_clusters is not None:
+            # Create a copy of the data with modified colors
+            highlight_color_dict = {ct: 'lightgrey' for ct in color_dict}
+            for ct in highlight_clusters:
+                if ct in color_dict:
+                    highlight_color_dict[ct] = color_dict[ct]
+                    
+            # Create a mask for highlighted cells
+            plot_df['highlighted'] = plot_df[hue].isin(highlight_clusters)
+            
+            sns.scatterplot(
+                data=plot_df,
+                x='x', y='y',
+                hue=hue, 
+                s=scatter_size,
+                ax=ax,
+                alpha=alpha,
+                edgecolor='black',
+                linewidth=linewidth,
+                palette=highlight_color_dict,
+                legend=not legend_on_loc
+            )
+        else:
+            # Standard plotting
+            plot_df['highlighted'] = True
+            
+            sns.scatterplot(
+                data=plot_df,
+                x='x', y='y',
+                hue=hue, 
+                s=scatter_size,
+                ax=ax,
+                alpha=alpha,
+                edgecolor='black',
+                linewidth=linewidth,
+                palette=color_dict,
+                legend=not legend_on_loc
+            )
+
+        ax.set_frame_on(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        ax.set_title('')
+        
+        if alt_colors is None:
+            alt_colors = self.color_dict
+            
+        all_cts = adata.obs[hue]
+
+        if legend_on_loc:
+            for cluster in all_cts.unique():
+                cluster_cells = all_cts == cluster
+                x = np.mean(adata.obsm[basis][cluster_cells, 0])
+                y = np.mean(adata.obsm[basis][cluster_cells, 1])
+                
+                # Use the appropriate color
+                if highlight_clusters is not None and cluster not in highlight_clusters:
+                    color = 'lightgrey'
+                else:
+                    color = color_dict[cluster]
+                
+                ax.text(x, y, rename.get(cluster, cluster), 
+                        fontsize=legend_fontsize, 
+                        ha='center', 
+                        va='center',
+                        color='black',
+                        bbox=dict(
+                            facecolor=color,
+                            alpha=1,
+                            edgecolor=None,
+                            boxstyle='round',
+                            linewidth=0.15
+                        ))
+        
+        if not legend_on_loc:
+            if highlight_clusters is not None:
+                # Include all clusters but use appropriate colors
+                handles = []
+                for label in all_cts.unique():
+                    if label in highlight_clusters:
+                        color = alt_colors[label]
+                    else:
+                        color = 'lightgrey'
+                    handles.append(plt.scatter([], [], c=color, label=label))
+            else:
+                handles = [plt.scatter([], [], c=alt_colors[label], label=label) 
+                           for label in all_cts.unique()]
+                
+            legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', 
+                               borderaxespad=0., fontsize=legend_fontsize)
+        
+        return ax
+    
     

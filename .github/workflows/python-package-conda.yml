@@ -6,14 +6,14 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     strategy:
-      max-parallel: 5
+      max-parallel: 8
 
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python 3.9.19
       uses: actions/setup-python@v3
       with:
-        python-version: '3.10'
+        python-version: '3.9.19'
     - name: Add conda to system path
       run: |
         # $CONDA is an environment variable pointing to the root of the miniconda directory
@@ -24,6 +24,7 @@ jobs:
         conda init bash
         source ~/.bashrc
         conda activate base
+        pip install --use-pep517 gensim==3.8.0
         pip install uv
         uv pip install pytest
         uv pip install -r requirements.txt
@@ -34,6 +35,4 @@ jobs:
         source ~/.bashrc
         conda activate base
         conda activate base
-        wget https://zenodo.org/records/13996393/files/ligand_target_mouse.parquet -O data/ligand_target_mouse.parquet
-        wget https://zenodo.org/records/14927299/files/ligand_target_human.parquet -O data/ligand_target_human.parquet
         pytest -vv -p no:warnings
