@@ -6,7 +6,7 @@
 
 ## Poster
 
-![Poster](./notebooks/beta_example.png)
+![Poster](./assets/GCTransitions.png)
 
 
 
