@@ -101,7 +101,7 @@ def plot_quiver(grid_points, vector_field, background=None, ax=None):
 
 def get_grid_layout(layout_embedding, grid_scale=1, create_annot=False, show=False):
     get_grid_points = lambda min_val, max_val: np.linspace(min_val, max_val, 
-                                                           int((max_val - min_val + 1) * grid_scale))
+                            int(np.sqrt((max_val - min_val + 1) * grid_scale))**2)
 
     grid_x = get_grid_points(np.min(layout_embedding[:, 0]), np.max(layout_embedding[:, 0]))
     grid_y = get_grid_points(np.min(layout_embedding[:, 1]), np.max(layout_embedding[:, 1]))
