@@ -95,9 +95,9 @@ class VirtualTissue:
 
         
         
-    def compute_ko_impact(self, force_recompute=False):
-        if os.path.exists('ko_impact_df.csv') and not force_recompute:
-            return pd.read_csv('ko_impact_df.csv', index_col=0)
+    def compute_ko_impact(self, cache_path='', force_recompute=False):
+        if os.path.exists(cache_path+'ko_impact_df.csv') and not force_recompute:
+            return pd.read_csv(cache_path+'ko_impact_df.csv', index_col=0)
         
         ko_data = []
         files = glob.glob(self.ko_path+'/*_0x.parquet')
@@ -130,12 +130,12 @@ class VirtualTissue:
             pbar.update(1)
         
         out = pd.concat(ko_data, axis=1)
-        out.to_csv('ko_impact_df.csv')
+        out.to_csv(cache_path+'ko_impact_df.csv')
         
         return out
     
     
-    def plot_radar(self, genes, show_for=None, figsize=(20, 6), dpi=300, rename=None):
+    def plot_radar(self, genes, cache_path='', show_for=None, figsize=(20, 6), dpi=300, rename=None):
         if isinstance(genes[0], str):
             genes = [genes]
             
@@ -148,10 +148,14 @@ class VirtualTissue:
         else:
             axs = axs.flatten()
         
-        ko_concat = self.compute_ko_impact()
+        ko_concat = self.compute_ko_impact(cache_path=cache_path)
         
         if show_for is not None:
             ko_concat = ko_concat.loc[show_for]
+            
+        # Apply renaming to index if rename dict is provided
+        if rename is not None:
+            ko_concat.index = ko_concat.index.map(lambda x: rename.get(x, x))
         
         ko_concat_norm = pd.DataFrame(
             StandardScaler().fit_transform(ko_concat), 
@@ -159,42 +163,87 @@ class VirtualTissue:
             columns=ko_concat.columns
         )
 
+        # Scale values to 0-100% range
+        ko_concat_norm = (ko_concat_norm - ko_concat_norm.min().min()) / (ko_concat_norm.max().max() - ko_concat_norm.min().min()) * 100
+
         for ax, geneset in zip(axs, genes):
+            # Turn off default grid
+            ax.grid(False)
+            
+            # Add percentage circles at 25% intervals
+            circles = [0, 25, 50, 75, 100]
+            ax.set_rticks(circles)
+            
+            # Remove all radial labels
+            ax.set_yticklabels([])
+            
+            # Get the number of variables
+            num_vars = len(ko_concat_norm.index)
+            angles = np.linspace(0, 2*np.pi, num_vars, endpoint=False)
+            
+            # Set the radial limits
+            ax.set_rlim(0, 110)
+            
+            # Draw the spider web grid
+            for circle in circles:
+                if circle > 0:  # Skip the center point
+                    # Calculate points on the circle
+                    points = np.array([[circle * np.cos(angle), circle * np.sin(angle)] 
+                                     for angle in angles])
+                    
+                    # Connect the points to form the polygon
+                    for i in range(len(points)):
+                        j = (i + 1) % len(points)
+                        ax.plot([np.arctan2(points[i, 1], points[i, 0]), 
+                                np.arctan2(points[j, 1], points[j, 0])],
+                               [np.hypot(points[i, 0], points[i, 1]), 
+                                np.hypot(points[j, 0], points[j, 1])],
+                               color='gray', alpha=0.15, linewidth=0.5)
+            
+            # Draw lines from center to outer ring
+            for angle in angles:
+                ax.plot([angle, angle], [0, 110], 
+                       color='gray', alpha=0.15, linewidth=0.5)
+            
+            # Plot each gene's data
             for i, col in enumerate(geneset):
+                # Get original or renamed label for the legend
+                label = rename.get(col, col) if rename is not None else col
+                
                 values = ko_concat_norm[col].values.tolist()
                 values += values[:1]  # Repeat first value to close polygon
                 
-                angles = np.linspace(0, 2*np.pi, len(ko_concat_norm.index), endpoint=False)
-                angles = np.concatenate((angles, [angles[0]]))  # Repeat first angle to close polygon
+                angles_plot = np.concatenate((angles, [angles[0]]))  # Complete the polygon
 
-                ax.plot(angles, values, '-', linewidth=1.5, label=col)
-                ax.fill(angles, values, alpha=0.1, edgecolor='black', linewidth=0.5, hatch='')
+                ax.plot(angles_plot, values, '-', linewidth=1, label=label)
+                ax.fill(angles_plot, values, alpha=0.15)
 
-            ax.set_xticks(angles[:-1])
+            # Customize axis labels with more spacing
+            ax.set_xticks(angles)
+            labels = ko_concat_norm.index
             ax.set_xticklabels(
-                ko_concat_norm.index.str.replace(' ', '\n'), size=12,
+                labels, size=10,
+                rotation=0  # Keep labels horizontal
             )
+            
+            # Add more space for the labels
+            ax.tick_params(pad=20)
 
-            ax.set_rlabel_position(0)
-            ax.tick_params(pad=15)
-
-            ax.grid(True, alpha=0.1, linestyle='--', color='black')
-            ax.set_yticklabels(labels=ax.get_yticks(), size=5)
-
+            # Remove the outer circle
             ax.spines['polar'].set_visible(False)
-            legend = ax.legend(bbox_to_anchor=(0.5, -0.1), 
-                loc='upper center', ncol=3, frameon=False, fontsize=14)
+            
+            # Add legend with colored text
+            legend = ax.legend(bbox_to_anchor=(0.5, -0.15), 
+                loc='upper center', ncol=3, frameon=False, fontsize=12)
             for text, line in zip(legend.get_texts(), legend.get_lines()):
                 text.set_color(line.get_color())
-            ax.set_rlabel_position(35)
-            ax.set_yticklabels([])
 
         if splits > 1:
             for i in range(1, splits):
                 fig.add_artist(plt.Line2D([i/splits, i/splits], [0.1, 0.9], 
                                         transform=fig.transFigure, color='black', 
                                         linestyle='--', linewidth=1, alpha=0.5))
+        
         plt.tight_layout()
-        plt.show()
         
         
