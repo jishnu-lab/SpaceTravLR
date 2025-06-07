@@ -25,6 +25,7 @@ from .utility import Data_strage
 
 from ..visualizations.config import CONFIG
 from ..visualizations.development_module_visualization import (\
+                            plot_background_on_grid,
                             plot_cluster_whole,
                             plot_cluster_cells_use,
                             plot_background,
