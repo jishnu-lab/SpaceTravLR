@@ -75,9 +75,11 @@ class VirtualTissue:
         self.chart = Cartography(atmp, self.color_dict)
         
         
-    def plot_arrows(self, perturb_target, mode='max', **params):
-        perturbed_df = pd.read_parquet(
-            f'{self.ovx_path}/{perturb_target}_4n_{mode}x.parquet')
+    def plot_arrows(self, perturb_target, perturbed_df=None, mode='max', **params):
+        if perturbed_df is None:
+            perturbed_df = pd.read_parquet(
+                f'{self.ovx_path}/{perturb_target}_4n_{mode}x.parquet')
+        
         params.setdefault('perturbed_df', perturbed_df)
         params.setdefault('perturb_target', perturb_target)
         params.setdefault('legend_on_loc', True)

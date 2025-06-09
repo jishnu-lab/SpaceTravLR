@@ -409,7 +409,7 @@ class Cartography:
                             color='black',
                             arrowsize=0.5,
                             linewidth=0.55,
-                            alpha=alpha_values,
+                            # alpha=alpha_values,
                             scale=scale, grains=grains)
                         
                         # anim = animate_velovect(ax, 
