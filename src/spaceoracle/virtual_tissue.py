@@ -93,7 +93,12 @@ class VirtualTissue:
         #             }
                 
         
-        _ = self.chart.plot_umap_quiver(**params)
+        grid_points, vector_field, P = self.chart.plot_umap_quiver(**params)
+        
+        # grid_points, vector_field, P = self.chart.plot_umap_pseudotime(**params)
+        
+        
+        return grid_points, vector_field
 
         
         
