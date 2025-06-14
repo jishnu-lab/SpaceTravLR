@@ -2,7 +2,7 @@
 #SBATCH --partition=preempt
 #SBATCH --cluster=gpu
 #SBATCH --mem=50G
-#SBATCH --job-name=ScreenLymph
+#SBATCH --job-name=covet_lymph
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH --nodes=1

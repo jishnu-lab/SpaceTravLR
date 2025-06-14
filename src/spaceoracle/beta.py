@@ -293,7 +293,7 @@ class Betabase:
             for k, v in beta[[i for i in beta.columns if '#' in i]].mean().to_dict().items():
                 if abs(v) > 0:
                     beta_tfl[k].append((gene_name, v))
-                    
+
             progress_bar.update()
             
         beta_lr_out = pd.DataFrame(

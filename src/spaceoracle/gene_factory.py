@@ -141,7 +141,7 @@ class GeneFactory(BaseTravLR):
             columns=self.adata.var_names
         )
         
-        if len(self.ligands) > 0:
+        if len(genes) > 0:
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
                 ligands_df=get_filtered_df(gex_df, cell_thresholds, genes),
@@ -149,7 +149,7 @@ class GeneFactory(BaseTravLR):
                 scale_factor=1
         )
         else:
-            weighted_ligands = []
+            weighted_ligands = pd.DataFrame(index=self.adata.obs.index)
         
         return weighted_ligands
     

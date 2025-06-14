@@ -49,3 +49,6 @@ liana
 tangram-sc
 squidpy
 decoupler
+protobuf==3.20
+wandb==0.16.6
+mudata==0.2.3

@@ -24,6 +24,17 @@ sp_maps = np.load('/ix/djishnu/shared/djishnu_kor11/covet_outputs/mouse_lymphnod
 feature_key = 'COVET'
 adata.obsm['COVET'] = sp_maps
 
+
+# Remove pre-processing from COMMOT
+del adata.uns['received_ligands']
+del adata.uns['received_ligands_tfl']
+
+adata.uns['cell_thresholds'] = pd.DataFrame(
+    index=adata.obs.index, 
+    columns=adata.var_names).fillna(1)
+
+adata
+
 # neil = Astronaut(
 #     adata=adata,
 #     annot='cell_type_int', 

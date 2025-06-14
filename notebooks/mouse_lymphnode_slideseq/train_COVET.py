@@ -29,7 +29,7 @@ adata
 neil = Astronaut(
     adata=adata,
     annot='cell_type_int', 
-    max_epochs=100, 
+    max_epochs=200, 
     learning_rate=5e-3, 
     spatial_dim=64,
     batch_size=512,
