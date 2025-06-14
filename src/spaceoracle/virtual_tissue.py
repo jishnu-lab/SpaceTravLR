@@ -75,6 +75,19 @@ class VirtualTissue:
         self.chart = Cartography(atmp, self.color_dict)
         
         
+    def plot_arrows_pseudotime(self, perturb_target, perturbed_df=None, mode='max', **params):
+        if perturbed_df is None:
+            perturbed_df = pd.read_parquet(
+                f'{self.ovx_path}/{perturb_target}_4n_{mode}x.parquet')
+        
+        params.setdefault('perturbed_df', perturbed_df)
+        params.setdefault('perturb_target', perturb_target)
+        params.setdefault('legend_on_loc', True)
+        
+        grid_points, vector_field, P = self.chart.plot_umap_pseudotime(**params)
+        return grid_points, vector_field
+    
+        
     def plot_arrows(self, perturb_target, perturbed_df=None, mode='max', **params):
         if perturbed_df is None:
             perturbed_df = pd.read_parquet(
