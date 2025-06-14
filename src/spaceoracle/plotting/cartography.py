@@ -107,7 +107,7 @@ def plot_cells(df, indices, radius):
     plt.show()
     
     return cells_within_radius
-    
+
     
 class Cartography:
     def __init__(self, adata, color_dict, base_layer='imputed_count'):
@@ -117,31 +117,72 @@ class Cartography:
         self.unperturbed_expression = adata.to_df(layer=base_layer)
         self.color_dict = color_dict
                 
-    @staticmethod
-    def compute_perturbation_corr(gene_mtx, delta_X):
-        corr = colDeltaCor(
-            np.ascontiguousarray(gene_mtx.T), 
-            np.ascontiguousarray(delta_X.T), 
-        )
+    def compute_perturbation_corr(self, gene_mtx, delta_X, embedding=None, k=200):
+        if embedding is None:
+            
+            corr = colDeltaCor(
+                np.ascontiguousarray(gene_mtx.T), 
+                np.ascontiguousarray(delta_X.T), 
+            )
+        
+        else:
+            nn = NearestNeighbors(n_neighbors=k+1)
+            nn.fit(embedding)
+            _, indices = nn.kneighbors(embedding)
+
+            indices = indices[:, 1:] # remove self transition
+
+            corr = colDeltaCorpartial(
+                np.ascontiguousarray(gene_mtx.T), 
+                np.ascontiguousarray(delta_X.T), 
+                indices
+            )
+
+            self.nn_indices = indices
+       
         corr = np.nan_to_num(corr, nan=1)
         return corr
+
+
+    def load_perturbation(self, perturb_target, betadata_path):
+        perturbed_df = pd.read_parquet(
+            f'{betadata_path}/{perturb_target}_4n_0x.parquet')
+        self.adata.layers[perturb_target] = perturbed_df.loc[self.adata.obs.index, self.adata.var.index].values
     
     
-    def get_corr(self, perturb_target):
+    def get_corr(self, perturb_target, embedding_label=None, k=200):
         assert perturb_target in self.adata.layers
         delta_X = (self.adata.to_df(layer=perturb_target) - self.unperturbed_expression).values
         gene_mtx = self.unperturbed_expression.values
-        return self.compute_perturbation_corr(gene_mtx, delta_X)
+
+        if embedding_label is not None:
+            assert embedding_label in self.adata.obsm
+            embedding = self.adata.obsm[embedding_label]
+        else:
+            embedding = None
+
+        return self.compute_perturbation_corr(gene_mtx, delta_X, embedding, k)
     
 
     def compute_transitions(self, corr_mtx, source_ct, annot='cell_type'):
 
         n_cells = self.adata.shape[0]
-        P = np.ones((n_cells, n_cells))
+
+        if hasattr(self, "nn_indices"):
+            P = np.zeros((n_cells, n_cells))
+            row_idx = np.repeat(np.arange(n_cells), self.nn_indices.shape[1])
+            col_idx = self.nn_indices.ravel()
+            P[row_idx, col_idx] = 1
+        else:
+            P = np.ones((n_cells, n_cells))
+
         T = 0.05
         np.fill_diagonal(P, 0)
         P *= np.exp(corr_mtx / T)   
         P /= P.sum(1)[:, None]
+
+        mask = np.where(corr_mtx <= 0, 0, 1) # if corr was negative or zero, it should not be a transition
+        P *= mask
         
         transition_df = pd.DataFrame(P[self.adata.obs[annot] == source_ct])
         transition_df.columns = self.adata.obs_names
@@ -157,52 +198,91 @@ class Cartography:
         range_df.index.name = 'Transition Target'
         return range_df.sort_values(by='mean', ascending=False)
     
-    def get_cellfate(self, transition_df, allowed_fates, thresh=0.0007, annot='cell_type'):
+    def get_cellfate(self, transition_df, allowed_fates, thresh=0.002, annot='cell_type', null_ct='null', self_thresh=0):
         source_ct = transition_df.columns.name
         assert source_ct in allowed_fates
+
         transitions = []
-        values = []
+
         base_celltypes = self.adata.obs[annot]
+
         for ix in tqdm(range(transition_df.shape[0])):
+
             fate_df = transition_df.iloc[ix].to_frame().join(
                 base_celltypes).groupby(annot).mean().loc[allowed_fates]
             
             ct = fate_df.sort_values(ix, ascending=False).iloc[0].to_frame()
-            
+
             self_fate = fate_df.query(f'{annot} == @source_ct').values[0][0]
             transition_fate = fate_df.query(f'{annot} == @ct.columns[0]').values[0][0]
-            
-            if transition_fate >= self_fate and transition_fate >= thresh:
+        
+            if (
+                (transition_fate > self_fate)
+                and (transition_fate > thresh)
+                and (transition_fate > self_thresh)
+            ):
                 transitions.append(ct.columns[0])
+            elif self_fate < thresh:
+                transitions.append(null_ct)
             else:
                 transitions.append(source_ct)
-            values.append((transition_fate, self_fate))
+
         
-        print(Counter(transitions), np.mean(transition_fate))
+        print(f'source ct {source_ct}', Counter(transitions), np.mean(transition_fate), self_thresh)
         return transitions
+
+    def get_transition_annot(self, corr, allowed_fates, thresh=0.0002, annot='leiden'):
+        
+        all_fates = []
+
+        if thresh is None:
+            thresh = np.median(corr)
+
+        for source_ct in self.adata.obs[annot].unique():
+
+            transition_df = self.compute_transitions(corr, source_ct=source_ct, annot=annot)
+
+            range_df = self.assess_transitions(transition_df, self.adata.obs[annot], source_ct, annot)
+            self_thresh = range_df.loc[source_ct, 'min'] # transition should exceed the minimum self transition
+ 
+            fates = self.get_cellfate(transition_df, 
+                    allowed_fates=allowed_fates, thresh=thresh, annot=annot, self_thresh=self_thresh)
+
+            ct_df = pd.DataFrame(
+                fates, 
+                index=self.adata.obs[self.adata.obs[annot] == source_ct].index,
+                columns=['transition'])
+            all_fates.append(ct_df)
+        
+        all_fates = pd.concat(all_fates, axis=0)
+        self.adata.obs = pd.concat([self.adata.obs, all_fates], axis=1)
+
+
     
-    def make_celltype_dict(self, annot='cell_type'):
+    def make_celltype_dict(self, annot='cell_type', basis='spatial'):
         assert 'transition' in self.adata.obs
         assert annot in self.adata.obs
         
         ct_points_wt = {}
         for ct in self.adata.obs[annot].unique():
             points = np.asarray(
-                self.adata[self.adata.obs[annot] == ct].obsm['spatial'])
-            delta = 30
-            points = np.vstack(
-                (points +[-delta,delta], points +[-delta,-delta], 
-                points +[delta,delta], points +[delta,-delta]))
+                self.adata[self.adata.obs[annot] == ct].obsm[basis])
+            if basis == 'spatial':
+                delta = 30
+                points = np.vstack(
+                    (points +[-delta,delta], points +[-delta,-delta], 
+                    points +[delta,delta], points +[delta,-delta]))
             ct_points_wt[ct] = points
 
         ct_points_ko = {}
         for ct in self.adata.obs['transition'].unique():
             points = np.asarray(
-                self.adata[self.adata.obs['transition'] == ct].obsm['spatial'])
-            delta = 30
-            points = np.vstack(
-                (points +[-delta,delta], points +[-delta,-delta], 
-                points +[delta,delta], points +[delta,-delta]))
+                self.adata[self.adata.obs['transition'] == ct].obsm[basis])
+            if basis == 'spatial':
+                delta = 30
+                points = np.vstack(
+                    (points +[-delta,delta], points +[-delta,-delta], 
+                    points +[delta,delta], points +[delta,-delta]))
             ct_points_ko[ct] = points
             
         return ct_points_wt, ct_points_ko
@@ -299,7 +379,7 @@ class Cartography:
             n_neighbors=n_neighbors, 
             remove_null=remove_null
         )
-        
+
         V_simulated = project_probabilities(P, layout_embedding, normalize=normalize)
         
         grid_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))
@@ -479,7 +559,7 @@ class Cartography:
         all_cts = self.adata.obs[hue]
 
         if legend_on_loc:
-            for cluster in all_cts.unique():
+            for cluster in sorted(all_cts.unique()):
                 cluster_cells = all_cts == cluster
                 x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
                 y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
@@ -505,20 +585,8 @@ class Cartography:
                 
         
         if not legend_on_loc:
-            if highlight_clusters is not None:
-                handles = []
-                for label in all_cts.unique():
-                    if label in highlight_clusters:
-                        color = alt_colors[label]
-                    else:
-                        color = 'lightgrey'
-                    handles.append(plt.scatter([], [], c=color, label=label))
-            else:
-                handles = [plt.scatter([], [], c=alt_colors[label], label=label) 
-                           for label in all_cts.unique()]
-                
-            legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', 
-                               borderaxespad=0., fontsize=legend_fontsize)
+            handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in sorted(all_cts.unique())]
+            legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=legend_fontsize)
         
         return grid_points, vector_field, P
     

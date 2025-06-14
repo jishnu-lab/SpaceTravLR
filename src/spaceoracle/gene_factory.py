@@ -103,9 +103,9 @@ class GeneFactory(BaseTravLR):
             contact_distance=params['contact_distance']
         )
         
-    # ## backwards compatibility
-    # def compute_betas(self, **kwargs):
-    #     self.load_betas(**kwargs)
+    ## backwards compatibility
+    def compute_betas(self, **kwargs):
+        self.load_betas(**kwargs)
 
     def load_betas(self, subsample=None, float16=False, obs_names=None):
         self.beta_dict = None
@@ -141,7 +141,7 @@ class GeneFactory(BaseTravLR):
             columns=self.adata.var_names
         )
         
-        if len(self.ligands) > 0:
+        if len(genes) > 0:
             weighted_ligands = received_ligands(
                 xy=self.adata.obsm['spatial'], 
                 ligands_df=get_filtered_df(gex_df, cell_thresholds, genes),
@@ -149,7 +149,7 @@ class GeneFactory(BaseTravLR):
                 scale_factor=1
         )
         else:
-            weighted_ligands = []
+            weighted_ligands = pd.DataFrame(index=self.adata.obs.index)
         
         return weighted_ligands
     
@@ -274,6 +274,7 @@ class GeneFactory(BaseTravLR):
             )
             
             _beta_out = betas_dict.get(gene, None)
+
             if _beta_out is not None:
                 mod_idx = self.beta_dict.data[gene].modulator_gene_indices
                 result[:, i] = np.sum(_beta_out.values * gex_delta[:, mod_idx], axis=1)
@@ -325,6 +326,7 @@ class GeneFactory(BaseTravLR):
             if cells is None:
                 simulation_input[:, target_index] = gene_expr   
             else:
+                # cells is a list of cell indices
                 simulation_input[cells, target_index] = gene_expr
         
         delta_input = simulation_input - gene_mtx
@@ -369,6 +371,13 @@ class GeneFactory(BaseTravLR):
         )
 
 
+        all_ligands = list(set(self.ligands) | set(self.tfl_ligands))
+        ligands_0 = self.adata.to_df(layer='imputed_count')[all_ligands].reindex(
+            index=self.adata.obs_names, 
+            columns=self.adata.var_names, 
+            fill_value=0
+        )
+
         gene_mtx_1 = gene_mtx.copy()
         
         self.iter = 0
@@ -396,15 +405,15 @@ class GeneFactory(BaseTravLR):
                 gene_mtx_1, cell_thresholds=None, genes=self.tfl_ligands)
 
             # update deltas to reflect change in received ligands
-            # we consider dy/dwL: we replace delta l with delta wL in  delta_simulated
+            # we consider dy/dwL: we replace delta l with delta wL in delta_simulated
             rw_ligands_1 = pd.concat(
                 [w_ligands_1, w_tfligands_1], axis=1
-            ).groupby(level=0, axis=1).max().reindex(
+            ).groupby(level=0, axis=1).max().reindex(      # w_ligands <= w_tfligands because of cell_thresholds
                 index=self.adata.obs_names, 
                 columns=self.adata.var_names, 
                 fill_value=0
             )
-            
+
             delta_rw_ligands = rw_ligands_1.values - rw_ligands_0.values
 
             # get the change in ligand expression within the gene_df that should be replaced with rw_ligand
@@ -462,7 +471,7 @@ class GeneFactory(BaseTravLR):
             
             del splashed_beta_dict
             gc.collect()
-        
+
         gem_simulated = gene_mtx + delta_simulated
         assert gem_simulated.shape == gene_mtx.shape
 

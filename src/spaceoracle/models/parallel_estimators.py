@@ -88,6 +88,7 @@ def received_ligands(xy, ligands_df, lr_info, scale_factor=1):
 
 def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=1e-9):
     '''Get filtered expression of ligands/ receptors based on celltype/ thresholds'''
+
     ligand_counts = counts_df[np.unique(genes)]
 
     if min_expression > 0:
@@ -446,6 +447,7 @@ class SpatialCellularProgramsEstimator:
     @staticmethod
     def ligands_receptors_interactions(received_ligands_df, receptor_gex_df):
 
+
         assert isinstance(received_ligands_df, pd.DataFrame)
         assert isinstance(receptor_gex_df, pd.DataFrame)
         assert received_ligands_df.index.equals(receptor_gex_df.index)    
@@ -509,6 +511,7 @@ class SpatialCellularProgramsEstimator:
                 contact_distance=self.contact_distance, 
                 cell_threshes=cell_thresholds
             )
+
 
         if len(self.lr['pairs']) > 0:
             
