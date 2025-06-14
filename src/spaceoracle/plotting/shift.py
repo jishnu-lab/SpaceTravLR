@@ -33,7 +33,7 @@ random_neighbors=False, annot=None, T=0.05, n_jobs=1):
     n_cells, n_genes = adata.shape
     delta_X = np.array(delta_X)
     gene_mtx = adata.layers['imputed_count']
-    
+
     if n_neighbors is None:
 
         P = np.ones((n_cells, n_cells))
@@ -92,12 +92,13 @@ random_neighbors=False, annot=None, T=0.05, n_jobs=1):
             rows = np.repeat(np.arange(n_cells), n_neighbors)
             cols = indices.flatten()
             P[rows, cols] = 1
-
+        
+        gene_mtx = gene_mtx.astype('float64')
         corr = colDeltaCorpartial(
             np.ascontiguousarray(gene_mtx.T), 
             np.ascontiguousarray(delta_X.T), 
             indices, threads=n_jobs
-            )
+        )
 
     corr = np.nan_to_num(corr, nan=1)
 

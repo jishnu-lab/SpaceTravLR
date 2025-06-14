@@ -277,8 +277,9 @@ class OracleQueue:
         locked_paths = glob.glob(f'{self.model_dir}/*.lock')
 
         for path in locked_paths:
-            with open(path, 'r') as f:
-                data = f.read()
+            try:
+                with open(path, 'r') as f:
+                    data = f.read()
                 lock = datetime.datetime.strptime(
                     ' '.join(data.split()[:2]), "%Y-%m-%d %H:%M:%S.%f")
 
@@ -286,6 +287,9 @@ class OracleQueue:
                     gene = self.extract_gene_name(path)
                     self.delete_lock(gene)
                     print(f'Deleted lock for {gene} after {self.lock_timeout} seconds')
+            
+            except Exception as e:
+                print(f'Error deleting lock for {path}: {e}')
 
 
     def add_orphan(self, gene):
