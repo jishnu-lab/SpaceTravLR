@@ -1,5 +1,6 @@
 # refer to /scvelo/plotting/velocity_embedding_grid.py
 from collections import Counter
+from matplotlib.colors import LinearSegmentedColormap
 import pandas as pd
 
 from matplotlib import pyplot as plt
@@ -17,8 +18,26 @@ from .layout import get_grid_layout, plot_quiver
 import glob
 from .modplot import velovect, animate_velovect
 from scipy.interpolate import griddata
+from sklearn.neighbors import KNeighborsRegressor
 
 
+def normalize_gradient(gradient, method="sqrt"):
+    if method == "sqrt":
+
+        size = np.sqrt(np.power(gradient, 2).sum(axis=1))
+        size_sq = np.sqrt(size)
+        size_sq[size_sq == 0] = 1
+        factor = np.repeat(np.expand_dims(size_sq, axis=1), 2, axis=1)
+
+    return gradient / factor
+
+def get_gradient(value_on_grid):
+    n = int(np.sqrt(value_on_grid.shape[0]))
+    value_on_grid_as_matrix = value_on_grid.reshape(n, n)
+    dy, dx = np.gradient(value_on_grid_as_matrix)
+    gradient = np.stack([dx.flatten(), dy.flatten()], axis=1)
+
+    return gradient
 
 # def alpha_shape(points, alpha, only_outer=True):
 #     assert points.shape[0] > 3, "Need at least four points"
@@ -286,7 +305,13 @@ class Cartography:
 
         return P
     
-    
+    @staticmethod
+    def knn_regression(x, y, x_new, y_new, value, n_knn=30):
+        data = np.stack([x, y], axis=1)
+        model = KNeighborsRegressor(n_neighbors=n_knn)
+        model.fit(data, value)
+        data_new = np.stack([x_new, y_new], axis=1)
+        return model.predict(data_new)
     
     
     def plot_umap_quiver(
@@ -317,10 +342,12 @@ class Cartography:
             grey_out=True,
             highlight_clusters=None,
             limit_clusters=False,
+            value=None,
             arrow_alpha_non_highlighted=0.3,
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
+        
         layout_embedding = self.adata.obsm['X_umap']
         
         if rename is None:
@@ -385,7 +412,7 @@ class Cartography:
         
         vector_scale = vector_scale / np.max(vector_field)
         vector_field *= vector_scale
-            
+        
         f, ax = plt.subplots(figsize=figsize, dpi=dpi)
         
         color_dict = self.color_dict.copy()
@@ -489,20 +516,8 @@ class Cartography:
                             color='black',
                             arrowsize=0.5,
                             linewidth=0.55,
-                            alpha=alpha_values,
+                            # alpha=alpha_values,
                             scale=scale, grains=grains)
-                        
-                        # anim = animate_velovect(ax, 
-                        #     xi[0,:], yi[:,0], ui, vi,
-                        #     arrowstyle='fancy',
-                        #     color='black',
-                        #     arrowsize=0.5,
-                        #     linewidth=0.55,
-                        #     # alpha=alpha_values,
-                        #     interval=100,
-                        #     scale=scale, grains=grains)
-                        
-                        # anim.save(f'{perturb_target}_quiver.gif', writer='pillow')
                 else:
                     ax.quiver(
                         highlighted_points[:, 0], highlighted_points[:, 1],   
@@ -532,7 +547,7 @@ class Cartography:
         else:
             plot_quiver(grid_points, vector_field, background=None, ax=ax)
          
-         
+        # Legend 
         ax.set_frame_on(False)
         ax.set_xticks([])
         ax.set_yticks([])
@@ -568,7 +583,6 @@ class Cartography:
                             linewidth=0.15
                         ))
                 
-        plt.title(f'{perturb_target}')
         
         if not legend_on_loc:
             handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in sorted(all_cts.unique())]
@@ -576,6 +590,211 @@ class Cartography:
         
         return grid_points, vector_field, P
     
+    
+    def plot_umap_pseudotime(
+            self, 
+            perturb_target, 
+            iroot,
+            hue='cell_type',
+            normalize=False, 
+            n_neighbors=150, 
+            grid_scale=1, 
+            vector_scale=0.85,
+            scatter_size=25,
+            legend_on_loc=False,
+            legend_fontsize=7,
+            figsize=(5, 5),
+            dpi=300,
+            alpha=0.8,
+            linewidth=0.1,
+            betadata_path='.',
+            alt_colors=None,
+            remove_null=True,
+            perturbed_df = None,
+            rescale=1,
+            scale=5,
+            grains=20,
+            rename=None,
+            ax=None,
+            curve=True,
+            grey_out=True,
+            highlight_clusters=None,
+            limit_clusters=False,
+            value=None,
+            arrow_alpha_non_highlighted=0.3,
+        ):
+        import scanpy as sc
+        
+        assert 'X_umap' in self.adata.obsm
+        assert 'cell_type' in self.adata.obs
+        
+        layout_embedding = self.adata.obsm['X_umap']
+        
+        if rename is None:
+            rename = {}
+        
+        if perturbed_df is None:
+            
+            pattern = f'{betadata_path}/{perturb_target}_*n_*x.parquet'
+            matching_files = glob.glob(pattern)
+            if matching_files:
+                perturbed_df = pd.read_parquet(matching_files[0])
+            else:
+                raise FileNotFoundError(f"No perturbed data file found for {perturb_target}")
+        
+        
+        perturbed_df = perturbed_df.loc[self.adata.obs_names]
+        
+        if limit_clusters and highlight_clusters is not None:
+            mask = ~self.adata.obs[hue].isin(highlight_clusters)
+            perturbed_df.loc[mask] = self.adata.to_df(layer='imputed_count').loc[mask]
+
+        delta_X = perturbed_df.values - self.adata.layers['imputed_count']
+        delta_X = delta_X.round(3)
+            
+            
+        P = self.compute_transition_probabilities(
+            delta_X * rescale, 
+            layout_embedding, 
+            n_neighbors=n_neighbors, 
+            remove_null=remove_null
+        )
+        
+        V_simulated = project_probabilities(P, layout_embedding, normalize=normalize)
+        
+        grid_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))
+        grid_x, grid_y = get_grid_layout(layout_embedding, grid_scale=grid_scale)
+        grid_points = np.array(np.meshgrid(grid_x, grid_y)).T.reshape(-1, 2)
+        size_x, size_y = len(grid_x), len(grid_y)
+        vector_field = np.zeros((size_x, size_y, 2))
+        x_thresh = (grid_x[1] - grid_x[0]) / 2
+        y_thresh = (grid_y[1] - grid_y[0]) / 2
+        
+        get_neighborhood = lambda grid_point, layout_embedding: np.where(
+            (np.abs(layout_embedding[:, 0] - grid_point[0]) <= x_thresh) &  
+            (np.abs(layout_embedding[:, 1] - grid_point[1]) <= y_thresh)   
+        )[0]
+
+        for idx, grid_point in enumerate(grid_points):
+
+            indices = get_neighborhood(grid_point, layout_embedding)
+            if len(indices) <= 0:
+                continue
+            nbr_vector = np.mean(V_simulated[indices], axis=0)
+            nbr_vector *= len(indices)       # upweight vectors with lots of cells
+                
+            grid_idx_x, grid_idx_y = np.unravel_index(idx, (size_x, size_y))
+            vector_field[grid_idx_x, grid_idx_y] = nbr_vector
+
+        vector_field = vector_field.reshape(-1, 2)
+        
+        vector_scale = vector_scale / np.max(vector_field)
+        vector_field *= vector_scale
+        
+        # Pseudotime analysis
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+        self.adata.uns['iroot'] = np.flatnonzero(
+            self.adata.obs['cell_type_2'] == iroot)[0]
+        sc.tl.diffmap(self.adata)
+        sc.tl.dpt(self.adata, n_dcs=10, n_branchings=0)
+        value = np.where(np.isinf(self.adata.obs.dpt_pseudotime.values), 1, self.adata.obs.dpt_pseudotime.values)
+        
+        
+        embedding = layout_embedding
+        x, y = embedding[:, 0], embedding[:, 1]
+        x_new, y_new = grid_points[:, 0], grid_points[:, 1]
+
+        pseudotime_on_grid = self.knn_regression(
+            x, y, x_new, y_new, value, n_knn=30)
+        gradient = get_gradient(value_on_grid=pseudotime_on_grid)
+        gradient = normalize_gradient(gradient, method="sqrt")
+        l2_norm = np.linalg.norm(gradient, ord=2, axis=1)
+        scale_factor = 1 / l2_norm.mean()
+        ref_flow = gradient * 1
+
+        zero_mask = (vector_field[:,0] == 0) & (vector_field[:,1] == 0)
+        ref_flow[zero_mask] = 0
+        
+        cmap = LinearSegmentedColormap.from_list('custom', ['red', 'white', 'green'])
+        
+        
+        inner_product = np.sum(vector_field * ref_flow, axis=1)
+        vmax = np.abs(inner_product).max()
+        scatter = ax.scatter(
+            grid_points[:,0], grid_points[:,1], 
+            c=inner_product, cmap=cmap, 
+            s=20,
+            vmin=-vmax, 
+            vmax=vmax, 
+            alpha=1, marker='s')
+
+        ax.quiver(grid_points[:,0], grid_points[:,1],
+                vector_field[:,0], vector_field[:,1],
+                angles='xy',
+                scale_units='xy', scale=1,
+                alpha=0.8, width=0.003, 
+                color='black')
+
+        ax.quiver(grid_points[:,0], grid_points[:,1],
+                ref_flow[:, 0], ref_flow[:, 1], 
+                angles='xy', scale_units='xy', scale=1,
+                alpha=0.8, color='blue', width=0.003)
+        
+        ax.set_frame_on(False)
+        ax.set_title('')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        
+        # Legend handling
+        alt_colors = self.color_dict
+        all_cts = self.adata.obs[hue]
+
+        if legend_on_loc:
+            for cluster in all_cts.unique():
+                cluster_cells = all_cts == cluster
+                x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
+                y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
+                
+                # Use the appropriate color
+                if highlight_clusters is not None and cluster not in highlight_clusters:
+                    color = 'lightgrey'
+                else:
+                    color = alt_colors[cluster]
+                
+                ax.text(x, y, rename.get(cluster, cluster), 
+                        fontsize=legend_fontsize, 
+                        ha='center', 
+                        va='center',
+                        color='black',
+                        bbox=dict(
+                            facecolor=color,
+                            alpha=1,
+                            edgecolor=None,
+                            boxstyle='round',
+                            linewidth=0.15
+                        ))
+                
+        
+        if not legend_on_loc:
+            if highlight_clusters is not None:
+                handles = []
+                for label in all_cts.unique():
+                    if label in highlight_clusters:
+                        color = alt_colors[label]
+                    else:
+                        color = 'lightgrey'
+                    handles.append(plt.scatter([], [], c=color, label=label))
+            else:
+                handles = [plt.scatter([], [], c=alt_colors[label], label=label) 
+                           for label in all_cts.unique()]
+                
+            legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', 
+                               borderaxespad=0., fontsize=legend_fontsize)
+        
+        return grid_points, vector_field, P
     
     def get_grids(self, P, projection_params):
         
