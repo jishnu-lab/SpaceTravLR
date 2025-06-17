@@ -26,12 +26,14 @@ class Visionary(GeneFactory):
     spatial-resolution such that spots can be mapped to each other.
     '''
     def __init__(self, ref_adata, test_adata, ref_json_path, 
-                 prematching, matching_annot='cell_type', subsample=None):
+            prematching, matching_annot='cell_type', 
+            subsample=None, override_params=None):
 
         with open(ref_json_path, 'r') as f:
             params = json.load(f)
 
-        
+        if override_params is not None:
+            params.update(override_params)
 
         super().__init__(adata=test_adata, 
                          models_dir=params['save_dir'], 
@@ -51,7 +53,7 @@ class Visionary(GeneFactory):
         self.adata.obs['reference_cell'] = self.matching['reference_cell'].values
             
         self.reformat()
-        self.compute_betas(subsample=subsample)
+        # self.compute_betas(subsample=subsample)
 
     def reformat(self):
         # Create cell_thresholds for test adata
@@ -62,7 +64,7 @@ class Visionary(GeneFactory):
             pd.Index(self.adata.obs.index)
         )
     
-    def compute_betas(self, subsample=None, float16=False):
+    def compute_betas(self, subsample=None, float16=True):
 
         super().compute_betas(subsample=subsample, float16=float16, obs_names=self.ref_adata.obs_names)
 
