@@ -47,7 +47,7 @@ gf = GeneFactory.from_json(
 
 gf.load_betas(float16=True, obs_names=None)
 
-os.makedirs('/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT')
+# os.makedirs('/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT')
 
 
 max_expr = adata[:, 'IL21'].layers['imputed_count'].max()

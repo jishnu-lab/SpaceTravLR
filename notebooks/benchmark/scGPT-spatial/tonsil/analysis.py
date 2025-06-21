@@ -46,29 +46,43 @@ gf = GeneFactory.from_json(
 
 gf.load_betas(float16=True, obs_names=None)
 
-os.makedirs('/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT_spatial')
+# os.makedirs('/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT_spatial')
 
-genes = [
-    'PAX5', 'BCL6', 'FOXP3', 'GATA3', 'PRDM1', 'FOXO1',
-    'PDCD1','IL7R', 'CXCR5', 'CXCR4', 'CCR2',
-    'IL7', 'GZMA', 'IL10', 'IL6ST', 'IL4', 'LGALS9', 
-    'IL21'
-]
 
-genes = [g for g in np.unique(genes) if g in adata.var_names]
-print(genes)
+max_expr = adata[:, 'IL21'].layers['imputed_count'].max()
+max_expr.item()
+gex_out = gf.perturb(
+    target='IL21', 
+    n_propagation=4,
+    gene_expr=max_expr.item()
+)
 
-from tqdm import tqdm
-for gene in tqdm(genes):
-    gex_out = gf.perturb(
-        target=gene, 
-        n_propagation=4,
-        gene_expr=0
-    )
+gex_out.to_parquet(
+    '/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT_spatial/IL21_4n_maxx.parquet'
+)
 
-    gex_out.to_parquet(
-        f'/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT_spatial/{gene}_4n_0x.parquet'
-    )
+
+# genes = [
+#     'PAX5', 'BCL6', 'FOXP3', 'GATA3', 'PRDM1', 'FOXO1',
+#     'PDCD1','IL7R', 'CXCR5', 'CXCR4', 'CCR2',
+#     'IL7', 'GZMA', 'IL10', 'IL6ST', 'IL4', 'LGALS9', 
+#     'IL21'
+# ]
+
+# genes = [g for g in np.unique(genes) if g in adata.var_names]
+# print(genes)
+
+# from tqdm import tqdm
+# for gene in tqdm(genes):
+#     gex_out = gf.perturb(
+#         target=gene, 
+#         n_propagation=4,
+#         gene_expr=0
+#     )
+
+#     gex_out.to_parquet(
+#         f'/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT_spatial/{gene}_4n_0x.parquet'
+#     )
 
 # # %%
 # gf.genome_screen(

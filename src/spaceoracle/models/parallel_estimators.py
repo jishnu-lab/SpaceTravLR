@@ -96,6 +96,10 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
         ligand_counts = ligand_counts * mask
 
     if cell_thresholds is not None:
+        cell_thresholds = cell_thresholds.loc[counts_df.index]
+
+        assert cell_thresholds.index.equals(counts_df.index), 'error aligning cell_thresholds and counts_df, check if obs_names has duplicates'
+
         mask = cell_thresholds.reindex(ligand_counts.columns, axis=1).fillna(0).values
         mask = np.where(mask > 0, 1, 0)
         ligand_counts = mask * ligand_counts
@@ -501,17 +505,13 @@ class SpatialCellularProgramsEstimator:
         lr_info = self.check_LR_properties(self.adata, self.layer)
         counts_df, cell_thresholds = lr_info
 
-        if not all(
-            hasattr(self.adata.uns, attr) 
-            for attr in ['received_ligands', 'received_ligands_tfl']
-        ):
+        if not (('received_ligands' in self.adata.uns.keys()) | ('received_ligands_tfl' in self.adata.uns.keys())):
             self.adata = init_received_ligands(
                 self.adata,
                 radius=self.radius, 
                 contact_distance=self.contact_distance, 
                 cell_threshes=cell_thresholds
             )
-
 
         if len(self.lr['pairs']) > 0:
             
@@ -524,7 +524,6 @@ class SpatialCellularProgramsEstimator:
             self.adata.uns['received_ligands'] = pd.DataFrame(index=self.adata.obs.index)
             self.adata.uns['ligand_receptor'] = pd.DataFrame(index=self.adata.obs.index)
 
-
         if len(self.tfl_pairs) > 0:
 
             self.adata.uns['ligand_regulator'] = self.ligand_regulators_interactions(
@@ -534,35 +533,42 @@ class SpatialCellularProgramsEstimator:
         else:
             self.adata.uns['ligand_regulator'] = pd.DataFrame(index=self.adata.obs.index)
 
-
         self.xy = np.array(self.adata.obsm['spatial'])
         cluster_labels = np.array(self.adata.obs[self.cluster_annot])
 
         self.xy_df = pd.DataFrame(self.xy, columns=['x', 'y'], index=self.adata.obs.index)
 
-        self.spatial_maps = xyc2spatial_fast(
+        if not 'spatial_maps' in self.adata.obsm.keys():
+            self.spatial_maps = xyc2spatial_fast(
                 xyc = np.column_stack([self.xy, cluster_labels]),
                 m=self.spatial_dim,
                 n=self.spatial_dim,
             )
             
-        self.adata.obsm['spatial_maps'] = self.spatial_maps
-
+            self.adata.obsm['spatial_maps'] = self.spatial_maps
+        
+        else:
+            self.spatial_maps = self.adata.obsm['spatial_maps']
+        
         self.train_df = self.adata.to_df(layer=self.layer)[
             [self.target_gene]+self.regulators] \
             .join(self.adata.uns['ligand_receptor']) \
             .join(self.adata.uns['ligand_regulator'])
+
+        if not 'spatial_features' in self.adata.obsm.keys():
+            self.spatial_features = create_spatial_features(
+                self.adata.obsm['spatial'][:, 0], 
+                self.adata.obsm['spatial'][:, 1], 
+                self.adata.obs[self.cluster_annot], 
+                self.adata.obs.index,
+                radius=self.radius
+            )
+
+            self.adata.obsm['spatial_features'] = self.spatial_features.copy()
         
+        else:
+            self.spatial_features = self.adata.obsm['spatial_features']
 
-        self.spatial_features = create_spatial_features(
-            self.adata.obsm['spatial'][:, 0], 
-            self.adata.obsm['spatial'][:, 1], 
-            self.adata.obs[self.cluster_annot], 
-            self.adata.obs.index,
-            radius=self.radius
-        )
-
-        self.adata.obsm['spatial_features'] = self.spatial_features.copy()
 
         self.spatial_features = pd.DataFrame(
             MinMaxScaler().fit_transform(self.spatial_features.values), 
