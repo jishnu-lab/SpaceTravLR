@@ -100,7 +100,8 @@ class GeneFactory(BaseTravLR):
             models_dir=params['save_dir'], 
             annot=params['annot'], 
             radius=params['radius'], 
-            contact_distance=params['contact_distance']
+            contact_distance=params['contact_distance'],
+            scale_factor=params.get('scale_factor', 1)
         )
         
     ## backwards compatibility
@@ -146,7 +147,7 @@ class GeneFactory(BaseTravLR):
                 xy=self.adata.obsm['spatial'], 
                 ligands_df=get_filtered_df(gex_df, cell_thresholds, genes),
                 lr_info=self.lr,
-                scale_factor=1
+                scale_factor=self.scale_factor
         )
         else:
             weighted_ligands = pd.DataFrame(index=self.adata.obs.index)

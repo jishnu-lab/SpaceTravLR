@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore", message=".*Pandas doesn't allow columns to be 
 
 
 class Prophet(BaseTravLR):
-    def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30):
+    def __init__(self, adata, models_dir, annot='cell_type_int', radius=100, contact_distance=30, scale_factor=1):
         
         super().__init__(adata, fields_to_keep=[annot])
         
@@ -31,7 +31,8 @@ class Prophet(BaseTravLR):
         self.radius = radius
         self.contact_distance = contact_distance
         self.species = 'mouse' if is_mouse_data(adata) else 'human'
-
+        self.scale_factor = scale_factor
+        
         self.queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
         self.ligands = []
         self.genes = list(self.adata.var_names)
@@ -107,7 +108,7 @@ class Prophet(BaseTravLR):
                 xy=self.adata.obsm['spatial'], 
                 ligands_df=get_filtered_df(gex_df, cell_thresholds, genes),
                 lr_info=self.lr,
-                scale_factor=1
+                scale_factor=self.scale_factor
         )
         else:
             weighted_ligands = []
