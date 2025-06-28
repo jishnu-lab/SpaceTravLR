@@ -29,7 +29,8 @@ class GeneFactory(BaseTravLR):
         models_dir, 
         annot='cell_type_int', 
         radius=200, 
-        contact_distance=30):
+        contact_distance=30,
+        scale_factor=1):
         
         super().__init__(adata, fields_to_keep=[annot])
         
@@ -39,6 +40,7 @@ class GeneFactory(BaseTravLR):
         self.radius = radius
         self.contact_distance = contact_distance
         self.species = 'mouse' if is_mouse_data(adata) else 'human'
+        self.scale_factor = scale_factor
 
         self.queue = OracleQueue(models_dir, all_genes=self.adata.var_names)
         self.ligands = []
@@ -101,7 +103,7 @@ class GeneFactory(BaseTravLR):
             annot=params['annot'], 
             radius=params['radius'], 
             contact_distance=params['contact_distance'],
-            scale_factor=params.get('scale_factor', 1)
+            # scale_factor=params.get('scale_factor', 1)
         )
         
     ## backwards compatibility
