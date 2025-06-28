@@ -271,6 +271,7 @@ class Betabase:
         
         beta_lr = defaultdict(list)
         beta_tfl = defaultdict(list)
+        beta_tfs = defaultdict(list)
         
         manager = enlighten.get_manager()
         progress_bar = manager.counter(
@@ -286,25 +287,33 @@ class Betabase:
             beta = pd.read_parquet(f)
             beta = beta.join(self.obs[annot]).query(f'{annot}==@cell_type').drop(columns=[annot])
             
-            for k, v in beta[[i for i in beta.columns if '$' in i]].mean().to_dict().items():
+            for k, v in beta.mean().to_dict().items():
                 if abs(v) > 0:
-                    beta_lr[k].append((gene_name, v))
-        
-            for k, v in beta[[i for i in beta.columns if '#' in i]].mean().to_dict().items():
-                if abs(v) > 0:
-                    beta_tfl[k].append((gene_name, v))
+                    if '$' in k:
+                        beta_lr[k].append((gene_name, v))
+                    elif '#' in k:
+                        beta_tfl[k].append((gene_name, v))
+                    else:
+                        beta_tfs[k].append((gene_name, v))
 
             progress_bar.update()
             
+            
+        beta_tf_out = pd.DataFrame(
+            [(k, gene, beta) for k, gene_beta_pairs in beta_tfs.items() for gene, beta in gene_beta_pairs], 
+                    columns=['interaction', 'gene', 'beta'])
+        beta_tf_out.index.name = cell_type
+        beta_tf_out['interaction_type'] = 'tf'
+            
         beta_lr_out = pd.DataFrame(
-        [(k, gene, beta) for k, gene_beta_pairs in beta_lr.items() for gene, beta in gene_beta_pairs], 
-                columns=['interaction', 'gene', 'beta'])
+            [(k, gene, beta) for k, gene_beta_pairs in beta_lr.items() for gene, beta in gene_beta_pairs], 
+                    columns=['interaction', 'gene', 'beta'])
         beta_lr_out.index.name = cell_type
         beta_lr_out['interaction_type'] = 'ligand-receptor'
         
         beta_tfl_out = pd.DataFrame(
-        [(k, gene, beta) for k, gene_beta_pairs in beta_tfl.items() for gene, beta in gene_beta_pairs], 
-                columns=['interaction', 'gene', 'beta'])
+            [(k, gene, beta) for k, gene_beta_pairs in beta_tfl.items() for gene, beta in gene_beta_pairs], 
+                    columns=['interaction', 'gene', 'beta'])
         beta_tfl_out.index.name = cell_type
         beta_tfl_out['interaction_type'] = 'ligand-tf'
         
