@@ -1,3 +1,4 @@
+from functools import cache
 import scanpy as sc
 import os
 import pandas as pd
@@ -67,7 +68,10 @@ class VirtualTissue:
         )
         
         
-    def init_cartography(self, adata, restrict_to=None):
+    def init_cartography(self, adata=None, restrict_to=None):
+        if adata is None:
+            adata = self.adata.copy()
+            
         if restrict_to is not None:
             atmp = adata[adata.obs[self.annot].isin(restrict_to)]
         else:
@@ -113,6 +117,15 @@ class VirtualTissue:
         
         return grid_points, vector_field
 
+    @cache
+    def load_knockout_gex(self, perturb_target):
+        ko = pd.read_parquet(
+            f"{self.ko_path}/{perturb_target}_4n_0x.parquet"
+        )
+        
+        assert ko[perturb_target].sum() == 0
+        
+        return ko
         
         
     def compute_ko_impact(self, cache_path='', force_recompute=False):
@@ -133,9 +146,9 @@ class VirtualTissue:
             pbar.desc = f'{kotarget:<15}'
             pbar.refresh()
             
-            # data = pd.read_parquet(ko_file)
-            data = self.adata.to_df(layer='imputed_count')
-            data[kotarget] = 0
+            data = pd.read_parquet(ko_file)
+            # data = self.adata.to_df(layer='imputed_count')
+            # data[kotarget] = 0
             
             data = data.loc[self.adata.obs_names] - self.adata.to_df(layer='imputed_count')
             data = data.join(self.adata.obs.cell_type).groupby('cell_type').mean().abs().mean(axis=1)
