@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=preempt
-#SBATCH --job-name=SpaceLymph
-#SBATCH --mem=250G
+#SBATCH --job-name=SpaceMelanoma
+#SBATCH --mem=150G
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH --nodes=1

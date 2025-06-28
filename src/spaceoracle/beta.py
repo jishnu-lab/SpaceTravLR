@@ -311,6 +311,8 @@ class Betabase:
         return pd.concat([beta_lr_out, beta_tfl_out])
         
 
+    def load_betadata(self, gene_name):
+        return BetaFrame.from_path(f'{self.folder}/{gene_name}_betadata.parquet')
 
     def load_betas_from_disk(self, obs_names=None):
         "obs_names are the str cell index from adata.obs_names"

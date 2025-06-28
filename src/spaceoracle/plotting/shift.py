@@ -1,3 +1,4 @@
+from functools import cache
 import numpy as np 
 from scipy.stats import pearsonr
 from sklearn.neighbors import NearestNeighbors
@@ -120,6 +121,7 @@ random_neighbors=False, annot=None, T=0.05, n_jobs=1):
     #     P[i] = np.array(row_probs)
 
     return P
+
 
 def project_probabilities(P, embedding, normalize=True):
     if normalize: 
