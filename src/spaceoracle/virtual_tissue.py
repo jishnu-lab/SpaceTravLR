@@ -146,10 +146,10 @@ class VirtualTissue:
             pbar.desc = f'{kotarget:<15}'
             pbar.refresh()
             
-            # data = pd.read_parquet(ko_file)
+            data = pd.read_parquet(ko_file)
             
-            data = self.adata.to_df(layer='imputed_count')
-            data[kotarget] = 0
+            # data = self.adata.to_df(layer='imputed_count')
+            # data[kotarget] = 0
             
             data = data.loc[self.adata.obs_names] - self.adata.to_df(layer='imputed_count')
             data = data.join(self.adata.obs[annot]).groupby(annot).mean().abs().mean(axis=1)
