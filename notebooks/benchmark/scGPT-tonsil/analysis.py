@@ -41,13 +41,12 @@ from spaceoracle.gene_factory import GeneFactory
 
 # %%
 gf = GeneFactory.from_json(
-    adata, 
-    '/ix/djishnu/shared/djishnu_kor11/scGPT_runs/tonsil/run_params.json', 
+    adata=adata, 
+    json_path='/ix/djishnu/shared/djishnu_kor11/scGPT_runs/tonsil/run_params.json', 
 )
-
 gf.load_betas(float16=True, obs_names=None)
 
-# os.makedirs('/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT')
+os.makedirs('/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT', exist_ok=True)
 
 
 max_expr = adata[:, 'IL21'].layers['imputed_count'].max()

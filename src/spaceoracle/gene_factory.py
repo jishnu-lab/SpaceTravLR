@@ -60,6 +60,8 @@ class GeneFactory(BaseTravLR):
             flat_links.sort_values(by='coef_mean', ascending=False, inplace=True)
             flat_links.drop_duplicates(subset=['source', 'target'], inplace=True, keep='first')
             self.co_grn_links = flat_links
+        else:
+            self.co_grn_links = None
 
         self.manager = enlighten.get_manager()
         
@@ -228,7 +230,10 @@ class GeneFactory(BaseTravLR):
         
         for i, (gene, betadata) in enumerate(betas_dict.data.items()):
 
-            grn_tfs = self.co_grn_links.loc[self.co_grn_links['source'] == gene, 'target'].values
+            if self.co_grn_links is not None:
+                grn_tfs = self.co_grn_links.loc[self.co_grn_links['source'] == gene, 'target'].values
+            else:
+                grn_tfs = None
 
             out_dict[gene] = self._combine_gene_wbetas(
                 weighted_ligands, weighted_ligands_tfl, gex_df, betadata, grn_tfs=grn_tfs)
