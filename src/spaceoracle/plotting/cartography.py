@@ -1,5 +1,6 @@
 # refer to /scvelo/plotting/velocity_embedding_grid.py
 from collections import Counter
+from functools import cache, lru_cache
 from matplotlib.colors import LinearSegmentedColormap
 import pandas as pd
 
@@ -288,7 +289,7 @@ class Cartography:
         return ct_points_wt, ct_points_ko
 
         
-        
+    
     def compute_transition_probabilities(self, delta_X, embedding, n_neighbors=200, remove_null=True, normalize=False):
             
         P = estimate_transition_probabilities(
@@ -312,11 +313,86 @@ class Cartography:
         model.fit(data, value)
         data_new = np.stack([x_new, y_new], axis=1)
         return model.predict(data_new)
+
+    def compute_transition_vector_field(
+        self, 
+        perturbed_df,
+        hue='cell_type',
+        normalize=False, 
+        n_neighbors=150, 
+        grid_scale=1, 
+        vector_scale=0.85,
+        remove_null=True,
+        rescale=1,
+        rename=None,
+        highlight_clusters=None,
+        limit_clusters=False,
+    ):
+        assert 'X_umap' in self.adata.obsm
+        assert 'cell_type' in self.adata.obs
+        
+        layout_embedding = self.adata.obsm['X_umap']
+        
+        if rename is None:
+            rename = {}
+        
+        perturbed_df = perturbed_df.loc[self.adata.obs_names]
+        
+        if limit_clusters and highlight_clusters is not None:
+            mask = ~self.adata.obs[hue].isin(highlight_clusters)
+            perturbed_df.loc[mask] = self.adata.to_df(layer='imputed_count').loc[mask]
+
+        delta_X = perturbed_df.values - self.adata.layers['imputed_count']
+        delta_X = delta_X.round(3)
+            
+            
+        P = self.compute_transition_probabilities(
+            delta_X * rescale, 
+            layout_embedding, 
+            n_neighbors=n_neighbors, 
+            remove_null=remove_null
+        )
+
+        V_simulated = project_probabilities(P, layout_embedding, normalize=normalize)
+        
+        grid_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))
+        grid_x, grid_y = get_grid_layout(layout_embedding, grid_scale=grid_scale)
+        grid_points = np.array(np.meshgrid(grid_x, grid_y)).T.reshape(-1, 2)
+        size_x, size_y = len(grid_x), len(grid_y)
+        vector_field = np.zeros((size_x, size_y, 2))
+        x_thresh = (grid_x[1] - grid_x[0]) / 2
+        y_thresh = (grid_y[1] - grid_y[0]) / 2
+        
+        get_neighborhood = lambda grid_point, layout_embedding: np.where(
+            (np.abs(layout_embedding[:, 0] - grid_point[0]) <= x_thresh) &  
+            (np.abs(layout_embedding[:, 1] - grid_point[1]) <= y_thresh)   
+        )[0]
+
+        for idx, grid_point in enumerate(grid_points):
+
+            indices = get_neighborhood(grid_point, layout_embedding)
+            if len(indices) <= 0:
+                continue
+            nbr_vector = np.mean(V_simulated[indices], axis=0)
+            nbr_vector *= len(indices)       # upweight vectors with lots of cells
+                
+            grid_idx_x, grid_idx_y = np.unravel_index(idx, (size_x, size_y))
+            vector_field[grid_idx_x, grid_idx_y] = nbr_vector
+
+
+
+        vector_field = vector_field.reshape(-1, 2)
+        
+        vector_scale = vector_scale / np.max(vector_field)
+        vector_field *= vector_scale
+        
+        return grid_point, vector_field
+
     
     
     def plot_umap_quiver(
             self, 
-            perturb_target, 
+            perturb_target='', 
             hue='cell_type',
             normalize=False, 
             n_neighbors=150, 
