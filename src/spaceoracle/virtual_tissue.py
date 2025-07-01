@@ -128,7 +128,7 @@ class VirtualTissue:
         return ko
         
         
-    def compute_ko_impact(self, cache_path='', force_recompute=False):
+    def compute_ko_impact(self, cache_path='', force_recompute=False, annot='cell_type'):
         if os.path.exists(cache_path+'ko_impact_df.csv') and not force_recompute:
             return pd.read_csv(cache_path+'ko_impact_df.csv', index_col=0)
         
@@ -146,12 +146,13 @@ class VirtualTissue:
             pbar.desc = f'{kotarget:<15}'
             pbar.refresh()
             
-            data = pd.read_parquet(ko_file)
-            # data = self.adata.to_df(layer='imputed_count')
-            # data[kotarget] = 0
+            # data = pd.read_parquet(ko_file)
+            
+            data = self.adata.to_df(layer='imputed_count')
+            data[kotarget] = 0
             
             data = data.loc[self.adata.obs_names] - self.adata.to_df(layer='imputed_count')
-            data = data.join(self.adata.obs.cell_type).groupby('cell_type').mean().abs().mean(axis=1)
+            data = data.join(self.adata.obs[annot]).groupby(annot).mean().abs().mean(axis=1)
 
             ds = {}
             for k, v in data.sort_values(ascending=False).to_dict().items():
@@ -168,7 +169,7 @@ class VirtualTissue:
         return out
     
     
-    def plot_radar(self, genes, cache_path='', show_for=None, figsize=(20, 6), dpi=300, rename=None):
+    def plot_radar(self, genes, cache_path='', show_for=None, figsize=(20, 6), dpi=300, annot='cell_type', rename=None):
         if isinstance(genes[0], str):
             genes = [genes]
             
@@ -181,7 +182,7 @@ class VirtualTissue:
         else:
             axs = axs.flatten()
         
-        ko_concat = self.compute_ko_impact(cache_path=cache_path)
+        ko_concat = self.compute_ko_impact(cache_path=cache_path, annot=annot)
         
         if show_for is not None:
             ko_concat = ko_concat.loc[show_for]

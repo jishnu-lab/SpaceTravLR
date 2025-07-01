@@ -288,7 +288,7 @@ class Betabase:
             beta = beta.join(self.obs[annot]).query(f'{annot}==@cell_type').drop(columns=[annot])
             
             for k, v in beta.mean().to_dict().items():
-                if abs(v) > 0:
+                if abs(v) > 0 and gene_name != 'beta0':
                     if '$' in k:
                         beta_lr[k].append((gene_name, v))
                     elif '#' in k:
@@ -317,7 +317,7 @@ class Betabase:
         beta_tfl_out.index.name = cell_type
         beta_tfl_out['interaction_type'] = 'ligand-tf'
         
-        return pd.concat([beta_lr_out, beta_tfl_out])
+        return pd.concat([beta_tf_out, beta_lr_out, beta_tfl_out])
         
 
     def load_betadata(self, gene_name):
