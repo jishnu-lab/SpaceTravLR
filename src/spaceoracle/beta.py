@@ -139,7 +139,7 @@ class BetaFrame(pd.DataFrame):
         self.tfl_pairs = [pair.split('#') for pair in self.tfl_pairs]
     
 
-    def splash(self, rw_ligands, rw_ligands_tfl, gex_df, scale_factor=1):
+    def splash(self, rw_ligands, rw_ligands_tfl, gex_df, scale_factor=1, beta_cap=None, grn_tfs=None):
         ## wL is the amount of ligand 'received' at each location
         ## assuming ligands and receptors expression are independent, dL/dR = 0
         ## y = b0 + b1*TF1 + b2*wL1R1 + b3*wL1R2
@@ -162,7 +162,7 @@ class BetaFrame(pd.DataFrame):
         # ).groupby(lambda x: x, axis=1).sum()
 
         # return _df[self.modulators_genes]
-        
+
         lr_betas = self.filter(like='$', axis=1)
         tfl_betas = self.filter(like='#', axis=1)
 
@@ -194,6 +194,11 @@ class BetaFrame(pd.DataFrame):
             columns=self.tfs
         ).astype(float)
 
+        # if provided, enforce links to also appear in co_grn_links
+        if grn_tfs is not None:
+            grn_tfs = [f'beta_{t}' for t in grn_tfs]
+            tf_derivatives.loc[:, ~tf_derivatives.columns.isin(grn_tfs)] = 0
+
         tf_tfl_derivatives = pd.DataFrame(
             tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
             index=self.index,
@@ -209,6 +214,9 @@ class BetaFrame(pd.DataFrame):
                 tf_derivatives,
                 tf_tfl_derivatives
             ], axis=1).groupby(level=0, axis=1).sum()
+        
+        if beta_cap is not None:
+            _df = _df.clip(lower=-beta_cap, upper=beta_cap)
 
 
         _df.columns = 'beta_' + _df.columns.astype(str)
