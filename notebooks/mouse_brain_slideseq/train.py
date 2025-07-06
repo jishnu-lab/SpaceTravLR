@@ -34,7 +34,8 @@ star = SpaceTravLR(
     grn=co_grn,
     radius=300,
     contact_distance=50,
-    save_dir=base_dir + f'lasso_runs/{fname}'
+    save_dir=base_dir + f'lasso_runs/{fname}',
+    skip_clusters=[3]
 )
 
 star.run()
