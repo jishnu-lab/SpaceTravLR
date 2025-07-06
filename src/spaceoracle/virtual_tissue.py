@@ -1,19 +1,18 @@
 from functools import cache
-import scanpy as sc
-import os
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
 from sklearn.preprocessing import StandardScaler
 import glob
 import enlighten
 import numpy as np
 import random
 
+from .models.parallel_estimators import create_spatial_features
+
 from .plotting.cartography import Cartography, xy_from_adata
 from .gene_factory import GeneFactory
 from .beta import BetaFrame
-
-import jscatter as js
 
 class VirtualTissue:
     
@@ -24,6 +23,7 @@ class VirtualTissue:
         ko_path=None, 
         ovx_path=None, 
         color_dict=None,
+        spf_radius=200,
         annot='cell_type'
         ):
         
@@ -33,6 +33,8 @@ class VirtualTissue:
         self.ko_path = ko_path
         self.ovx_path = ovx_path
         self.annot = annot
+        
+
         
         if ovx_path is None:
             self.ovx_path = ko_path
@@ -46,6 +48,15 @@ class VirtualTissue:
             self.color_dict = color_dict
         
         self.xy = xy_from_adata(self.adata) 
+        self.spf_radius = spf_radius
+        
+        self.spf = create_spatial_features(
+            x=adata.obsm['spatial'][:, 0], 
+            y=adata.obsm['spatial'][:, 1], 
+            celltypes=adata.obs[self.annot], 
+            obs_index=adata.obs_names,
+            radius = self.spf_radius
+        )
         
     def random_color(self):
         return "#{:06x}".format(random.randint(0, 0xFFFFFF))
@@ -55,6 +66,44 @@ class VirtualTissue:
             f'{self.betadatas_path}/{gene}_betadata.parquet', 
             obs_names=self.adata.obs_names
         )
+        
+        
+    def plot_gene_vs_proximity(
+        self, perturb_target, perturbed_df, gene, color_gene, 
+        cell_filter, cell_groups, 
+        proximity_threshold=150, gene_threshold=0.005, ax=None, mode='ko'):
+        
+        datadf = self.spf[
+            [i+'_within' for i in cell_groups
+                ]].sum(1).to_frame().join(self.adata.obs[self.annot]).query(
+                f'{self.annot}.isin(["{cell_filter}"])').join(self.xy).join(
+            ((perturbed_df-self.adata.to_df(layer='imputed_count'))/self.adata.to_df(layer='imputed_count'))*100
+        )
+        datadf = datadf[datadf[0] < proximity_threshold]
+        
+        if ax is None:
+            ax = plt.gca()
+        
+        try:
+            corr = pearsonr(datadf[datadf[gene]>gene_threshold][0], datadf[datadf[gene]>gene_threshold][gene]).statistic
+            ax.set_title(f"{perturb_target} {mode.upper()} in\n{cell_filter}\nCorrelation: {corr:.4f}")
+        except:
+            corr = 0
+            ax.set_title(f"{perturb_target} {mode.upper()} in\n{cell_filter}")
+            
+        scatter = ax.scatter(
+            datadf[0], 
+            datadf[gene], 
+            c=datadf[color_gene],
+            cmap='rainbow',
+        )
+        plt.colorbar(scatter, label=f'{color_gene} % change', shrink=0.75, ax=ax, format='%.2f')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.set_ylabel(f'{gene} % change')
+        ax.set_xlabel(f'Number of {" & ".join(cell_groups)} cells within {self.spf_radius}um')
+        
+        return ax, datadf
         
     
     def init_gene_factory(self):
@@ -126,14 +175,24 @@ class VirtualTissue:
         assert ko[perturb_target].sum() == 0
         
         return ko
+
+    def compute_ko_impact(
+        self, 
+        annot='cell_type',
+        baseline_only=False,
+        genes=None,
+        cache_path=None,
+        force_recompute=False
+        ):
         
-        
-    def compute_ko_impact(self, cache_path='', force_recompute=False, annot='cell_type'):
-        if os.path.exists(cache_path+'ko_impact_df.csv') and not force_recompute:
-            return pd.read_csv(cache_path+'ko_impact_df.csv', index_col=0)
+        # if os.path.exists(cache_path+'ko_impact_df.csv') and not force_recompute:
+        #     return pd.read_csv(cache_path+'ko_impact_df.csv', index_col=0)
         
         ko_data = []
-        files = glob.glob(self.ko_path+'/*_0x.parquet')
+        if genes is None:  
+            files = glob.glob(self.ko_path+'/*_0x.parquet')
+        else:
+            files = [f"{self.ko_path}/{gene}_4n_0x.parquet" for gene in genes]
         
         pbar = enlighten.manager.get_manager().counter(
             total=len(files),
@@ -141,15 +200,17 @@ class VirtualTissue:
             unit='KO',
             auto_refresh=True
         )
+        
         for ko_file in files:
             kotarget = ko_file.split('/')[-1].split('_')[0]
             pbar.desc = f'{kotarget:<15}'
             pbar.refresh()
             
-            data = pd.read_parquet(ko_file)
-            
-            # data = self.adata.to_df(layer='imputed_count')
-            # data[kotarget] = 0
+            if baseline_only:
+                data = self.adata.to_df(layer='imputed_count')
+                data[kotarget] = 0
+            else:
+                data = pd.read_parquet(ko_file)
             
             data = data.loc[self.adata.obs_names] - self.adata.to_df(layer='imputed_count')
             data = data.join(self.adata.obs[annot]).groupby(annot).mean().abs().mean(axis=1)
@@ -164,12 +225,25 @@ class VirtualTissue:
             pbar.update(1)
         
         out = pd.concat(ko_data, axis=1)
-        out.to_csv(cache_path+'ko_impact_df.csv')
+        # out.to_csv(cache_path+'ko_impact_df.csv')
         
         return out
     
     
-    def plot_radar(self, genes, cache_path='', show_for=None, figsize=(20, 6), dpi=300, annot='cell_type', rename=None):
+    def plot_radar(
+        self, 
+        genes, 
+        impact_df=None, 
+        show_for=None, 
+        figsize=(20, 6), 
+        dpi=300, 
+        annot='cell_type', 
+        rename=None,
+        label_size=20,
+        legend_size=12,
+        cache_path=None, 
+        ):
+        
         if isinstance(genes[0], str):
             genes = [genes]
             
@@ -181,47 +255,35 @@ class VirtualTissue:
             axs = [axs]
         else:
             axs = axs.flatten()
-        
-        ko_concat = self.compute_ko_impact(cache_path=cache_path, annot=annot)
+            
+        if impact_df is None:
+            impact_df = self.compute_ko_impact(annot=annot)
         
         if show_for is not None:
-            ko_concat = ko_concat.loc[show_for]
+            impact_df = impact_df.loc[show_for]
             
-        # Apply renaming to index if rename dict is provided
         if rename is not None:
-            ko_concat.index = ko_concat.index.map(lambda x: rename.get(x, x))
+            impact_df.index = impact_df.index.map(lambda x: rename.get(x, x))
         
         ko_concat_norm = pd.DataFrame(
-            StandardScaler().fit_transform(ko_concat), 
-            index=ko_concat.index, 
-            columns=ko_concat.columns
+            StandardScaler().fit_transform(impact_df),
+            index=impact_df.index, 
+            columns=impact_df.columns
         )
 
-        # Scale values to 0-100% range
-        ko_concat_norm = (ko_concat_norm - ko_concat_norm.min().min()) / (ko_concat_norm.max().max() - ko_concat_norm.min().min()) * 100
+        ko_concat_norm = (ko_concat_norm - ko_concat_norm.min().min()) /\
+            (ko_concat_norm.max().max() - ko_concat_norm.min().min()) * 100
 
         for ax, geneset in zip(axs, genes):
-            # Turn off default grid
             ax.grid(False)
-            
-            # Add percentage circles at 25% intervals
             circles = [0, 25, 50, 75, 100]
             ax.set_rticks(circles)
-            
-            # Remove all radial labels
             ax.set_yticklabels([])
-            
-            # Get the number of variables
             num_vars = len(ko_concat_norm.index)
             angles = np.linspace(0, 2*np.pi, num_vars, endpoint=False)
-            
-            # Set the radial limits
             ax.set_rlim(0, 110)
-            
-            # Draw the spider web grid
             for circle in circles:
                 if circle > 0:  # Skip the center point
-                    # Calculate points on the circle
                     points = np.array([[circle * np.cos(angle), circle * np.sin(angle)] 
                                      for angle in angles])
                     
@@ -234,43 +296,39 @@ class VirtualTissue:
                                 np.hypot(points[j, 0], points[j, 1])],
                                color='gray', alpha=0.15, linewidth=0.5)
             
-            # Draw lines from center to outer ring
             for angle in angles:
                 ax.plot([angle, angle], [0, 110], 
                        color='gray', alpha=0.15, linewidth=0.5)
             
-            # Plot each gene's data
             for i, col in enumerate(geneset):
-                # Get original or renamed label for the legend
-                label = rename.get(col, col) if rename is not None else col
-                
-                values = ko_concat_norm[col].values.tolist()
-                values += values[:1]  # Repeat first value to close polygon
-                
-                angles_plot = np.concatenate((angles, [angles[0]]))  # Complete the polygon
+                values = ko_concat_norm[col].values
+                if not np.allclose(values, values[0]):
+                    label = rename.get(col, col) if rename is not None else col
+                    
+                    values_list = values.tolist()
+                    values_list += values_list[:1]  # Repeat first value to close polygon
+                    
+                    angles_plot = np.concatenate((angles, [angles[0]]))  # Complete the polygon
 
-                ax.plot(angles_plot, values, '-', linewidth=1, label=label)
-                ax.fill(angles_plot, values, alpha=0.15)
+                    ax.plot(angles_plot, values_list, '-', linewidth=1, label=label)
+                    ax.fill(angles_plot, values_list, alpha=0.15)
 
-            # Customize axis labels with more spacing
             ax.set_xticks(angles)
             labels = ko_concat_norm.index
             ax.set_xticklabels(
-                labels, size=10,
+                labels, size=label_size,
                 rotation=0  # Keep labels horizontal
             )
             
-            # Add more space for the labels
             ax.tick_params(pad=20)
 
-            # Remove the outer circle
             ax.spines['polar'].set_visible(False)
             
-            # Add legend with colored text
             legend = ax.legend(bbox_to_anchor=(0.5, -0.15), 
-                loc='upper center', ncol=3, frameon=False, fontsize=12)
-            for text, line in zip(legend.get_texts(), legend.get_lines()):
-                text.set_color(line.get_color())
+                loc='upper center', ncol=3, frameon=False, fontsize=legend_size)
+            if legend:
+                for text, line in zip(legend.get_texts(), legend.get_lines()):
+                    text.set_color(line.get_color())
 
         if splits > 1:
             for i in range(1, splits):

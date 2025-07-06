@@ -1,4 +1,6 @@
 import sys
+
+from oracles import BaseTravLR
 sys.path.append('../../src')
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -18,6 +20,8 @@ co_grn = RegulatoryFactory(
 adata = sc.read_h5ad(
     base_dir + f'training_data_2025/{fname}.h5ad')
 
+BaseTravLR.impute_clusterwise(adata)
+
 print(adata)
 
 star = SpaceTravLR(
@@ -28,23 +32,23 @@ star = SpaceTravLR(
     spatial_dim=64,
     batch_size=512,
     grn=co_grn,
-    radius=200,
-    contact_distance=30,
+    radius=300,
+    contact_distance=50,
     save_dir=base_dir + f'lasso_runs/{fname}'
 )
 
 star.run()
 
-gf = GeneFactory.from_json(
-    adata=star.adata, 
-    json_path=star.save_dir + '/run_params.json', 
-)
+# gf = GeneFactory.from_json(
+#     adata=star.adata, 
+#     json_path=star.save_dir + '/run_params.json', 
+# )
 
-gf.load_betas()
+# gf.load_betas()
 
-gf.genome_screen(
-    save_to=base_dir + f'/genome_screens/{fname}',
-    n_propagation=4
-)
+# gf.genome_screen(
+#     save_to=base_dir + f'/genome_screens/{fname}',
+#     n_propagation=4
+# )
 
 exit()
