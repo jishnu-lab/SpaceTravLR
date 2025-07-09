@@ -49,11 +49,12 @@ class Visionary(GeneFactory):
             matching_label: i for matching_label, i in self.ref_adata.obs[[self.matching_annot, self.annot]].value_counts().index}
         self.adata.obs[self.annot] = self.adata.obs[self.matching_annot].map(ct_int_mapping)
 
+        prematching.index = prematching.index.astype(str)
         self.matching = prematching.reindex(self.adata.obs.index, axis=0)
         self.adata.obs['reference_cell'] = self.matching['reference_cell'].values
             
         self.reformat()
-        # self.compute_betas(subsample=subsample)
+        self.compute_betas(subsample=subsample)
 
     def reformat(self):
         # Create cell_thresholds for test adata
