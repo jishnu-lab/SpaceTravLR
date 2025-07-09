@@ -624,14 +624,20 @@ class SpatialCellularProgramsEstimator:
             mask = self.cluster_labels == cluster_target
             indices = self.cell_indices[mask]
             index_tracker.extend(indices)
-            cluster_sp_maps = torch.from_numpy(
-                self.sp_maps[mask][:, cluster_target:cluster_target+1, :, :]).float()
-            spf = torch.from_numpy(self.spatial_features.values[mask]).float()
             
-            b = self.models[cluster_target].get_betas(
-                cluster_sp_maps.to(self.device),
-                spf.to(self.device)
-            ).cpu().numpy()
+            if cluster_target not in self.models:
+                b = np.zeros((len(indices), (len(self.modulators)+1)))
+                
+            else:
+                
+                cluster_sp_maps = torch.from_numpy(
+                    self.sp_maps[mask][:, cluster_target:cluster_target+1, :, :]).float()
+                spf = torch.from_numpy(self.spatial_features.values[mask]).float()
+                
+                b = self.models[cluster_target].get_betas(
+                    cluster_sp_maps.to(self.device),
+                    spf.to(self.device)
+                ).cpu().numpy()
         
             betas.extend(b)
             
@@ -643,15 +649,25 @@ class SpatialCellularProgramsEstimator:
         ).reindex(self.adata.obs.index)
     
     @property
-    def betadata(self):
+    def betadata(self): ##backward compatibility
         return self.get_betas()
 
-    def fit(self, num_epochs=100, threshold_lambda=1e-6, learning_rate=5e-3, batch_size=512, 
-            pbar=None, estimator='lasso',
-            score_threshold=0.2, l1_reg=1e-9):
+    def fit(
+        self, 
+        num_epochs=100, 
+        threshold_lambda=1e-6, 
+        learning_rate=5e-3, 
+        batch_size=512, 
+        pbar=None, 
+        estimator='lasso',
+        score_threshold=0.2, 
+        l1_reg=1e-9,
+        skip_clusters=None):
         
         sp_maps, X, y, cluster_labels = self.init_data()
 
+        if skip_clusters is None:
+            skip_clusters = []
 
         assert estimator in ['lasso', 'bayesian', 'ard']
         self.estimator = estimator
@@ -681,6 +697,10 @@ class SpatialCellularProgramsEstimator:
         self.scores = {}
 
         for cluster in np.unique(cluster_labels):
+            if int(cluster) in skip_clusters:
+                pbar.update(num_epochs*len(self.cell_indices[cluster_labels == cluster]))
+                continue
+            
             mask = cluster_labels == cluster
             X_cell, y_cell = self.Xn[mask], self.yn[mask]
 
@@ -763,7 +783,11 @@ class SpatialCellularProgramsEstimator:
                 ).to(self.device)
 
             criterion = torch.nn.MSELoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0)
+            optimizer = torch.optim.Adam(
+                model.parameters(), 
+                lr=learning_rate, 
+                weight_decay=0
+            )
             
             for epoch in range(num_epochs):
                 model.train()

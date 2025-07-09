@@ -327,10 +327,17 @@ class OracleQueue:
 class SpaceTravLR(BaseTravLR):
 
     def __init__(
-        self, adata, save_dir='./models', annot='cell_type_int', grn=None,
-        max_epochs=50, spatial_dim=64, learning_rate=5e-3, batch_size=512, rotate_maps=True, 
+        self, adata, 
+        save_dir='./models', annot='cell_type_int', grn=None,
+        max_epochs=50, spatial_dim=64, learning_rate=5e-3, 
+        batch_size=512, rotate_maps=True, 
         layer='imputed_count', alpha=0.05,
-        threshold_lambda=1e-6, tf_ligand_cutoff=0.01, radius=200, contact_distance=30,
+        threshold_lambda=1e-6, 
+        tf_ligand_cutoff=0.01, 
+        radius=200, 
+        contact_distance=30,
+        skip_clusters=None
+        ,
         scale_factor=1):
         
         super().__init__(adata, fields_to_keep=[annot, 'cell_thresholds'])
@@ -363,6 +370,7 @@ class SpaceTravLR(BaseTravLR):
 
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
+        self.skip_clusters = skip_clusters
         
         if not os.path.exists(self.save_dir+'/run_params.json'):
             with open(self.save_dir+'/run_params.json', 'w') as f:
@@ -446,7 +454,8 @@ class SpaceTravLR(BaseTravLR):
                     threshold_lambda=self.threshold_lambda, 
                     learning_rate=self.learning_rate,
                     batch_size=self.batch_size,
-                    pbar=train_bar
+                    pbar=train_bar,
+                    skip_clusters=self.skip_clusters
                 )
                 
                 ## filter out columns with all zeros

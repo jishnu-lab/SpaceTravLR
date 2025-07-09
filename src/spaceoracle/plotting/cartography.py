@@ -642,7 +642,7 @@ class Cartography:
                 
                 # Use the appropriate color
                 if highlight_clusters is not None and cluster not in highlight_clusters:
-                    color = 'lightgrey'
+                    color = 'lightgrey' if grey_out else alt_colors[cluster]
                 else:
                     color = alt_colors[cluster]
                 
