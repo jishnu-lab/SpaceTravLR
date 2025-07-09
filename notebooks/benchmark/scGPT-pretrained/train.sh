@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=preempt
+#SBATCH --partition=l40s
 #SBATCH --cluster=gpu
 #SBATCH --mem=50G
 #SBATCH --job-name=scGPT_pretrained

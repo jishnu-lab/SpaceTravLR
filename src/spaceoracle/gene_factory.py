@@ -30,7 +30,11 @@ class GeneFactory(BaseTravLR):
         annot='cell_type_int', 
         radius=200, 
         contact_distance=30,
-        scale_factor=1):
+        scale_factor=1,
+        beta_scale_factor=1,
+        beta_cap=None, 
+        co_grn=None
+        ):
         
         super().__init__(adata, fields_to_keep=[annot])
         
@@ -48,8 +52,17 @@ class GeneFactory(BaseTravLR):
         self.trained_genes = []
         self.beta_dict = None
         self._name = 'GeneFactory'
-
+        self.beta_scale_factor = beta_scale_factor
+        self.beta_cap = beta_cap
         
+        if co_grn is not None:
+            flat_links = pd.concat([co_grn.links[ct] for ct in co_grn.links.keys()], axis=0)
+            flat_links.sort_values(by='coef_mean', ascending=False, inplace=True)
+            flat_links.drop_duplicates(subset=['source', 'target'], inplace=True, keep='first')
+            self.co_grn_links = flat_links
+        else:
+            self.co_grn_links = None
+
         self.manager = enlighten.get_manager()
         
         self._logo = '🐭️🧬️️' if self.species == 'mouse' else '🙅‍♂️🧬️️'
@@ -88,7 +101,8 @@ class GeneFactory(BaseTravLR):
         
         
     @classmethod
-    def from_json(cls, adata, json_path, override_params=None):
+    def from_json(cls, adata, json_path, override_params=None, 
+                  beta_scale_factor=1, beta_cap=None, co_grn=None):
         import json
         
         with open(json_path, 'r') as f:
@@ -103,7 +117,10 @@ class GeneFactory(BaseTravLR):
             annot=params['annot'], 
             radius=params['radius'], 
             contact_distance=params['contact_distance'],
-            # scale_factor=params.get('scale_factor', 1)
+            scale_factor=params.get('scale_factor', 1),
+            beta_scale_factor=beta_scale_factor,
+            beta_cap=beta_cap,
+            co_grn=co_grn
         )
         
     ## backwards compatibility
@@ -212,8 +229,14 @@ class GeneFactory(BaseTravLR):
         out_dict = {}
         
         for i, (gene, betadata) in enumerate(betas_dict.data.items()):
+
+            if self.co_grn_links is not None:
+                grn_tfs = self.co_grn_links.loc[self.co_grn_links['source'] == gene, 'target'].values
+            else:
+                grn_tfs = None
+
             out_dict[gene] = self._combine_gene_wbetas(
-                weighted_ligands, weighted_ligands_tfl, gex_df, betadata)
+                weighted_ligands, weighted_ligands_tfl, gex_df, betadata, grn_tfs=grn_tfs)
             
             self.update_status(
                 f'{self.current_target} | {i}/{len(betas_dict.data)} | [{self.iter}/{self.max_iter}] | Computing Ligand interactions', color='black_on_salmon')
@@ -223,11 +246,14 @@ class GeneFactory(BaseTravLR):
         # return dict(results)
         return out_dict
 
-    def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata):
+    def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata, grn_tfs=None):
         betas_df = betadata.splash(
             rw_ligands, 
             rw_ligands_tfl, 
-            filtered_df
+            filtered_df,
+            scale_factor=self.beta_scale_factor,
+            beta_cap=self.beta_cap,
+            grn_tfs=grn_tfs
         )
         
         return betas_df
@@ -441,7 +467,6 @@ class GeneFactory(BaseTravLR):
             #     columns=self.adata.var_names, 
             #     index=self.adata.obs_names
             # )
-            
             
             # delta_ligands = pd.concat(
             #         [delta_df[self.ligands], delta_df[self.tfl_ligands]], axis=1

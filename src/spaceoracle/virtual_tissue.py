@@ -24,7 +24,8 @@ class VirtualTissue:
         ko_path=None, 
         ovx_path=None, 
         color_dict=None,
-        annot='cell_type'
+        annot='cell_type',
+        n_props=4
         ):
         
         
@@ -33,6 +34,7 @@ class VirtualTissue:
         self.ko_path = ko_path
         self.ovx_path = ovx_path
         self.annot = annot
+        self.n_props = n_props
         
         if ovx_path is None:
             self.ovx_path = ko_path
@@ -128,21 +130,68 @@ class VirtualTissue:
         return ko
         
         
-    def compute_ko_impact(self, cache_path='', force_recompute=False):
+    def compute_ko_impact_estimate(self, genes, cache_path='', force_recompute=False):
         if os.path.exists(cache_path+'ko_impact_df.csv') and not force_recompute:
             return pd.read_csv(cache_path+'ko_impact_df.csv', index_col=0)
         
         ko_data = []
-        files = glob.glob(self.ko_path+'/*_0x.parquet')
+        files = glob.glob(self.ko_path+f'/{self.n_props}n_0x.parquet')
         
         pbar = enlighten.manager.get_manager().counter(
-            total=len(files),
+            total=len(genes),
             desc='Computing KO impact',
             unit='KO',
             auto_refresh=True
         )
         for ko_file in files:
             kotarget = ko_file.split('/')[-1].split('_')[0]
+
+            if kotarget not in genes:
+                continue
+            
+            pbar.desc = f'{kotarget:<15}'
+            pbar.refresh()
+            
+            data = pd.read_parquet(ko_file)
+            # data = self.adata.to_df(layer='imputed_count')
+            # data[kotarget] = 0
+            
+            data = data.loc[self.adata.obs_names] - self.adata.to_df(layer='imputed_count')
+            data = data.join(self.adata.obs.cell_type).groupby('cell_type').mean().abs().mean(axis=1)
+
+            ds = {}
+            for k, v in data.sort_values(ascending=False).to_dict().items():
+                ds[k] = v
+
+            data = pd.DataFrame.from_dict(ds, orient='index')
+            data.columns = [kotarget]
+            ko_data.append(data)
+            pbar.update(1)
+        
+        out = pd.concat(ko_data, axis=1)
+        out.to_csv(cache_path+'ko_impact_df.csv')
+        
+        return out
+    
+    def compute_ko_impact(self, genes, cache_path='', force_recompute=False):
+        if os.path.exists(cache_path+'ko_impact_df.csv') and not force_recompute:
+            return pd.read_csv(cache_path+'ko_impact_df.csv', index_col=0)
+        
+        ko_data = []
+        files = glob.glob(self.ko_path+f'/*{self.n_props}n_0x.parquet')
+        
+        pbar = enlighten.manager.get_manager().counter(
+            total=len(genes),
+            desc='Computing KO impact',
+            unit='KO',
+            auto_refresh=True
+        )
+        for ko_file in files:
+            kotarget = ko_file.split('/')[-1].split('_')[0]
+
+            if kotarget not in genes:
+                continue
+            
             pbar.desc = f'{kotarget:<15}'
             pbar.refresh()
             
@@ -181,7 +230,7 @@ class VirtualTissue:
         else:
             axs = axs.flatten()
         
-        ko_concat = self.compute_ko_impact(cache_path=cache_path)
+        ko_concat = self.compute_ko_impact(genes, cache_path=cache_path)
         
         if show_for is not None:
             ko_concat = ko_concat.loc[show_for]
@@ -279,4 +328,83 @@ class VirtualTissue:
         
         plt.tight_layout()
         
+    
+class SubsampledTissue(VirtualTissue):
+    
+    def __init__(
+        self, 
+        adata, 
+        betadatas_paths=None,  
+        ko_paths=None, 
+        ovx_paths=None, 
+        color_dict=None,
+        annot='cell_type',
+        suffix = '',
+        n_props=4
+        ):
         
+        
+        self.adata = adata
+        self.betadatas_paths = betadatas_paths
+        self.ko_paths = ko_paths
+        self.ovx_paths = ovx_paths
+        self.annot = annot
+        self.suffix = suffix
+        self.n_props = n_props
+
+        
+        if ovx_paths is None:
+            self.ovx_paths = ko_paths
+        
+        if color_dict is None:
+            
+            self.color_dict = {
+                c: self.random_color() for c in self.adata.obs[self.annot].unique()
+            }
+        else:
+            self.color_dict = color_dict
+        
+        self.xy = xy_from_adata(self.adata) 
+
+
+    def compute_ko_impact(self, genes, cache_path='', force_recompute=False):
+        if os.path.exists(cache_path+'ko_impact_df.csv') and not force_recompute:
+            return pd.read_csv(cache_path+'ko_impact_df.csv', index_col=0)
+        
+        ko_data = []
+        
+        pbar = enlighten.manager.get_manager().counter(
+            total=len(sum(genes, [])),
+            desc='Computing KO impact',
+            unit='KO',
+            auto_refresh=True
+        )
+        for kotarget in sum(genes, []):
+            pbar.desc = f'{kotarget:<15}'
+            pbar.refresh()
+
+            files = [f'{ko_path}/{kotarget}_{self.n_props}n_0x{self.suffix}.parquet' for ko_path in self.ko_paths]
+            
+            data = pd.concat([
+                pd.read_parquet(ko_file) for ko_file in files
+            ], axis=0)
+            data = data.loc[self.adata.obs.index]
+            # data = self.adata.to_df(layer='imputed_count')
+            # data[kotarget] = 0
+            
+            data = data.loc[self.adata.obs_names] - self.adata.to_df(layer='imputed_count')
+            data = data.join(self.adata.obs.cell_type).groupby('cell_type').mean().abs().mean(axis=1)
+
+            ds = {}
+            for k, v in data.sort_values(ascending=False).to_dict().items():
+                ds[k] = v
+
+            data = pd.DataFrame.from_dict(ds, orient='index')
+            data.columns = [kotarget]
+            ko_data.append(data)
+            pbar.update(1)
+        
+        out = pd.concat(ko_data, axis=1)
+        out.to_csv(cache_path+'ko_impact_df.csv')
+        
+        return out

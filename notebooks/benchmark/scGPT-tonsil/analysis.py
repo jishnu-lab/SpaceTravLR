@@ -41,49 +41,54 @@ from spaceoracle.gene_factory import GeneFactory
 
 # %%
 gf = GeneFactory.from_json(
-    adata, 
-    '/ix/djishnu/shared/djishnu_kor11/scGPT_runs/tonsil/run_params.json', 
+    adata=adata, 
+    json_path='/ix/djishnu/shared/djishnu_kor11/scGPT_runs/tonsil/run_params.json', 
 )
-
 gf.load_betas(float16=True, obs_names=None)
 
-# os.makedirs('/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT')
+os.makedirs('/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT', exist_ok=True)
+
+# t_cells = [
+#     'T_follicular_helper', 
+#     'T_CD4'
+# ]
+# cells = adata[adata.obs['cell_type'].isin(t_cells)].obs.index
+# simulated_gex = gf.perturb(
+#     target = 'FOXO1',
+#     n_propagation = 4,
+#     gene_expr = 0,
+#     cells = np.where(adata.obs.index.isin(cells))[0],
+# )
+# simulated_gex.to_parquet(f'/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT/FOXO1_4n_0x_CD4_Tfh.parquet')
 
 
-max_expr = adata[:, 'IL21'].layers['imputed_count'].max()
-max_expr.item()
-gex_out = gf.perturb(
-    target='IL21', 
-    n_propagation=4,
-    gene_expr=max_expr.item()
-)
-gex_out.to_parquet(
-    '/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT/IL21_4n_maxx.parquet'
-)
+# max_expr = adata[:, 'IL21'].layers['imputed_count'].max()
+# max_expr.item()
+# gex_out = gf.perturb(
+#     target='IL21', 
+#     n_propagation=4,
+#     gene_expr=max_expr.item()
+# )
+# gex_out.to_parquet(
+#     '/ix/djishnu/shared/djishnu_kor11/genome_screens/human_tonsil_scGPT/IL21_4n_maxx.parquet'
+# )
 
-# %%
-genes = [
-    'PAX5', 'BCL6', 'FOXP3', 'GATA3', 'PRDM1', 'FOXO1',
-    'PDCD1','IL7R', 'CXCR5', 'CXCR4', 'CCR2',
-    'IL7', 'GZMA', 'IL10', 'IL6ST', 'IL4', 'LGALS9',
-    'IL21'
-]
+# # %%
+# genes = [
+#     'PAX5', 'BCL6', 'FOXP3', 'GATA3', 'PRDM1', 'FOXO1',
+#     'PDCD1','IL7R', 'CXCR5', 'CXCR4', 'CCR2',
+#     'IL7', 'GZMA', 'IL10', 'IL6ST', 'IL4', 'LGALS9',
+#     'IL21'
+# ]
+
+
+genes = ['STAT4']
 
 genes = [g for g in np.unique(genes) if g in adata.var_names]
 print(genes)
 
 
 
-
-
-# # %%
-# gf.genome_screen(
-#     save_to=base_dir + '/genome_screens/human_tonsil_scGPT',
-#     n_propagation=4,
-#     priority_genes=genes,
-#     # mode='overexpress'
-#     mode='knockout'
-# )
 
 
 from tqdm import tqdm
