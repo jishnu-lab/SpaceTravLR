@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --partition=preempt
+#SBATCH --cluster=gpu
+#SBATCH --mem=50G
+#SBATCH --job-name=scGPT_pretrained
+#SBATCH --output=train.txt
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --gres=gpu:1
+#SBATCH --time=8:00:00
+
+# mamba activate SpaceOracle
+# python train.py
+
+
+conda init
+source ~/.bashrc
+conda activate /ix3/djishnu/alw399/envs/sheep
+echo $CONDA_DEFAULT_ENV
+
+python train.py
+# python analysis.py
