@@ -352,8 +352,8 @@ class GeneFactory(BaseTravLR):
         else:
             print('warning: cell_thresholds not found in adata.uns')
 
-        rw_ligands_0 = self.adata.uns.get('received_ligands').loc[obs]
-        rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl').loc[obs]
+        rw_ligands_0 = self.adata.uns.get('received_ligands')
+        rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl')
         
         if rw_ligands_0 is None or rw_tfligands_0 is None:
             rw_ligands_0 = self._compute_weighted_ligands(
@@ -366,8 +366,10 @@ class GeneFactory(BaseTravLR):
         rw_ligands_0 = pd.concat(
                 [rw_ligands_0, rw_tfligands_0], axis=1
             ).groupby(level=0, axis=1).max().reindex(
-                index=self.obs_names, 
-                columns=self.adata.var_names, fill_value=0)
+                index=obs, 
+                columns=self.adata.var_names, 
+                fill_value=0
+            )
 
         
         all_ligands = list(set(self.ligands) | set(self.tfl_ligands))
