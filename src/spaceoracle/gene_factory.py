@@ -189,7 +189,7 @@ class GeneFactory(BaseTravLR):
         gex_df = get_filtered_df(       # mask out receptors too
             counts_df=pd.DataFrame(
                 gene_mtx, 
-                index=self.adata.obs_names, 
+                index=self.obs_names, 
                 columns=self.adata.var_names
             ),
             cell_thresholds=cell_thresholds,
@@ -366,13 +366,13 @@ class GeneFactory(BaseTravLR):
         rw_ligands_0 = pd.concat(
                 [rw_ligands_0, rw_tfligands_0], axis=1
             ).groupby(level=0, axis=1).max().reindex(
-                index=self.adata.obs_names, 
+                index=self.obs_names, 
                 columns=self.adata.var_names, fill_value=0)
 
         
         all_ligands = list(set(self.ligands) | set(self.tfl_ligands))
         ligands_0 = self.adata.to_df(layer='imputed_count')[all_ligands].reindex(
-            index=self.adata.obs_names, 
+            index=self.obs_names, 
             columns=self.adata.var_names, 
             fill_value=0
         )
@@ -380,7 +380,7 @@ class GeneFactory(BaseTravLR):
 
         all_ligands = list(set(self.ligands) | set(self.tfl_ligands))
         ligands_0 = self.adata.to_df(layer='imputed_count')[all_ligands].reindex(
-            index=self.adata.obs_names, 
+            index=self.obs_names, 
             columns=self.adata.var_names, 
             fill_value=0
         )
@@ -416,7 +416,7 @@ class GeneFactory(BaseTravLR):
             rw_ligands_1 = pd.concat(
                 [w_ligands_1, w_tfligands_1], axis=1
             ).groupby(level=0, axis=1).max().reindex(      # w_ligands <= w_tfligands because of cell_thresholds
-                index=self.adata.obs_names, 
+                index=self.obs_names, 
                 columns=self.adata.var_names, 
                 fill_value=0
             )
@@ -427,13 +427,13 @@ class GeneFactory(BaseTravLR):
             gene_df_1 = pd.DataFrame(
                 gene_mtx_1,
                 columns=self.adata.var_names,
-                index=self.adata.obs_names
+                index=obs
             )
 
             ligands_1 = pd.concat(
                 [gene_df_1[self.ligands], gene_df_1[self.tfl_ligands]], axis=1
             ).groupby(level=0, axis=1).max().reindex(
-                index=self.adata.obs_names, 
+                index=obs, 
                 columns=self.adata.var_names, 
                 fill_value=0
             )
@@ -495,7 +495,7 @@ class GeneFactory(BaseTravLR):
         if save_layer:
             self.adata.layers[output_name] = gem_simulated
             
-        gex_out = pd.DataFrame(gem_simulated, index=self.adata.obs_names, columns=self.adata.var_names)
+        gex_out = pd.DataFrame(gem_simulated, index=obs, columns=self.adata.var_names)
         gex_out.index.name = output_name
             
         return gex_out
