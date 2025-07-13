@@ -157,7 +157,7 @@ class GeneFactory(BaseTravLR):
         self.update_status(f'{self.current_target} >> Computing received ligands', color='black_on_cyan')
         gex_df = pd.DataFrame(
             gene_mtx, 
-            index=self.adata.obs_names, 
+            index=self.obs_names, 
             columns=self.adata.var_names
         )
         
@@ -178,18 +178,6 @@ class GeneFactory(BaseTravLR):
         self.status.color = color
         self.status.refresh()
 
-    # def _process_gene(
-    #     self, 
-    #     item, 
-    #     weighted_ligands, 
-    #     weighted_ligands_tfl, 
-    #     filtered_df):
-        
-    #     gene, betadata = item
-    #     return gene, self._combine_gene_wbetas(
-    #         weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
-    
-    
     def _get_wbetas_dict(
         self, 
         betas_dict, 
@@ -212,20 +200,6 @@ class GeneFactory(BaseTravLR):
             f'[{self.iter}/{self.max_iter}] | Computing Ligand interactions', 
             color='black_on_salmon')
         
-        # process_gene_partial = partial(
-        #     self._process_gene, 
-        #     weighted_ligands=weighted_ligands, 
-        #     weighted_ligands_tfl=weighted_ligands_tfl, 
-        #     filtered_df=gex_df
-        # )
-        
-        # results = pqdm(
-        #     betas_dict.data.items(), 
-        #     process_gene_partial, 
-        #     n_jobs=8, 
-        #     tqdm_class=tqdm
-        # )
-
         out_dict = {}
         
         for i, (gene, betadata) in enumerate(betas_dict.data.items()):
@@ -243,7 +217,6 @@ class GeneFactory(BaseTravLR):
             
         self.update_status(f'Ligand interactions - Done')
 
-        # return dict(results)
         return out_dict
 
     def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata, grn_tfs=None):
@@ -262,6 +235,10 @@ class GeneFactory(BaseTravLR):
         bdb = Betabase(self.adata, self.save_dir, subsample=subsample, float16=float16, obs_names=obs_names)
         self.ligands = list(bdb.ligands_set)
         self.tfl_ligands = list(bdb.tfl_ligands_set)
+        if obs_names is not None:
+            self.obs_names = self.adata.obs_names
+        else:
+            self.obs_names = obs_names
         return bdb
     
     def splash_betas(self, gene, obs_names=None):
@@ -339,7 +316,9 @@ class GeneFactory(BaseTravLR):
         
         self.current_target = output_name
         
-        gene_mtx = self.adata.layers['imputed_count'].copy()
+        obs = self.obs_names
+        
+        gene_mtx = self.adata[obs].layers['imputed_count'].copy()
         self.payload_dict = payload_dict
 
         if isinstance(gene_mtx, pd.DataFrame):
@@ -362,20 +341,19 @@ class GeneFactory(BaseTravLR):
         delta_simulated = delta_input.copy() 
 
         if self.beta_dict is None:
-            self.beta_dict = self._get_spatial_betas_dict() 
+            self.beta_dict = self._get_spatial_betas_dict(obs_names=self.obs_names) 
 
         # get LR specific filtered gex contributions
-        cell_thresholds = self.adata.uns.get('cell_thresholds').loc[self.adata.obs_names]
+        cell_thresholds = self.adata.uns.get('cell_thresholds').loc[obs]
         if cell_thresholds is not None:
-            # Only commot LR values should be filtered
             cell_thresholds = cell_thresholds.reindex(              
-                index=self.adata.obs_names, columns=self.adata.var_names, fill_value=1)
+                index=obs, columns=self.adata.var_names, fill_value=1)
             self.adata.uns['cell_thresholds'] = cell_thresholds
         else:
             print('warning: cell_thresholds not found in adata.uns')
 
-        rw_ligands_0 = self.adata.uns.get('received_ligands')
-        rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl')
+        rw_ligands_0 = self.adata.uns.get('received_ligands').loc[obs]
+        rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl').loc[obs]
         
         if rw_ligands_0 is None or rw_tfligands_0 is None:
             rw_ligands_0 = self._compute_weighted_ligands(
