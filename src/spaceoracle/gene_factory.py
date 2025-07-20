@@ -145,6 +145,8 @@ class GeneFactory(BaseTravLR):
             obs_names=obs_names
         )
         
+        self.obs_names = obs_names
+        
         self.status.update('Loading betas - Done')
         self.status.color = 'black_on_green'
         self.status.refresh()
@@ -163,13 +165,13 @@ class GeneFactory(BaseTravLR):
         
         if len(genes) > 0:
             weighted_ligands = received_ligands(
-                xy=self.adata.obsm['spatial'], 
+                xy=self.adata[self.obs_names].obsm['spatial'], 
                 ligands_df=get_filtered_df(gex_df, cell_thresholds, genes),
                 lr_info=self.lr,
                 scale_factor=self.scale_factor
         )
         else:
-            weighted_ligands = pd.DataFrame(index=self.adata.obs.index)
+            weighted_ligands = pd.DataFrame(index=self.obs_names)
         
         return weighted_ligands
     
@@ -235,10 +237,7 @@ class GeneFactory(BaseTravLR):
         bdb = Betabase(self.adata, self.save_dir, subsample=subsample, float16=float16, obs_names=obs_names)
         self.ligands = list(bdb.ligands_set)
         self.tfl_ligands = list(bdb.tfl_ligands_set)
-        if obs_names is not None:
-            self.obs_names = self.adata.obs_names
-        else:
-            self.obs_names = obs_names
+
         return bdb
     
     def splash_betas(self, gene, obs_names=None):
@@ -318,7 +317,7 @@ class GeneFactory(BaseTravLR):
         
         obs = self.obs_names
         
-        gene_mtx = self.adata[obs].layers['imputed_count'].copy()
+        gene_mtx = self.adata.to_df(layer='imputed_count').loc[obs]
         self.payload_dict = payload_dict
 
         if isinstance(gene_mtx, pd.DataFrame):
