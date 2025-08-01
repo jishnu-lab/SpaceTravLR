@@ -388,6 +388,8 @@ class VirtualTissue:
         
         plt.tight_layout()
         
+        return fig, axs
+        
     
 class SubsampledTissue(VirtualTissue):
     

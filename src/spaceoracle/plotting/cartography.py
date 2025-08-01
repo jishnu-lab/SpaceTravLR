@@ -267,7 +267,7 @@ class Cartography:
         ct_points_wt = {}
         for ct in self.adata.obs[annot].unique():
             points = np.asarray(
-                self.adata[self.adata.obs[annot] == ct].obsm[basis])
+                self.adata.obsm[basis][self.adata.obs[annot] == ct])
             if basis == 'spatial':
                 delta = 30
                 points = np.vstack(
@@ -278,7 +278,7 @@ class Cartography:
         ct_points_ko = {}
         for ct in self.adata.obs['transition'].unique():
             points = np.asarray(
-                self.adata[self.adata.obs['transition'] == ct].obsm[basis])
+                self.adata.obsm[basis][self.adata.obs['transition'] == ct])
             if basis == 'spatial':
                 delta = 30
                 points = np.vstack(
