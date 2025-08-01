@@ -119,9 +119,9 @@ class NicheAttentionNetwork(nn.Module):
         self.spatial_dim = spatial_dim
         self.dim = n_regulators+1
         
-        if use_conditional_conv:
-            self.conditional_conv = ConditionalConv2D(
-                self.in_channels, self.in_channels, 1, num_experts=self.in_channels)
+        # if use_conditional_conv:
+        #     self.conditional_conv = ConditionalConv2D(
+        #         self.in_channels, self.in_channels, 1, num_experts=self.in_channels)
         
         self.conditional_conv = nn.Conv2d(self.in_channels, self.in_channels, 1)
 
