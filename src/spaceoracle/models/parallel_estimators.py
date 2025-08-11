@@ -108,7 +108,7 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
     return ligand_counts
 
 
-def init_received_ligands(adata, radius, contact_distance, cell_threshes):
+def init_received_ligands(adata, radius, contact_distance, cell_threshes, layer='imputed_count'):
     species = 'mouse' if is_mouse_data(adata) else 'human'
     df_ligrec = ct.pp.ligand_receptor_database(
         database='CellChat', 
@@ -125,7 +125,7 @@ def init_received_ligands(adata, radius, contact_distance, cell_threshes):
         radius, contact_distance
     )
 
-    counts_df = adata.to_df(layer='imputed_count')
+    counts_df = adata.to_df(layer=layer)
     ligands = np.unique(lr.ligand)
 
     adata.uns['received_ligands'] = received_ligands(
