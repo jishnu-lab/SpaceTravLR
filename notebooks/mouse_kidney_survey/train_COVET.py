@@ -24,41 +24,72 @@ sp_maps = np.load('/ix/djishnu/shared/djishnu_kor11/covet_outputs/mouse_kidney_1
 feature_key = 'COVET'
 adata.obsm['COVET'] = sp_maps
 
-cell_threshes = pd.read_parquet(
-    base_dir + 'training_data_2025/mouse_kidney_13_LRs.parquet')
-adata.uns['cell_thresholds'] = cell_threshes
+# neil = Astronaut(
+#     adata=adata,
+#     annot='cell_type_int', 
+#     max_epochs=100, 
+#     learning_rate=5e-3, 
+#     spatial_dim=64,
+#     batch_size=512,
+#     grn=co_grn,
+#     radius=200,
+#     contact_distance=30,
+#     save_dir=base_dir + 'covet_runs/mouse_kidney_13'
+# )
 
-neil = Astronaut(
-    adata=adata,
-    annot='cell_type_int', 
-    max_epochs=200, 
-    learning_rate=5e-3, 
-    spatial_dim=64,
-    batch_size=512,
-    grn=co_grn,
-    radius=200,
-    contact_distance=30,
-    save_dir=base_dir + 'covet_runs/mouse_kidney_13'
+# neil.run(sp_maps_key='COVET')
+
+gf = GeneFactory.from_json(
+    adata=adata, 
+    json_path=base_dir + 'covet_runs/mouse_kidney_13' + '/run_params.json', 
 )
 
-neil.run(sp_maps_key='COVET')
+gf.load_betas()
+gf.perturb(target='Mif', n_propagation=4, save_layer=True)
+pd.DataFrame(
+    gf.adata.layers['Mif_4n_0x'],
+    index=gf.adata.obs_names,
+    columns=gf.adata.var_names
+).to_parquet('/ix/djishnu/shared/djishnu_kor11/genome_screens/mouse_kidney_13_COVET/Mif_4n_0x.parquet')
 
 
-# gf = GeneFactory.from_json(
-#     adata=adata, 
-#     json_path=base_dir + 'covet_runs/mouse_kidney_13' + '/run_params.json', 
-# )
+priority_genes = [
+    'Cd74',
+    'Cxcl10',
+    'Cxcr4',
+    'Ebf1',
+    'Egfr',
+    'Flt1',
+    'Hbegf',
+    'Hes1',
+    'Hgf',
+    'Il1b',
+    'Il7r',
+    'Mafb',
+    'Mif',
+    'Pax5',
+    'Pax8',
+    'Pdgfrb',
+    'Pecam1',
+    'Rora',
+    'Tfrc',
+    'Tgfb2',
+    'Tgfb3',
+    'Tgfbr1',
+    'Vegfa',
+    'Zeb2'
+]
 
-# gf.load_betas()
-# gf.perturb(target='Mif', n_propagation=4, save_layer=True)
-# pd.DataFrame(
-#     gf.adata.layers['Mif_4n_0x'],
-#     index=gf.adata.obs_names,
-#     columns=gf.adata.var_names
-# ).to_parquet('/ix/djishnu/shared/djishnu_kor11/genome_screens/mouse_kidney_13_COVET/Mif_4n_0x.parquet')
+for gene in priority_genes:
+    gf.perturb(target=gene, n_propagation=4, save_layer=True)
+    pd.DataFrame(
+        gf.adata.layers[f'{gene}_4n_0x'],
+        index=gf.adata.obs_names,
+        columns=gf.adata.var_names
+    ).to_parquet(f'/ix/djishnu/shared/djishnu_kor11/genome_screens/mouse_kidney_13_COVET/{gene}_4n_0x.parquet')
 
 
-# gf.genome_screen(
-#     save_to=base_dir + '/genome_screens/mouse_kidney_13_COVET',
-#     n_propagation=4
-# )
+gf.genome_screen(
+    save_to=base_dir + '/genome_screens/mouse_kidney_13_COVET',
+    n_propagation=4
+)
