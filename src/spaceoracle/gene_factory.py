@@ -459,7 +459,6 @@ class GeneFactory(BaseTravLR):
             _simulated = self._perturb_all_cells(delta_simulated, splashed_beta_dict)
             delta_simulated = np.array(_simulated)
             
-            
             # ensure values in delta_simulated match our desired KO / input
             delta_simulated = np.where(delta_input != 0, delta_input, delta_simulated)
 

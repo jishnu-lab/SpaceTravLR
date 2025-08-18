@@ -26,5 +26,9 @@
     "B cells": "#9865c8",
     "Dendritic cells": "#9da13c",
     "Myeloid cells": "#f3c009",
-    "NK cells": "#a36e29"
+    "NK cells": "#a36e29",
+
+    "SpaceTravLR": "#0e0ee8",
+    "scGPT": "#71e39c",
+    "CellOracle": "#7ddde8"
 }
