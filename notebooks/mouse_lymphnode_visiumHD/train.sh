@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=l40s
+#SBATCH --partition=preempt
 #SBATCH --cluster=gpu
 #SBATCH --mem=100G
 #SBATCH --job-name=lymphCOVET

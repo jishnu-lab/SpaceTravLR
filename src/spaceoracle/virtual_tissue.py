@@ -1,6 +1,10 @@
 from functools import cache
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import seaborn as sns
+import matplotlib as mpl
+from itertools import cycle
 from scipy.stats import pearsonr
 from sklearn.preprocessing import StandardScaler
 import glob
@@ -278,7 +282,108 @@ class VirtualTissue:
         
         return out
     
+    def plot_comparative_radar(
+        self,
+        gene,
+        impact_dfs,
+        labels=None,
+        show_for=None,
+        figsize=(8, 6),
+        dpi=300,
+        annot='cell_type',
+        rename=None,
+        label_size=20,
+        legend_size=12,
+        color_dict=None,
+        show_legend=False
+    ):
+        colors = [color_dict[l] for l in labels]
+
+        processed = []
+        for df in impact_dfs:
+            if gene not in df.columns:
+                data = pd.Series(0, index=df.index)
+            else:
+                data = df[gene]
+            if show_for is not None:
+                data = data.loc[show_for]
+            if rename is not None:
+                data.index = data.index.map(lambda x: rename.get(x, x))
+            processed.append(data)
+
+        # Ensure all have the same index order
+        idx = processed[0].index
+        for d in processed:
+            if not all(d.index == idx):
+                raise ValueError("All impact_dfs must have the same annotation categories (index) in the same order.")
+
+        # Stack into a DataFrame for scaling
+        stacked = pd.concat(processed, axis=1)
+        stacked.columns = labels
+
+        # Scale and normalize to 0-100
+        scaler = StandardScaler()
+        scaled = scaler.fit_transform(stacked)
+        scaled = (scaled - scaled.min()) / (scaled.max() - scaled.min()) * 100
+        scaled_df = pd.DataFrame(scaled, index=idx, columns=labels)
+
+        # Radar plot setup
+        categories = list(idx)
+        N = len(categories)
+        angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
+        angles += angles[:1]  # close the loop
+
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi, subplot_kw={'projection': 'polar'})
+
+        circles = [0, 25, 50, 75, 100]
+        ax.set_rticks(circles)
+        ax.set_yticklabels([])
+        num_vars = len(categories)
+        plot_angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False)
+        ax.set_rlim(0, 110)
+        for circle in circles:
+            if circle > 0:  # Skip the center point
+                points = np.array([[circle * np.cos(angle), circle * np.sin(angle)] 
+                                   for angle in plot_angles])
+                for i in range(len(points)):
+                    j = (i + 1) % len(points)
+                    ax.plot([np.arctan2(points[i, 1], points[i, 0]), 
+                             np.arctan2(points[j, 1], points[j, 0])],
+                            [np.hypot(points[i, 0], points[i, 1]), 
+                             np.hypot(points[j, 0], points[j, 1])],
+                            color='gray', alpha=0.15, linewidth=0.5)
+        for angle in plot_angles:
+            ax.plot([angle, angle], [0, 110], 
+                    color='gray', alpha=0.15, linewidth=0.5)
+
+        for i, label in enumerate(labels):
+            values = scaled_df[label].values
+            values_list = values.tolist()
+            values_list += values_list[:1]  # Repeat first value to close polygon
+            angles_plot = np.concatenate((plot_angles, [plot_angles[0]]))  # Complete the polygon
+
+            ax.plot(angles_plot, values_list, '-', linewidth=2, label=label, color=colors[i % len(colors)])
+            ax.fill(angles_plot, values_list, color=colors[i % len(colors)], alpha=0.15)
+
+        ax.tick_params(pad=20)
+
+        ax.spines['polar'].set_visible(False)
     
+        # Set category labels
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(categories, fontsize=label_size)
+        ax.set_yticks([0, 25, 50, 75, 100])
+        ax.set_yticklabels(['' for x in [0, 25, 50, 75, 100]], fontsize=label_size-4)
+        ax.set_title(f"{gene}", fontsize=label_size+2, pad=20, fontweight='bold')
+        ax.grid(False)
+        if show_legend:
+            legend = ax.legend(bbox_to_anchor=(0.5, -0.15), 
+            loc='upper center', ncol=3, frameon=False, fontsize=legend_size)
+            for text, line in zip(legend.get_texts(), legend.get_lines()):
+                text.set_color(line.get_color())
+        plt.tight_layout()
+        return fig
+
     def plot_radar(
         self, 
         genes, 
@@ -387,7 +492,187 @@ class VirtualTissue:
                                         linestyle='--', linewidth=1, alpha=0.5))
         
         plt.tight_layout()
-        
+
+
+    def plot_comparative_bar(
+        self, 
+        genes, 
+        impact_dfs, 
+        show_for=None, 
+        figsize=(20, 6), 
+        dpi=300, 
+        annot='cell_type', 
+        rename=None, 
+        label_size=20, 
+        legend_size=12, 
+        cache_path=None,
+        legend_labels=None
+    ):
+        """
+        Prettier comparative bar plot for gene impacts across cell types and datasets.
+        Bars are colored differently depending on x position (cell type), and
+        each impact_df is shown as solid, striped, or dotted bars, respectively.
+        If a gene is missing from an impact_df, its bars are set to 0.
+        """
+
+        n_dfs = len(impact_dfs)
+        n_genes = len(genes)
+
+        # Determine cell types to show
+        if show_for is not None:
+            cell_types = show_for
+        else:
+            # Use intersection of all cell types present in all dfs
+            cell_types = set(impact_dfs[0].index)
+            for df in impact_dfs[1:]:
+                cell_types = cell_types & set(df.index)
+            cell_types = list(cell_types)
+        if len(cell_types) == 0:
+            raise ValueError("No cell types to show in bar plot.")
+
+        # Prepare data: for each df, get values for cell_types and genes, and normalize per gene (min-max across cell types)
+        normed_dfs = []
+        for df in impact_dfs:
+            # If gene is missing, fill with 0
+            subdf = df.reindex(cell_types)
+            for gene in genes:
+                if gene not in subdf.columns:
+                    subdf[gene] = 0.0
+            subdf = subdf[genes]
+            normed = subdf.copy()
+            for gene in genes:
+                vals = normed[gene].values.astype(float)
+                minv = np.nanmin(vals)
+                maxv = np.nanmax(vals)
+                if np.isclose(maxv, minv):
+                    normed[gene] = 0
+                else:
+                    normed[gene] = (vals - minv) / (maxv - minv)
+            normed_dfs.append(normed)
+
+        # Do NOT sort cell types; keep the order as in cell_types for all genes
+        cell_types_per_gene = [cell_types for _ in genes]
+
+        # Set up color palette for cell types (x axis)
+        n_cell_types = len(cell_types)
+        celltype_palette = sns.color_palette("tab20", n_colors=n_cell_types)
+        bar_edge_color = "#333333"
+
+        # Define hatches for each impact_df: solid, striped, dotted
+        hatch_styles = ["", "//", "o"]
+        # If more than 3 dfs, cycle through hatches
+        hatch_cycle = cycle(hatch_styles)
+
+        # Bar chart: for each gene, plot grouped bars for each cell type, with bars for each impact_df
+        fig, axes = plt.subplots(
+            1, n_genes, 
+            figsize=figsize, 
+            dpi=dpi, 
+            sharey=True, 
+            constrained_layout=True
+        )
+        if n_genes == 1:
+            axes = [axes]
+
+        for i, gene in enumerate(genes):
+            ax = axes[i]
+            this_cell_types = cell_types_per_gene[i]
+            x = np.arange(len(this_cell_types))  # cell type positions
+            width = 0.7 / n_dfs  # width of each bar, leave some space
+
+            # Draw grid for y axis
+            ax.yaxis.grid(True, linestyle='--', linewidth=0.7, alpha=0.4, zorder=0)
+            ax.set_axisbelow(True)
+
+            for j, normed in enumerate(normed_dfs):
+                vals = normed.loc[this_cell_types, gene].values
+                label = None
+                if legend_labels is not None and j < len(legend_labels):
+                    label = legend_labels[j]
+                else:
+                    label = f"Set {j+1}"
+
+                # Pick hatch style for this impact_df
+                hatch = hatch_styles[j % len(hatch_styles)]
+
+                # For each bar, set color by cell type and hatch by impact_df
+                bar_containers = []
+                for k, ct in enumerate(this_cell_types):
+                    bar_color = celltype_palette[k % len(celltype_palette)]
+                    bar = ax.bar(
+                        x[k] + j*width - (width*(n_dfs-1)/2),
+                        vals[k],
+                        width=width,
+                        label=label if k == 0 else None,  # only label first bar for legend
+                        color=bar_color,
+                        edgecolor=bar_edge_color,
+                        linewidth=0.8,
+                        zorder=3,
+                        hatch=hatch
+                    )
+                    bar_containers.append(bar)
+
+            # Set axis
+            ax.set_xticks(x)
+            ax.set_xticklabels(
+                [rename.get(ct, ct) if rename and ct in rename else ct for ct in this_cell_types], 
+                rotation=35, ha='right', fontsize=label_size, color="#222222"
+            )
+            ax.set_title(
+                rename[gene] if rename and gene in rename else gene, 
+                size=label_size+2, 
+                color="#222222", 
+                pad=16, 
+            )
+            ax.tick_params(axis='y', labelsize=label_size, colors="#222222")
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_color("#888888")
+            ax.spines['bottom'].set_color("#888888")
+            ax.set_facecolor("#fafafa")
+            if i == 0:
+                ax.set_ylabel("Relative Impact", fontsize=label_size+1, color="#222222", labelpad=10)
+
+        # Legend for impact_dfs (hatch styles)
+        # Create custom legend handles for hatches
+        legend_handles = []
+        legend_labels_final = []
+        for j in range(n_dfs):
+            hatch = hatch_styles[j % len(hatch_styles)]
+            color = "#bbbbbb"
+            patch = mpatches.Patch(
+                facecolor=color, edgecolor=bar_edge_color, hatch=hatch, linewidth=0.8
+            )
+            if legend_labels is not None and j < len(legend_labels):
+                legend_label = legend_labels[j]
+            else:
+                legend_label = f"Set {j+1}"
+            legend_handles.append(patch)
+            legend_labels_final.append(legend_label)
+        # Place both legends
+        legend1 = fig.legend(
+            legend_handles, legend_labels_final, 
+            bbox_to_anchor=(0.5, -0.08), 
+            loc='upper center', 
+            ncol=n_dfs, 
+            fontsize=legend_size+2, 
+            frameon=False, 
+            handletextpad=0.8, 
+            columnspacing=1.2,
+            title="Dataset (bar style)",
+            title_fontsize=legend_size+2
+        )
+        for text in legend1.get_texts():
+            text.set_color("#222222")
+
+        # Remove excess whitespace and prettify layout
+        plt.subplots_adjust(wspace=0.18, bottom=0.28, top=0.90)
+        fig.patch.set_facecolor("#ffffff")
+        plt.tight_layout()
+
+        if cache_path is not None:
+            plt.savefig(cache_path, bbox_inches='tight', dpi=dpi, facecolor=fig.get_facecolor())
+        return fig
     
 class SubsampledTissue(VirtualTissue):
     

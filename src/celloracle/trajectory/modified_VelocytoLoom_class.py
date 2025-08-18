@@ -115,6 +115,7 @@ class modified_VelocytoLoom():
         score = log_cv - ff
         if sort_inverse:
             score = - score
+        N = min(N, Sf.shape[0] - 1)
         nth_score = np.sort(score)[::-1][N]
         if plot:
             scatter_viz(log_m[score > nth_score], log_cv[score > nth_score], s=3, alpha=0.4, c="tab:red")

@@ -513,13 +513,17 @@ class Cartography:
             # Create a mask for highlighted cells
             plot_df['highlighted'] = plot_df[hue].isin(highlight_clusters)
             
+            vector_magnitudes = np.linalg.norm(V_simulated, axis=1)
+            vector_magnitudes = 0.1 + 0.9 * (vector_magnitudes - vector_magnitudes.min()) / (vector_magnitudes.max() - vector_magnitudes.min())
+            vector_magnitudes = np.clip(vector_magnitudes, 0.1, 0.95)
+
             sns.scatterplot(
                 data=plot_df,
                 x='x', y='y',
                 hue=hue, 
                 s=scatter_size,
                 ax=ax,
-                alpha=alpha,
+                alpha=vector_magnitudes,
                 edgecolor='black',
                 linewidth=linewidth,
                 palette=highlight_color_dict,
@@ -542,9 +546,6 @@ class Cartography:
                 legend=not legend_on_loc
             )
             
-
-        
-        
         if highlight_clusters is not None:
             highlighted_regions = np.zeros(len(grid_points), dtype=bool)
             
@@ -600,7 +601,7 @@ class Cartography:
                         highlighted_vectors[:, 0], highlighted_vectors[:, 1], 
                         angles='xy', scale_units='xy', scale=1, 
                         headwidth=3, headlength=3, headaxislength=3,
-                        width=0.002, alpha=0.9
+                        width=0.002, alpha=vector_magnitudes
                     )
                     
                 
