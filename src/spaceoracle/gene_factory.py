@@ -145,6 +145,8 @@ class GeneFactory(BaseTravLR):
             obs_names=obs_names
         )
         
+        self.obs_names = obs_names
+        
         self.status.update('Loading betas - Done')
         self.status.color = 'black_on_green'
         self.status.refresh()
@@ -157,19 +159,19 @@ class GeneFactory(BaseTravLR):
         self.update_status(f'{self.current_target} >> Computing received ligands', color='black_on_cyan')
         gex_df = pd.DataFrame(
             gene_mtx, 
-            index=self.adata.obs_names, 
+            index=self.obs_names, 
             columns=self.adata.var_names
         )
         
         if len(genes) > 0:
             weighted_ligands = received_ligands(
-                xy=self.adata.obsm['spatial'], 
+                xy=self.adata[self.obs_names].obsm['spatial'], 
                 ligands_df=get_filtered_df(gex_df, cell_thresholds, genes),
                 lr_info=self.lr,
                 scale_factor=self.scale_factor
         )
         else:
-            weighted_ligands = pd.DataFrame(index=self.adata.obs.index)
+            weighted_ligands = pd.DataFrame(index=self.obs_names)
         
         return weighted_ligands
     
@@ -178,18 +180,6 @@ class GeneFactory(BaseTravLR):
         self.status.color = color
         self.status.refresh()
 
-    # def _process_gene(
-    #     self, 
-    #     item, 
-    #     weighted_ligands, 
-    #     weighted_ligands_tfl, 
-    #     filtered_df):
-        
-    #     gene, betadata = item
-    #     return gene, self._combine_gene_wbetas(
-    #         weighted_ligands, weighted_ligands_tfl, filtered_df, betadata)
-    
-    
     def _get_wbetas_dict(
         self, 
         betas_dict, 
@@ -201,7 +191,7 @@ class GeneFactory(BaseTravLR):
         gex_df = get_filtered_df(       # mask out receptors too
             counts_df=pd.DataFrame(
                 gene_mtx, 
-                index=self.adata.obs_names, 
+                index=self.obs_names, 
                 columns=self.adata.var_names
             ),
             cell_thresholds=cell_thresholds,
@@ -212,20 +202,6 @@ class GeneFactory(BaseTravLR):
             f'[{self.iter}/{self.max_iter}] | Computing Ligand interactions', 
             color='black_on_salmon')
         
-        # process_gene_partial = partial(
-        #     self._process_gene, 
-        #     weighted_ligands=weighted_ligands, 
-        #     weighted_ligands_tfl=weighted_ligands_tfl, 
-        #     filtered_df=gex_df
-        # )
-        
-        # results = pqdm(
-        #     betas_dict.data.items(), 
-        #     process_gene_partial, 
-        #     n_jobs=8, 
-        #     tqdm_class=tqdm
-        # )
-
         out_dict = {}
         
         for i, (gene, betadata) in enumerate(betas_dict.data.items()):
@@ -243,7 +219,6 @@ class GeneFactory(BaseTravLR):
             
         self.update_status(f'Ligand interactions - Done')
 
-        # return dict(results)
         return out_dict
 
     def _combine_gene_wbetas(self, rw_ligands, rw_ligands_tfl, filtered_df, betadata, grn_tfs=None):
@@ -262,6 +237,7 @@ class GeneFactory(BaseTravLR):
         bdb = Betabase(self.adata, self.save_dir, subsample=subsample, float16=float16, obs_names=obs_names)
         self.ligands = list(bdb.ligands_set)
         self.tfl_ligands = list(bdb.tfl_ligands_set)
+
         return bdb
     
     def splash_betas(self, gene, obs_names=None):
@@ -339,7 +315,9 @@ class GeneFactory(BaseTravLR):
         
         self.current_target = output_name
         
-        gene_mtx = self.adata.layers['imputed_count'].copy()
+        obs = self.obs_names
+        
+        gene_mtx = self.adata.to_df(layer='imputed_count').loc[obs]
         self.payload_dict = payload_dict
 
         if isinstance(gene_mtx, pd.DataFrame):
@@ -362,14 +340,13 @@ class GeneFactory(BaseTravLR):
         delta_simulated = delta_input.copy() 
 
         if self.beta_dict is None:
-            self.beta_dict = self._get_spatial_betas_dict() 
+            self.beta_dict = self._get_spatial_betas_dict(obs_names=self.obs_names) 
 
         # get LR specific filtered gex contributions
-        cell_thresholds = self.adata.uns.get('cell_thresholds').loc[self.adata.obs_names]
+        cell_thresholds = self.adata.uns.get('cell_thresholds').loc[obs]
         if cell_thresholds is not None:
-            # Only commot LR values should be filtered
             cell_thresholds = cell_thresholds.reindex(              
-                index=self.adata.obs_names, columns=self.adata.var_names, fill_value=1)
+                index=obs, columns=self.adata.var_names, fill_value=1)
             self.adata.uns['cell_thresholds'] = cell_thresholds
         else:
             print('warning: cell_thresholds not found in adata.uns')
@@ -388,13 +365,15 @@ class GeneFactory(BaseTravLR):
         rw_ligands_0 = pd.concat(
                 [rw_ligands_0, rw_tfligands_0], axis=1
             ).groupby(level=0, axis=1).max().reindex(
-                index=self.adata.obs_names, 
-                columns=self.adata.var_names, fill_value=0)
+                index=obs, 
+                columns=self.adata.var_names, 
+                fill_value=0
+            )
 
         
         all_ligands = list(set(self.ligands) | set(self.tfl_ligands))
         ligands_0 = self.adata.to_df(layer='imputed_count')[all_ligands].reindex(
-            index=self.adata.obs_names, 
+            index=self.obs_names, 
             columns=self.adata.var_names, 
             fill_value=0
         )
@@ -402,7 +381,7 @@ class GeneFactory(BaseTravLR):
 
         all_ligands = list(set(self.ligands) | set(self.tfl_ligands))
         ligands_0 = self.adata.to_df(layer='imputed_count')[all_ligands].reindex(
-            index=self.adata.obs_names, 
+            index=self.obs_names, 
             columns=self.adata.var_names, 
             fill_value=0
         )
@@ -438,7 +417,7 @@ class GeneFactory(BaseTravLR):
             rw_ligands_1 = pd.concat(
                 [w_ligands_1, w_tfligands_1], axis=1
             ).groupby(level=0, axis=1).max().reindex(      # w_ligands <= w_tfligands because of cell_thresholds
-                index=self.adata.obs_names, 
+                index=self.obs_names, 
                 columns=self.adata.var_names, 
                 fill_value=0
             )
@@ -449,13 +428,13 @@ class GeneFactory(BaseTravLR):
             gene_df_1 = pd.DataFrame(
                 gene_mtx_1,
                 columns=self.adata.var_names,
-                index=self.adata.obs_names
+                index=obs
             )
 
             ligands_1 = pd.concat(
                 [gene_df_1[self.ligands], gene_df_1[self.tfl_ligands]], axis=1
             ).groupby(level=0, axis=1).max().reindex(
-                index=self.adata.obs_names, 
+                index=obs, 
                 columns=self.adata.var_names, 
                 fill_value=0
             )
@@ -516,7 +495,7 @@ class GeneFactory(BaseTravLR):
         if save_layer:
             self.adata.layers[output_name] = gem_simulated
             
-        gex_out = pd.DataFrame(gem_simulated, index=self.adata.obs_names, columns=self.adata.var_names)
+        gex_out = pd.DataFrame(gem_simulated, index=obs, columns=self.adata.var_names)
         gex_out.index.name = output_name
             
         return gex_out

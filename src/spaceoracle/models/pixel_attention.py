@@ -18,6 +18,7 @@ device = torch.device(
     else "cpu"
 )
 
+use_conditional_conv = device == 'gpu'
 
 class _cluster_routing(nn.Module):
 
@@ -117,7 +118,11 @@ class NicheAttentionNetwork(nn.Module):
         self.out_channels = in_channels
         self.spatial_dim = spatial_dim
         self.dim = n_regulators+1
-        # self.conditional_conv = ConditionalConv2D(self.in_channels, self.in_channels, 1, num_experts=self.in_channels)
+        
+        # if use_conditional_conv:
+        #     self.conditional_conv = ConditionalConv2D(
+        #         self.in_channels, self.in_channels, 1, num_experts=self.in_channels)
+        
         self.conditional_conv = nn.Conv2d(self.in_channels, self.in_channels, 1)
 
         self.sigmoid = nn.Sigmoid()
