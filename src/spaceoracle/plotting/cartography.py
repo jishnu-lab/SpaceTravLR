@@ -515,7 +515,7 @@ class Cartography:
             
             vector_magnitudes = np.linalg.norm(V_simulated, axis=1)
             vector_magnitudes = 0.1 + 0.9 * (vector_magnitudes - vector_magnitudes.min()) / (vector_magnitudes.max() - vector_magnitudes.min())
-            vector_magnitudes = np.clip(vector_magnitudes, 0.1, 0.95)
+            vector_magnitudes = np.clip(vector_magnitudes, 0.01, 1) * alpha
 
             sns.scatterplot(
                 data=plot_df,
@@ -524,6 +524,7 @@ class Cartography:
                 s=scatter_size,
                 ax=ax,
                 alpha=vector_magnitudes,
+                # alpha=0.1,
                 edgecolor='black',
                 linewidth=linewidth,
                 palette=highlight_color_dict,
@@ -974,6 +975,7 @@ class Cartography:
                 legend=not legend_on_loc
             )
         else:
+            print('!!!!!!')
             # Standard plotting
             plot_df['highlighted'] = True
             
