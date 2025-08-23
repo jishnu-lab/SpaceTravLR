@@ -3,6 +3,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+device = torch.device(
+    "mps" if torch.backends.mps.is_available() 
+    else "cuda" if torch.cuda.is_available() 
+    else "cpu"
+)
 
 def cosine_annealing(epoch, total_epochs):
     return (0.5 * (1 + np.cos(np.pi * (epoch - 0) / total_epochs))) 
@@ -104,7 +109,104 @@ class ViT(nn.Module):
         
         
 
+
+
+class SkeletonViT(nn.Module):
+    def __init__(self, n_modulators, in_channels, anchors=None, spatial_dim=64, n_patches=4, n_blocks=4, hidden_d=16, n_heads=8):
+        super().__init__()
+        
+        self.dim = n_modulators+1
+        if anchors is None:
+            anchors = np.ones(self.dim)
+
+        self.anchors = torch.from_numpy(anchors).float().to(device)
+        
+        self.in_channels = in_channels
+        self.spatial_dim = spatial_dim
+        
+        chw = (in_channels, spatial_dim, spatial_dim) # ( C , H , W )
+        self.n_patches = n_patches
+        self.n_blocks = n_blocks
+        self.n_heads = n_heads
+        self.hidden_d = hidden_d
+        
+        # Input and patches sizes
+        assert chw[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
+        assert chw[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
+        self.patch_size = (chw[1] / n_patches, chw[2] / n_patches)
+
+        self.input_d = int(chw[0] * self.patch_size[0] * self.patch_size[1])
+        self.linear_mapper = nn.Linear(self.input_d, self.hidden_d)
+        
+        self.class_token = nn.Parameter(torch.rand(1, self.hidden_d))       # Consider removing
+        self.pos_embed = nn.Parameter(get_positional_embeddings(self.n_patches ** 2 + 1, self.hidden_d))
+        self.pos_embed.requires_grad = False
+
+        self.cluster_embed = nn.Embedding(self.in_channels, self.hidden_d)
+        
+        self.blocks = nn.ModuleList(
+            [ViTBlock(hidden_d, n_heads) for _ in range(n_blocks)])
+
+        self.mlp = nn.Sequential(
+            nn.Linear(self.hidden_d, 32),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(32, 16),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(16, self.dim)
+        )
+
+        self.alpha = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+        # self.alpha = 5e-2
+
+        self.e = 0
+
+    def forward(self, images, inputs_labels):
+        n, c, h, w = images.shape 
+        patches = patchify(images, self.n_patches).to(self.pos_embed.device)
+        
+        tokens = self.linear_mapper(patches) 
+        tokens = torch.cat((self.class_token.expand(n, 1, -1), tokens), dim=1)
+        out = tokens + self.pos_embed.repeat(n, 1, 1)
+        
+        for j, block in enumerate(self.blocks):
+            out = block(out)
+            
+        out = out[:, 0]
+
+        emb = self.cluster_embed(inputs_labels) * 1
+        # out = torch.concat([out, emb], dim=1)
+        out = out + emb
+        betas = self.mlp(out)
+
+        return betas
+        
     
+    def get_att_weights(self, images):
+        n, c, h, w = images.shape 
+        patches = patchify(images, self.n_patches).to(self.pos_embed.device)
+        
+        tokens = self.linear_mapper(patches)
+        tokens = torch.cat((self.class_token.expand(n, 1, -1), tokens), dim=1)
+        out = tokens + self.pos_embed.repeat(n, 1, 1)
+        
+        att_weights = []   # (n_blocks, batch, n_heads, seqs, seqs) where seqs is flattened patches
+        for block in self.blocks:
+            out, att = block.forward_att(out)
+            att_weights.append(att)
+        
+        return att_weights
+
+
+    def __repr__(self):
+        return self.__str__()
+        
+        
+
+
+    
+
 
 
     

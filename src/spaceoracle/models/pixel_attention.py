@@ -10,6 +10,8 @@ import functools
 from torch.nn.utils.parametrizations import weight_norm
 from sklearn.linear_model import ARDRegression
 
+from spaceoracle.models.vit_blocks import ViTBlock, get_positional_embeddings, patchify
+
 pyro.clear_param_store()
 
 device = torch.device(
@@ -259,6 +261,120 @@ class CellularNicheNetwork(nn.Module):
                 betas[:, 1:].unsqueeze(2)
             ).squeeze(1).squeeze(1) + \
                 betas[:, 0]
+    
+    def forward(self, spatial_maps, inputs_x, spatial_features):
+        betas = self.get_betas(spatial_maps, spatial_features)
+        y_pred = self.predict_y(inputs_x, betas)
+        
+        return y_pred
+    
+    
+    
+    
+    
+class CellularViT(nn.Module):
+    
+    @classmethod
+    def from_pretrained(cls, trained_model, n_modulators, anchors=None, spatial_dim=64, n_clusters=7):
+        cnn = cls.make_vision_model()
+        cnn.load_state_dict(trained_model.conv_layers.state_dict())
+        model = cls(n_modulators, anchors, spatial_dim, n_clusters)
+        model.conv_layers = cnn
+        return model
+
+     
+    def __init__(self, n_modulators, anchors=None, spatial_dim=64, n_clusters=7, n_patches=4, n_blocks=4, hidden_d=16, n_heads=8):
+        super().__init__()
+        in_channels = 1
+        self.out_channels = 1
+        self.spatial_dim = spatial_dim
+        self.dim = n_modulators+1
+        if anchors is None:
+            anchors = np.ones(self.dim)
+
+        self.anchors = torch.from_numpy(anchors).float().to(device)
+        
+        self.dim = n_modulators+1
+        if anchors is None:
+            anchors = np.ones(self.dim)
+
+        self.anchors = torch.from_numpy(anchors).float().to(device)
+        
+        self.in_channels = in_channels
+        self.spatial_dim = spatial_dim
+        
+        chw = (in_channels, spatial_dim, spatial_dim) # ( C , H , W )
+        self.n_patches = n_patches
+        self.n_blocks = n_blocks
+        self.n_heads = n_heads
+        self.hidden_d = hidden_d
+        
+        # Input and patches sizes
+        assert chw[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
+        assert chw[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
+        
+        self.patch_size = (chw[1] / n_patches, chw[2] / n_patches)
+
+        self.input_d = int(chw[0] * self.patch_size[0] * self.patch_size[1])
+        self.linear_mapper = nn.Linear(self.input_d, self.hidden_d)
+        
+        self.class_token = nn.Parameter(torch.rand(1, self.hidden_d))       # Consider removing
+        self.pos_embed = nn.Parameter(get_positional_embeddings(self.n_patches ** 2 + 1, self.hidden_d))
+        self.pos_embed.requires_grad = False
+
+        self.blocks = nn.ModuleList(
+            [ViTBlock(hidden_d, n_heads) for _ in range(n_blocks)])
+
+
+        self.spatial_features_mlp = nn.Sequential(
+            nn.Linear(n_clusters, 16),
+            nn.PReLU(init=0.1),
+            nn.Linear(16, 32),
+            nn.PReLU(init=0.1),
+            nn.Linear(32, self.hidden_d)
+        )
+
+
+        self.mlp = nn.Sequential(
+            nn.Linear(self.hidden_d, 32),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(32, 16),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(16, self.dim)
+        )
+
+        self.output_activation = nn.Sigmoid()
+    
+    
+    def get_betas(self, spatial_maps, spatial_features):
+        n, c, h, w = spatial_maps.shape 
+        patches = patchify(spatial_maps, self.n_patches).to(self.pos_embed.device)
+        sp_out = self.spatial_features_mlp(spatial_features)
+        tokens = self.linear_mapper(patches) 
+        tokens = torch.cat((self.class_token.expand(n, 1, -1), tokens), dim=1)
+        out = tokens + self.pos_embed.repeat(n, 1, 1)
+        
+        for j, block in enumerate(self.blocks):
+            out = block(out)
+            
+            
+        print(out[:, 0].shape, sp_out.shape)
+            
+        betas = self.mlp(out[:, 0]+sp_out)
+        betas = self.output_activation(betas) * 1.5
+        
+        return betas*self.anchors
+    
+    @staticmethod
+    def predict_y(inputs_x, betas):
+        return torch.matmul(
+                inputs_x.unsqueeze(1), 
+                betas[:, 1:].unsqueeze(2)
+            ).squeeze(1).squeeze(1) + \
+                betas[:, 0]
+                
     
     def forward(self, spatial_maps, inputs_x, spatial_features):
         betas = self.get_betas(spatial_maps, spatial_features)
