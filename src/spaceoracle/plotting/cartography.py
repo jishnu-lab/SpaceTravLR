@@ -20,6 +20,7 @@ import glob
 from .modplot import velovect, animate_velovect
 from scipy.interpolate import griddata
 from sklearn.neighbors import KNeighborsRegressor
+from adjustText import adjust_text
 
 
 def normalize_gradient(gradient, method="sqrt"):
@@ -515,7 +516,7 @@ class Cartography:
             
             vector_magnitudes = np.linalg.norm(V_simulated, axis=1)
             vector_magnitudes = 0.1 + 0.9 * (vector_magnitudes - vector_magnitudes.min()) / (vector_magnitudes.max() - vector_magnitudes.min())
-            vector_magnitudes = np.clip(vector_magnitudes, 0.1, 0.95)
+            vector_magnitudes = np.clip(vector_magnitudes, 0.01, 1) * alpha
 
             sns.scatterplot(
                 data=plot_df,
@@ -524,6 +525,7 @@ class Cartography:
                 s=scatter_size,
                 ax=ax,
                 alpha=vector_magnitudes,
+                # alpha=0.1,
                 edgecolor='black',
                 linewidth=linewidth,
                 palette=highlight_color_dict,
@@ -636,6 +638,7 @@ class Cartography:
         all_cts = self.adata.obs[hue]
 
         if legend_on_loc:
+            texts = []
             for cluster in sorted(all_cts.unique()):
                 cluster_cells = all_cts == cluster
                 x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
@@ -647,7 +650,7 @@ class Cartography:
                 else:
                     color = alt_colors[cluster]
                 
-                ax.text(x, y, rename.get(cluster, cluster), 
+                text = ax.text(x, y, rename.get(cluster, cluster), 
                         fontsize=legend_fontsize, 
                         ha='center', 
                         va='center',
@@ -659,6 +662,13 @@ class Cartography:
                             boxstyle='round',
                             linewidth=0.15
                         ))
+                texts.append(text)
+            
+            # Adjust text positions to prevent overlaps
+            if texts:
+                adjust_text(texts, 
+                           arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.7),
+                           ax=ax)
                 
         
         if not legend_on_loc:
@@ -830,6 +840,7 @@ class Cartography:
         all_cts = self.adata.obs[hue]
 
         if legend_on_loc:
+            texts = []
             for cluster in all_cts.unique():
                 cluster_cells = all_cts == cluster
                 x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
@@ -841,7 +852,7 @@ class Cartography:
                 else:
                     color = alt_colors[cluster]
                 
-                ax.text(x, y, rename.get(cluster, cluster), 
+                text = ax.text(x, y, rename.get(cluster, cluster), 
                         fontsize=legend_fontsize, 
                         ha='center', 
                         va='center',
@@ -853,6 +864,13 @@ class Cartography:
                             boxstyle='round',
                             linewidth=0.15
                         ))
+                texts.append(text)
+            
+            # Adjust text positions to prevent overlaps
+            if texts:
+                adjust_text(texts, 
+                           arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.7),
+                           ax=ax)
                 
         
         if not legend_on_loc:
@@ -1003,6 +1021,7 @@ class Cartography:
         all_cts = adata.obs[hue]
 
         if legend_on_loc:
+            texts = []
             for cluster in all_cts.unique():
                 cluster_cells = all_cts == cluster
                 x = np.mean(adata.obsm[basis][cluster_cells, 0])
@@ -1014,7 +1033,7 @@ class Cartography:
                 else:
                     color = color_dict[cluster]
                 
-                ax.text(x, y, rename.get(cluster, cluster), 
+                text = ax.text(x, y, rename.get(cluster, cluster), 
                         fontsize=legend_fontsize, 
                         ha='center', 
                         va='center',
@@ -1026,6 +1045,13 @@ class Cartography:
                             boxstyle='round',
                             linewidth=0.15
                         ))
+                texts.append(text)
+            
+            # Adjust text positions to prevent overlaps
+            if texts:
+                adjust_text(texts, 
+                           arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.7),
+                           ax=ax)
         
         if not legend_on_loc:
             if highlight_clusters is not None:
