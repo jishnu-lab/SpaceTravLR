@@ -6,7 +6,7 @@ import seaborn as sns
 import matplotlib as mpl
 from itertools import cycle
 from scipy.stats import pearsonr
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
 import glob
 import enlighten
 import numpy as np
@@ -327,6 +327,24 @@ class VirtualTissue:
         scaled = (scaled - scaled.min()) / (scaled.max() - scaled.min()) * 100
         scaled_df = pd.DataFrame(scaled, index=idx, columns=labels)
 
+        # Filter out methods with no variance after normalization
+        methods_to_plot = []
+        colors_to_plot = []
+        for i, label in enumerate(labels):
+            variance = scaled_df[label].var()
+            if variance > 1e-6:  # Only include methods with variance
+                methods_to_plot.append(label)
+                colors_to_plot.append(colors[i])
+
+        # If no methods have variance, return empty plot
+        if len(methods_to_plot) == 0:
+            fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+            ax.text(0.5, 0.5, f'No variance in data for {gene}', 
+                   ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f"{gene}", fontsize=label_size+2, pad=20, fontweight='bold')
+            plt.tight_layout()
+            return fig
+
         # Radar plot setup
         categories = list(idx)
         N = len(categories)
@@ -356,14 +374,14 @@ class VirtualTissue:
             ax.plot([angle, angle], [0, 110], 
                     color='gray', alpha=0.15, linewidth=0.5)
 
-        for i, label in enumerate(labels):
+        for i, label in enumerate(methods_to_plot):
             values = scaled_df[label].values
             values_list = values.tolist()
             values_list += values_list[:1]  # Repeat first value to close polygon
             angles_plot = np.concatenate((plot_angles, [plot_angles[0]]))  # Complete the polygon
 
-            ax.plot(angles_plot, values_list, '-', linewidth=2, label=label, color=colors[i % len(colors)])
-            ax.fill(angles_plot, values_list, color=colors[i % len(colors)], alpha=0.15)
+            ax.plot(angles_plot, values_list, '-', linewidth=2, label=label, color=colors_to_plot[i])
+            ax.fill(angles_plot, values_list, color=colors_to_plot[i], alpha=0.15)
 
         ax.tick_params(pad=20)
 
@@ -376,7 +394,7 @@ class VirtualTissue:
         ax.set_yticklabels(['' for x in [0, 25, 50, 75, 100]], fontsize=label_size-4)
         ax.set_title(f"{gene}", fontsize=label_size+2, pad=20, fontweight='bold')
         ax.grid(False)
-        if show_legend:
+        if show_legend and len(methods_to_plot) > 0:
             legend = ax.legend(bbox_to_anchor=(0.5, -0.15), 
             loc='upper center', ncol=3, frameon=False, fontsize=legend_size)
             for text, line in zip(legend.get_texts(), legend.get_lines()):
@@ -394,16 +412,24 @@ class VirtualTissue:
         annot='cell_type', 
         rename=None,
         label_size=20,
+        normalize=True,
         legend_size=12,
-        cache_path=None, 
+        cache_path=None,
+        colors=None,
+        fig=None,
+        axes=None
         ):
         
         if isinstance(genes[0], str):
             genes = [genes]
             
         splits = len(genes)
-        fig, axs = plt.subplots(1, splits, figsize=figsize, dpi=dpi,
-            subplot_kw={'projection': 'polar'})
+        if axes is None:
+            fig, axs = plt.subplots(1, splits, figsize=figsize, dpi=dpi,
+                subplot_kw={'projection': 'polar'})
+        else:
+            axs = axes
+            fig = fig
         
         if splits == 1:
             axs = [axs]
@@ -420,16 +446,25 @@ class VirtualTissue:
         if rename is not None:
             impact_df.index = impact_df.index.map(lambda x: rename.get(x, x))
         
-        ko_concat_norm = pd.DataFrame(
-            StandardScaler().fit_transform(impact_df),
-            index=impact_df.index, 
-            columns=impact_df.columns
-        )
+        if normalize:
+            ko_concat_norm = pd.DataFrame(
+                StandardScaler().fit_transform(impact_df),
+                # RobustScaler().fit_transform(impact_df),
+                # MinMaxScaler().fit_transform(impact_df),
+                index=impact_df.index, 
+                columns=impact_df.columns
+            )
+            
+        else:
+            ko_concat_norm = impact_df
 
         ko_concat_norm = (ko_concat_norm - ko_concat_norm.min().min()) /\
             (ko_concat_norm.max().max() - ko_concat_norm.min().min()) * 100
-
-        for ax, geneset in zip(axs, genes):
+        
+        if not normalize:
+            ko_concat_norm = ko_concat_norm * 5
+            
+        for ax_idx, (ax, geneset) in enumerate(zip(axs, genes)):
             ax.grid(False)
             circles = [0, 25, 50, 75, 100]
             ax.set_rticks(circles)
@@ -445,11 +480,20 @@ class VirtualTissue:
                     # Connect the points to form the polygon
                     for i in range(len(points)):
                         j = (i + 1) % len(points)
-                        ax.plot([np.arctan2(points[i, 1], points[i, 0]), 
-                                np.arctan2(points[j, 1], points[j, 0])],
-                               [np.hypot(points[i, 0], points[i, 1]), 
-                                np.hypot(points[j, 0], points[j, 1])],
-                               color='gray', alpha=0.15, linewidth=0.5)
+                        
+                        # Make the innermost polygon (circle == 25) dotted and more visible
+                        if circle == -1:
+                            ax.plot([np.arctan2(points[i, 1], points[i, 0]), 
+                                    np.arctan2(points[j, 1], points[j, 0])],
+                                   [np.hypot(points[i, 0], points[i, 1]), 
+                                    np.hypot(points[j, 0], points[j, 1])],
+                                   color='gray', alpha=0.6, linewidth=2, linestyle='--')
+                        else:
+                            ax.plot([np.arctan2(points[i, 1], points[i, 0]), 
+                                    np.arctan2(points[j, 1], points[j, 0])],
+                                   [np.hypot(points[i, 0], points[i, 1]), 
+                                    np.hypot(points[j, 0], points[j, 1])],
+                                   color='gray', alpha=0.35, linewidth=0.5)
             
             for angle in angles:
                 ax.plot([angle, angle], [0, 110], 
@@ -465,8 +509,21 @@ class VirtualTissue:
                     
                     angles_plot = np.concatenate((angles, [angles[0]]))  # Complete the polygon
 
-                    ax.plot(angles_plot, values_list, '-', linewidth=1, label=label)
-                    ax.fill(angles_plot, values_list, alpha=0.15)
+                    # Use custom color if provided, otherwise use default matplotlib colors
+                    color = None
+                    if colors:
+                        # Check if colors is a list of lists (one list per geneset)
+                        if isinstance(colors[0], (list, tuple)) if len(colors) > 0 else False:
+                            # Use colors for the current geneset (ax_idx)
+                            if ax_idx < len(colors) and i < len(colors[ax_idx]):
+                                color = colors[ax_idx][i]
+                        else:
+                            # Use colors as a simple list for all genesets
+                            if i < len(colors):
+                                color = colors[i]
+                    
+                    ax.plot(angles_plot, values_list, '-', linewidth=1, label=label, color=color)
+                    ax.fill(angles_plot, values_list, alpha=0.3, color=color)
 
             ax.set_xticks(angles)
             labels = ko_concat_norm.index
@@ -480,18 +537,20 @@ class VirtualTissue:
             ax.spines['polar'].set_visible(False)
             
             legend = ax.legend(bbox_to_anchor=(0.5, -0.15), 
-                loc='upper center', ncol=3, frameon=False, fontsize=legend_size)
+                loc='upper center', ncol=2, frameon=False, fontsize=legend_size)
             if legend:
                 for text, line in zip(legend.get_texts(), legend.get_lines()):
                     text.set_color(line.get_color())
 
-        if splits > 1:
-            for i in range(1, splits):
-                fig.add_artist(plt.Line2D([i/splits, i/splits], [0.1, 0.9], 
-                                        transform=fig.transFigure, color='black', 
-                                        linestyle='--', linewidth=1, alpha=0.5))
+        # if splits > 1:
+        #     for i in range(1, splits):
+        #         fig.add_artist(plt.Line2D([i/splits, i/splits], [0.1, 0.9], 
+        #                                 transform=fig.transFigure, color='black', 
+        #                                 linestyle='--', linewidth=1, alpha=0.5))
         
         plt.tight_layout()
+        
+        return fig, axs
 
 
     def plot_comparative_bar(

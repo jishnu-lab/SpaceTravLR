@@ -360,8 +360,6 @@ class CellularViT(nn.Module):
             out = block(out)
             
             
-        print(out[:, 0].shape, sp_out.shape)
-            
         betas = self.mlp(out[:, 0]+sp_out)
         betas = self.output_activation(betas) * 1.5
         

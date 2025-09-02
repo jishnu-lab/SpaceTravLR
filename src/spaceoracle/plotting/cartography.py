@@ -20,6 +20,7 @@ import glob
 from .modplot import velovect, animate_velovect
 from scipy.interpolate import griddata
 from sklearn.neighbors import KNeighborsRegressor
+from adjustText import adjust_text
 
 
 def normalize_gradient(gradient, method="sqrt"):
@@ -637,6 +638,7 @@ class Cartography:
         all_cts = self.adata.obs[hue]
 
         if legend_on_loc:
+            texts = []
             for cluster in sorted(all_cts.unique()):
                 cluster_cells = all_cts == cluster
                 x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
@@ -648,7 +650,7 @@ class Cartography:
                 else:
                     color = alt_colors[cluster]
                 
-                ax.text(x, y, rename.get(cluster, cluster), 
+                text = ax.text(x, y, rename.get(cluster, cluster), 
                         fontsize=legend_fontsize, 
                         ha='center', 
                         va='center',
@@ -660,6 +662,13 @@ class Cartography:
                             boxstyle='round',
                             linewidth=0.15
                         ))
+                texts.append(text)
+            
+            # Adjust text positions to prevent overlaps
+            if texts:
+                adjust_text(texts, 
+                           arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.7),
+                           ax=ax)
                 
         
         if not legend_on_loc:
@@ -831,6 +840,7 @@ class Cartography:
         all_cts = self.adata.obs[hue]
 
         if legend_on_loc:
+            texts = []
             for cluster in all_cts.unique():
                 cluster_cells = all_cts == cluster
                 x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
@@ -842,7 +852,7 @@ class Cartography:
                 else:
                     color = alt_colors[cluster]
                 
-                ax.text(x, y, rename.get(cluster, cluster), 
+                text = ax.text(x, y, rename.get(cluster, cluster), 
                         fontsize=legend_fontsize, 
                         ha='center', 
                         va='center',
@@ -854,6 +864,13 @@ class Cartography:
                             boxstyle='round',
                             linewidth=0.15
                         ))
+                texts.append(text)
+            
+            # Adjust text positions to prevent overlaps
+            if texts:
+                adjust_text(texts, 
+                           arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.7),
+                           ax=ax)
                 
         
         if not legend_on_loc:
@@ -975,7 +992,6 @@ class Cartography:
                 legend=not legend_on_loc
             )
         else:
-            print('!!!!!!')
             # Standard plotting
             plot_df['highlighted'] = True
             
@@ -1005,6 +1021,7 @@ class Cartography:
         all_cts = adata.obs[hue]
 
         if legend_on_loc:
+            texts = []
             for cluster in all_cts.unique():
                 cluster_cells = all_cts == cluster
                 x = np.mean(adata.obsm[basis][cluster_cells, 0])
@@ -1016,7 +1033,7 @@ class Cartography:
                 else:
                     color = color_dict[cluster]
                 
-                ax.text(x, y, rename.get(cluster, cluster), 
+                text = ax.text(x, y, rename.get(cluster, cluster), 
                         fontsize=legend_fontsize, 
                         ha='center', 
                         va='center',
@@ -1028,6 +1045,13 @@ class Cartography:
                             boxstyle='round',
                             linewidth=0.15
                         ))
+                texts.append(text)
+            
+            # Adjust text positions to prevent overlaps
+            if texts:
+                adjust_text(texts, 
+                           arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.7),
+                           ax=ax)
         
         if not legend_on_loc:
             if highlight_clusters is not None:

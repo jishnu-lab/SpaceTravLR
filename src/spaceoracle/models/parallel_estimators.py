@@ -13,7 +13,7 @@ from sklearn.linear_model import ARDRegression, BayesianRidge
 from group_lasso import GroupLasso
 from spaceoracle.models.spatial_map import xyc2spatial_fast
 from spaceoracle.tools.network import RegulatoryFactory, expand_paired_interactions
-from .pixel_attention import CellularNicheNetwork
+from .pixel_attention import CellularNicheNetwork, CellularViT
 from ..tools.utils import gaussian_kernel_2d, is_mouse_data, set_seed
 import commot as ct
 from scipy.spatial.distance import cdist
@@ -660,17 +660,22 @@ class SpatialCellularProgramsEstimator:
         batch_size=512, 
         pbar=None, 
         estimator='lasso',
+        vision_model='cnn',
         score_threshold=0.2, 
         l1_reg=1e-9,
+        subsample=None,
         skip_clusters=None):
         
         sp_maps, X, y, cluster_labels = self.init_data()
-
+        
         if skip_clusters is None:
             skip_clusters = []
 
         assert estimator in ['lasso', 'bayesian', 'ard']
+        assert vision_model in ['cnn', 'transformer']
+        
         self.estimator = estimator
+        self.vision_model = vision_model
         self.models = {}
         self.Xn = X
         self.yn = y
@@ -695,6 +700,8 @@ class SpatialCellularProgramsEstimator:
             
             
         self.scores = {}
+        
+        self.loss_dict = {}
 
         for cluster in np.unique(cluster_labels):
             if int(cluster) in skip_clusters:
@@ -774,8 +781,18 @@ class SpatialCellularProgramsEstimator:
             )
 
             assert _betas.shape[0] == len(self.modulators)+1
+            
+            if self.vision_model == 'cnn':
 
-            model = CellularNicheNetwork(
+                model = CellularNicheNetwork(
+                        n_modulators = len(self.modulators), 
+                        anchors=_betas,
+                        spatial_dim=self.spatial_dim,
+                        n_clusters=self.n_clusters
+                    ).to(self.device)
+                
+            elif self.vision_model == 'transformer':
+                model = CellularViT(
                     n_modulators = len(self.modulators), 
                     anchors=_betas,
                     spatial_dim=self.spatial_dim,
@@ -788,6 +805,8 @@ class SpatialCellularProgramsEstimator:
                 lr=learning_rate, 
                 weight_decay=0
             )
+            
+            self.loss_dict[cluster] = []
             
             for epoch in range(num_epochs):
                 model.train()
@@ -814,6 +833,8 @@ class SpatialCellularProgramsEstimator:
 
                     pbar.desc = f'{self.target_gene} | {cluster+1}/{self.n_clusters}'
                     pbar.update(len(targets))
+                    
+                    self.loss_dict[cluster].append(loss.item())
 
             if num_epochs:
                 score = r2_score(all_y_true, all_y_pred)
