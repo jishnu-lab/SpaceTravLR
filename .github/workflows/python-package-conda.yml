@@ -26,6 +26,7 @@ jobs:
         pip install --user setuptools
         pip install uv
         uv pip install pytest
+        uv pip install commot --no-deps
         uv pip install -r requirements.txt
     - name: Test with pytest
       run: |
