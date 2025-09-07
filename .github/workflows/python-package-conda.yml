@@ -27,8 +27,7 @@ jobs:
         pip install pip --upgrade
         pip install setuptools --upgrade
         pip install wheel --upgrade
-        pip install gensim --no-build-isolation
-        uv pip install pytest
+        uv pip install gensim pytest
         uv pip install -r requirements.txt
     - name: Test with pytest
       run: |
