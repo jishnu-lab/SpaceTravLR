@@ -23,7 +23,6 @@ jobs:
         conda init bash
         source ~/.bashrc
         conda activate base
-        sudo apt-get install python-setuptools
         pip install pip --upgrade
         pip install --user setuptools
         pip install uv
