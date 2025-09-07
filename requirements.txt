@@ -2,7 +2,7 @@ adjustText==1.2.0
 certifi==2024.2.2
 genomepy==0.16.1
 goatools==1.4.12
-h5py==3.11.0
+# h5py==3.11.0
 joblib==1.4.2
 # matplotlib==3.6.3
 networkx==3.2.1
@@ -29,8 +29,8 @@ commot
 group-lasso
 pqdm
 magic-impute
-wordcloud
-pysankeybeta
+# wordcloud
+# pysankeybeta
 easydict
 # velocyto==0.17.17
 shiny>=0.6.0
