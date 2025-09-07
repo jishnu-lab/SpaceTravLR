@@ -16,7 +16,6 @@ jobs:
         python-version: '3.9.19'
     - name: Add conda to system path
       run: |
-        # $CONDA is an environment variable pointing to the root of the miniconda directory
         echo $CONDA/bin >> $GITHUB_PATH
     - name: Install dependencies
       run: |
@@ -25,6 +24,8 @@ jobs:
         source ~/.bashrc
         conda activate base
         conda install -c numba llvmdev
+        sudo apt-get update
+        sudo apt-get install -y libhdf5-dev
         pip install --use-pep517 gensim==3.8.0
         pip install uv
         uv pip install pytest
@@ -34,6 +35,5 @@ jobs:
         eval "$(conda shell.bash hook)"
         conda init bash
         source ~/.bashrc
-        conda activate base
         conda activate base
         pytest -vv -p no:warnings
