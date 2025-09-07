@@ -15,7 +15,8 @@ from spaceoracle.models.spatial_map import xyc2spatial_fast
 from spaceoracle.tools.network import RegulatoryFactory, expand_paired_interactions
 from .pixel_attention import CellularNicheNetwork, CellularViT
 from ..tools.utils import gaussian_kernel_2d, is_mouse_data, set_seed
-import commot as ct
+from ..tools.network import get_cellchat_db
+# import commot as ct
 from scipy.spatial.distance import cdist
 import numba
 from wordcloud import WordCloud
@@ -110,12 +111,14 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
 
 def init_received_ligands(adata, radius, contact_distance, cell_threshes, layer='imputed_count'):
     species = 'mouse' if is_mouse_data(adata) else 'human'
-    df_ligrec = ct.pp.ligand_receptor_database(
-        database='CellChat', 
-        species=species, 
-        signaling_type=None
-    ) 
-    df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+    # df_ligrec = ct.pp.ligand_receptor_database(
+    #     database='CellChat', 
+    #     species=species, 
+    #     signaling_type=None
+    # ) 
+    # df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+    
+    df_ligrec = get_cellchat_db(species)
 
     lr = expand_paired_interactions(df_ligrec)
     lr = lr[lr.ligand.isin(adata.var_names) &\
@@ -214,13 +217,15 @@ def init_ligands_and_receptors(
     
     ligand_mixtures = edict()
     
-    df_ligrec = ct.pp.ligand_receptor_database(
-            database='CellChat', 
-            species=species, 
-            signaling_type=None
-        )
+    # df_ligrec = ct.pp.ligand_receptor_database(
+    #         database='CellChat', 
+    #         species=species, 
+    #         signaling_type=None
+    #     )
         
-    df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+    # df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+    
+    df_ligrec = get_cellchat_db(species)
     
     lr = expand_paired_interactions(df_ligrec)
     lr = lr[lr.ligand.isin(adata.var_names) &\

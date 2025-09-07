@@ -14,6 +14,11 @@ def get_mouse_housekeeping_genes():
     return pd.read_csv('https://housekeeping.unicamp.br/Housekeeping_GenesMouse.csv', sep=';')
 
 
+def get_cellchat_db(species):
+    data_path = os.path.join(
+        os.path.dirname(__file__), '..', '..', '..', 'data', f'cellchat_{species}.csv')
+    return pd.read_csv(data_path)
+
 def expand_paired_interactions(df):
     expanded_rows = []
     for _, row in df.iterrows():
@@ -43,7 +48,7 @@ class GeneRegulatoryNetwork:
     def __init__(self, organism='mouse'):
         if organism == 'mouse':
             # self.data = co.data.load_mouse_scATAC_atlas_base_GRN()
-            import os
+            
             data_path = os.path.join(
                 os.path.dirname(__file__), '..', '..', '..', 'data', 'mm9_mouse_atac_atlas_data_TSS.parquet')
             self.data = pd.read_parquet(data_path)

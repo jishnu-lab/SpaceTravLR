@@ -6,9 +6,9 @@ import statistics
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import commot as ct
+# import commot as ct
 import gc
-from .tools.network import expand_paired_interactions
+from .tools.network import expand_paired_interactions, get_cellchat_db
 from .models.parallel_estimators import get_filtered_df, received_ligands
 from .oracles import OracleQueue, BaseTravLR
 from .beta import BetaFrame, Betabase
@@ -82,13 +82,15 @@ class GeneFactory(BaseTravLR):
             columns=['x', 'y']
         )
     
-        df_ligrec = ct.pp.ligand_receptor_database(
-                database='CellChat', 
-                species=self.species, 
-                signaling_type=None
-            )
+        # df_ligrec = ct.pp.ligand_receptor_database(
+        #         database='CellChat', 
+        #         species=self.species, 
+        #         signaling_type=None
+        #     )
             
-        df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+        # df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']
+        
+        df_ligrec = get_cellchat_db(self.species)  
         
         self.lr = expand_paired_interactions(df_ligrec)
         self.lr = self.lr[

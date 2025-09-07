@@ -12,7 +12,7 @@ import enlighten
 from numba import jit
 import torch.nn.functional as F
 import torch
-import commot as ct
+# import commot as ct
 import torch.nn as nn
 from torch.nn.utils.parametrizations import weight_norm
 from torch.utils.data import DataLoader, TensorDataset, random_split
@@ -147,13 +147,14 @@ class VisionEstimator(AbstractEstimator):
 
 
         if df_ligrec is None:
-            df_ligrec = ct.pp.ligand_receptor_database(
-                database='CellChat', 
-                species='mouse', 
-                signaling_type="Secreted Signaling"
-            )
+            # df_ligrec = ct.pp.ligand_receptor_database(
+            #     database='CellChat', 
+            #     species='mouse', 
+            #     signaling_type="Secreted Signaling"
+            # )
             
-            df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']
+            # df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']
+            df_ligrec = get_cellchat_db('mouse')
 
         self.lr = expand_paired_interactions(df_ligrec)
         self.lr = self.lr[self.lr.ligand.isin(adata.var_names) & (self.lr.receptor.isin(adata.var_names))]
