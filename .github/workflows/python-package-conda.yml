@@ -24,6 +24,7 @@ jobs:
         conda init bash
         source ~/.bashrc
         conda activate base
+        conda install -c numba llvmdev
         pip install --use-pep517 gensim==3.8.0
         pip install uv
         uv pip install pytest
