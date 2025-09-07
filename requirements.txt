@@ -26,7 +26,7 @@ enlighten
 pyro-ppl
 # commot
 group-lasso
-# pqdm
+pqdm
 magic-impute
 wordcloud
 # pysankeybeta
