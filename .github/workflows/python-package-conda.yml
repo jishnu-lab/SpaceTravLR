@@ -10,10 +10,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python 3.9.19
+    - name: Set up Python 3.12
       uses: actions/setup-python@v3
       with:
-        python-version: '3.9.19'
+        python-version: '3.12'
     - name: Add conda to system path
       run: |
         echo $CONDA/bin >> $GITHUB_PATH
@@ -23,9 +23,6 @@ jobs:
         conda init bash
         source ~/.bashrc
         conda activate base
-        conda install -c numba llvmdev
-        sudo apt-get update
-        sudo apt-get install -y libhdf5-dev
         pip install uv
         uv pip install pytest
         uv pip install -r requirements.txt
