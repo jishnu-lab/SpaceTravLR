@@ -25,7 +25,7 @@ scanpy==1.10.2
 # pyarrow==17.0.0
 enlighten
 pyro-ppl
-commot
+# commot
 group-lasso
 # pqdm
 magic-impute
