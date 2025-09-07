@@ -23,8 +23,6 @@ jobs:
         conda init bash
         source ~/.bashrc
         conda activate base
-        conda install -c conda-forge gensim
-        pip install pip --upgrade
         pip install --user setuptools
         pip install uv
         uv pip install pytest
