@@ -28,7 +28,7 @@ pyro-ppl
 group-lasso
 # pqdm
 magic-impute
-# wordcloud
+wordcloud
 # pysankeybeta
 easydict
 # velocyto==0.17.17
