@@ -21,7 +21,7 @@ scanpy==1.10.2
 # torch==2.4.0
 torchvision
 # tqdm==4.66.4
-# pyarrow==17.0.0
+pyarrow
 enlighten
 pyro-ppl
 # commot
