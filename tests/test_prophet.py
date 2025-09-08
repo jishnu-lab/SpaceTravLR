@@ -12,6 +12,7 @@ from unittest.mock import patch, MagicMock
 
 from spaceoracle.prophets import *
 from spaceoracle.models.parallel_estimators import received_ligands
+from spaceoracle.tools.network import get_cellchat_db
 
 @pytest.fixture
 def temp_dir():

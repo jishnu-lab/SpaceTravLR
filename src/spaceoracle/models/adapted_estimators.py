@@ -5,7 +5,7 @@ from ..tools.utils import is_mouse_data
 
 import torch
 import torch.nn as nn 
-import commot as ct
+# import commot as ct
 import itertools
 
 
@@ -322,12 +322,14 @@ class GeneProgramsEstimator(PrefeaturizedCellularProgramsEstimator):
     
         adata = self.adata
         species = 'mouse' if is_mouse_data(adata) else 'human'
-        df_ligrec = ct.pp.ligand_receptor_database(
-            database='CellChat', 
-            species=species, 
-            signaling_type=None
-        ) 
-        df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+        # df_ligrec = ct.pp.ligand_receptor_database(
+        #     database='CellChat', 
+        #     species=species, 
+        #     signaling_type=None
+        # ) 
+        # df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling'] 
+        
+        df_ligrec = get_cellchat_db(species) 
 
         lr = expand_paired_interactions(df_ligrec)
         lr = lr[lr.ligand.isin(adata.var_names) &\
