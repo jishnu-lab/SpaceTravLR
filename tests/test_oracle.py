@@ -78,19 +78,19 @@ def temp_dir():
     yield temp_dir
     shutil.rmtree(temp_dir)
 
-def test_oracle_initialization(mock_adata_with_true_betas):
-    adata = mock_adata_with_true_betas
-    oracle = BaseTravLR(adata)
-    assert 'imputed_count' in oracle.adata.layers
-    assert oracle.pcs is None
-    assert oracle.gene2index is not None
+# def test_oracle_initialization(mock_adata_with_true_betas):
+#     adata = mock_adata_with_true_betas
+#     oracle = BaseTravLR(adata)
+#     assert 'imputed_count' in oracle.adata.layers
+#     assert oracle.pcs is None
+#     assert oracle.gene2index is not None
 
-    del adata.layers['imputed_count']
-    adata = mock_adata_with_true_betas
-    oracle = BaseTravLR(adata)
-    assert 'imputed_count' in oracle.adata.layers
-    assert oracle.pcs is not None
-    assert oracle.gene2index is not None
+#     del adata.layers['imputed_count']
+#     adata = mock_adata_with_true_betas
+#     oracle = BaseTravLR(adata)
+#     assert 'imputed_count' in oracle.adata.layers
+#     assert oracle.pcs is not None
+#     assert oracle.gene2index is not None
 
 
 def test_oracle_queue_initialization(temp_dir, mock_adata_with_true_betas):

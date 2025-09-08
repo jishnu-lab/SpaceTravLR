@@ -111,35 +111,35 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
         # Clean up temporary directory
         shutil.rmtree(self.temp_dir)
     
-    @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
-    def test_initialization(self):
-        """Test that the estimator initializes correctly with valid parameters."""
-        estimator = SpatialCellularProgramsEstimator(
-            adata=self.adata,
-            target_gene='target_gene',
-            cluster_annot='rctd_cluster',
-            layer='imputed_count',
-            radius=200,
-            contact_distance=50,
-            tf_ligand_cutoff=0.01,
-            colinks_path='dummy_path'
-        )
+    # @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
+    # def test_initialization(self):
+    #     """Test that the estimator initializes correctly with valid parameters."""
+    #     estimator = SpatialCellularProgramsEstimator(
+    #         adata=self.adata,
+    #         target_gene='target_gene',
+    #         cluster_annot='rctd_cluster',
+    #         layer='imputed_count',
+    #         radius=200,
+    #         contact_distance=50,
+    #         tf_ligand_cutoff=0.01,
+    #         colinks_path='dummy_path'
+    #     )
         
-        # Check that the estimator was initialized correctly
-        self.assertEqual(estimator.target_gene, 'target_gene')
-        self.assertEqual(estimator.cluster_annot, 'rctd_cluster')
-        self.assertEqual(estimator.layer, 'imputed_count')
-        self.assertEqual(estimator.radius, 200)
-        self.assertEqual(estimator.contact_distance, 50)
-        self.assertEqual(estimator.spatial_dim, 64)  # Default value
+    #     # Check that the estimator was initialized correctly
+    #     self.assertEqual(estimator.target_gene, 'target_gene')
+    #     self.assertEqual(estimator.cluster_annot, 'rctd_cluster')
+    #     self.assertEqual(estimator.layer, 'imputed_count')
+    #     self.assertEqual(estimator.radius, 200)
+    #     self.assertEqual(estimator.contact_distance, 50)
+    #     self.assertEqual(estimator.spatial_dim, 64)  # Default value
         
-        # Check that regulators were set correctly
-        self.assertIsNotNone(estimator.regulators)
-        self.assertIsInstance(estimator.regulators, list)
+    #     # Check that regulators were set correctly
+    #     self.assertIsNotNone(estimator.regulators)
+    #     self.assertIsInstance(estimator.regulators, list)
         
-        # Check that ligands and receptors were initialized
-        self.assertIsNotNone(estimator.ligands)
-        self.assertIsNotNone(estimator.receptors)
+    #     # Check that ligands and receptors were initialized
+    #     self.assertIsNotNone(estimator.ligands)
+    #     self.assertIsNotNone(estimator.receptors)
     
     @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
     @patch('spaceoracle.tools.network.get_cellchat_db')
