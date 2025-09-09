@@ -116,15 +116,19 @@ class CellOracleLinks:
 
 
 class RegulatoryFactory(CellOracleLinks):
-    def __init__(self, colinks_path, annot='cell_type_int'):
+    def __init__(self, colinks_path=None, links=None, annot='cell_type_int'):
         self.colinks_path = colinks_path
         self.annot = annot
 
-        with open(self.colinks_path, 'rb') as f:
-            self.links = pickle.load(f)
+        if colinks_path is not None:
+            with open(self.colinks_path, 'rb') as f:
+                self.links = pickle.load(f)
+
+        elif links is not None:
+            self.links = links
 
         self.cluster_labels = encode_labels(self.links.keys())
-
+        
  
     def get_cluster_regulators(self, adata, target_gene, alpha=0.05):
         adata_clusters = np.unique(adata.obs[self.annot])
