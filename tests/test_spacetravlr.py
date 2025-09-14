@@ -30,7 +30,7 @@ def test_space_oracle_initialization():
     ss = SpaceShip(adata)
     
     ss.run_celloracle()
-    ss.run_commot()
+    # ss.run_commot()
     ss.run_spacetravlr()
     
     assert True

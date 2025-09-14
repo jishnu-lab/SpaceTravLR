@@ -155,20 +155,8 @@ class VirtualTissue:
         params.setdefault('perturbed_df', perturbed_df)
         params.setdefault('perturb_target', perturb_target)
         params.setdefault('legend_on_loc', True)
-        
-        # if params.get('hue', self.annot) is not None:
-        #     if not all(x in self.chart.color_dict for x in self.adata.obs[
-        #         params.get('hue', self.annot)].unique()):
-        #         self.chart.color_dict = {
-        #                 c: self.random_color() for c in self.adata.obs[
-        #                     params.get('hue', self.annot)].unique()
-        #             }
                 
-        
         grid_points, vector_field, P = self.chart.plot_umap_quiver(**params)
-        
-        # grid_points, vector_field, P = self.chart.plot_umap_pseudotime(**params)
-        
         
         return grid_points, vector_field
 

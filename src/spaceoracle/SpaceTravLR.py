@@ -19,13 +19,11 @@ import scanpy as sc
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import re
 import commot as ct
 import sys 
 from collections import defaultdict
 from tqdm import tqdm
 import anndata as ad
-import pickle
 
 class SpaceShip:
     def __init__(self, adata, annot='cell_type'):

@@ -258,8 +258,6 @@ class Cartography:
         
         all_fates = pd.concat(all_fates, axis=0)
         self.adata.obs = pd.concat([self.adata.obs, all_fates], axis=1)
-
-
     
     def make_celltype_dict(self, annot='cell_type', basis='spatial'):
         assert 'transition' in self.adata.obs
@@ -289,8 +287,6 @@ class Cartography:
             
         return ct_points_wt, ct_points_ko
 
-        
-    
     def compute_transition_probabilities(self, delta_X, embedding, n_neighbors=200, remove_null=True, normalize=False):
             
         P = estimate_transition_probabilities(
@@ -327,8 +323,8 @@ class Cartography:
         rescale=1,
         rename=None,
         highlight_clusters=None,
-        limit_clusters=False,
-    ):
+        limit_clusters=False):
+        
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
         
@@ -388,9 +384,7 @@ class Cartography:
         vector_field *= vector_scale
         
         return grid_point, vector_field
-
-    
-    
+ 
     def plot_umap_quiver(
             self, 
             perturb_target='', 
@@ -511,7 +505,6 @@ class Cartography:
                 for ct in color_dict:
                     highlight_color_dict[ct] = color_dict[ct]
                     
-            # Create a mask for highlighted cells
             plot_df['highlighted'] = plot_df[hue].isin(highlight_clusters)
             
             vector_magnitudes = np.linalg.norm(V_simulated, axis=1)
@@ -525,14 +518,12 @@ class Cartography:
                 s=scatter_size,
                 ax=ax,
                 alpha=vector_magnitudes,
-                # alpha=0.1,
                 edgecolor='black',
                 linewidth=linewidth,
                 palette=highlight_color_dict,
                 legend=not legend_on_loc
             )
         else:
-            # Standard plotting
             plot_df['highlighted'] = True
             
             sns.scatterplot(
@@ -626,7 +617,6 @@ class Cartography:
         else:
             plot_quiver(grid_points, vector_field, background=None, ax=ax)
          
-        # Legend 
         ax.set_frame_on(False)
         ax.set_xticks([])
         ax.set_yticks([])
@@ -644,7 +634,6 @@ class Cartography:
                 x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
                 y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
                 
-                # Use the appropriate color
                 if highlight_clusters is not None and cluster not in highlight_clusters:
                     color = 'lightgrey' if grey_out else alt_colors[cluster]
                 else:
@@ -664,7 +653,6 @@ class Cartography:
                         ))
                 texts.append(text)
             
-            # Adjust text positions to prevent overlaps
             if texts:
                 adjust_text(texts, 
                            arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.7),
@@ -676,7 +664,6 @@ class Cartography:
             legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=legend_fontsize)
         
         return grid_points, vector_field, P
-    
     
     def plot_umap_pseudotime(
             self, 
@@ -927,9 +914,6 @@ class Cartography:
         self.adata.obs.index.name = None
         
         return vector_field_df
-    
-    
-    
     
     def plot_umap(
             self, 
