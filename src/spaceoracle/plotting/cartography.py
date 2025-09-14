@@ -415,6 +415,8 @@ class Cartography:
             limit_clusters=False,
             value=None,
             arrow_alpha_non_highlighted=0.3,
+            threshold=0,
+            dynamic_alpha=True,
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
@@ -483,6 +485,10 @@ class Cartography:
         
         vector_scale = vector_scale / np.max(vector_field)
         vector_field *= vector_scale
+
+        if threshold and threshold > 0:
+            mags = np.linalg.norm(vector_field, axis=1)
+            vector_field[mags < threshold] = 0
         
         f, ax = plt.subplots(figsize=figsize, dpi=dpi)
         
@@ -517,7 +523,7 @@ class Cartography:
                 hue=hue, 
                 s=scatter_size,
                 ax=ax,
-                alpha=vector_magnitudes,
+                alpha=vector_magnitudes if dynamic_alpha else alpha,
                 edgecolor='black',
                 linewidth=linewidth,
                 palette=highlight_color_dict,
@@ -932,6 +938,25 @@ class Cartography:
             adata=None,
             ax=None,
             color_dict=None,
+            layer='imputed_count',
+            cmap='viridis',
+            colorbar=True,
+            quiver_on_genes=False,
+            n_neighbors=300,
+            arrow_linewidth=0.55,
+            scale=1,
+            curve=False,
+            grains=20,
+            grid_scale=1,
+            arrowstyle='fancy',
+            vector_scale=0.85,
+            vector_color='black',
+            arrowsize=0.5,
+            threshold=0.0,
+            vector_cmap=None,
+            label='',
+            headwidth=3, headlength=3, headaxislength=3,
+            width=0.005,
         ):
         if adata is None:
             adata = self.adata
@@ -947,20 +972,147 @@ class Cartography:
         if color_dict is None:
             color_dict = self.color_dict.copy()
         
-        # Create a modified color dictionary if highlighting specific clusters
         plot_df = pd.DataFrame(
             adata.obsm[basis], 
             columns=['x', 'y'], 
             index=adata.obs_names).join(adata.obs)
         
+        # If hue is a gene or list of genes, plot continuous expression
+        is_gene_name = isinstance(hue, str) and (hue in adata.var_names)
+        is_gene_list = isinstance(hue, (list, tuple, np.ndarray)) and all([g in adata.var_names for g in hue])
+        if is_gene_name or is_gene_list:
+            genes = [hue] if is_gene_name else list(hue)
+            layer_used = layer
+            expr_df = adata.to_df(layer=layer_used)
+            values = expr_df[genes].mean(1) if len(genes) > 1 else expr_df[genes[0]]
+            values = (values - values.min()) / (values.max() - values.min())
+            
+            plot_df['__gene_expr__'] = values.loc[plot_df.index]
+            
+
+            sc = ax.scatter(
+                plot_df['x'], plot_df['y'],
+                c=plot_df['__gene_expr__'],
+                cmap=cmap,
+                s=scatter_size,
+                alpha=alpha,
+                edgecolor='black',
+                linewidth=linewidth,
+            )
+
+            if colorbar:
+                # plt.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
+                plt.colorbar(sc, label=label, 
+                    orientation='vertical',
+                    fraction=0.046, pad=0.04,
+                    shrink=0.5)
+                
+            if quiver_on_genes:
+                layout_embedding = adata.obsm[basis]
+                n_cells, n_genes = adata.shape
+                delta_X = np.zeros_like(adata.layers['imputed_count'], dtype=np.float64)
+                for g in genes:
+                    if g in adata.var_names:
+                        gi = int(np.where(adata.var_names == g)[0][0])
+                        delta_X[:, gi] = expr_df[g].values
+                delta_X = np.round(delta_X, 5)
+
+                P = self.compute_transition_probabilities(
+                    delta_X,
+                    layout_embedding,
+                    n_neighbors=n_neighbors,
+                    remove_null=True,
+                    normalize=False,
+                )
+
+                V_simulated = project_probabilities(P, layout_embedding, normalize=False)
+
+                adaptive_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))
+                grid_x, grid_y = get_grid_layout(layout_embedding, grid_scale=adaptive_scale)
+                grid_points = np.array(np.meshgrid(grid_x, grid_y)).T.reshape(-1, 2)
+                size_x, size_y = len(grid_x), len(grid_y)
+                vector_field = np.zeros((size_x, size_y, 2))
+                x_thresh = (grid_x[1] - grid_x[0]) / 2
+                y_thresh = (grid_y[1] - grid_y[0]) / 2
+
+                get_neighborhood = lambda gp, emb: np.where(
+                    (np.abs(emb[:, 0] - gp[0]) <= x_thresh) &
+                    (np.abs(emb[:, 1] - gp[1]) <= y_thresh)
+                )[0]
+
+                for idx, gp in enumerate(grid_points):
+                    indices = get_neighborhood(gp, layout_embedding)
+                    if len(indices) <= 0:
+                        continue
+                    nbr_vector = np.mean(V_simulated[indices], axis=0)
+                    nbr_vector *= len(indices)
+                    gx, gy = np.unravel_index(idx, (size_x, size_y))
+                    vector_field[gx, gy] = nbr_vector
+
+                vector_field = vector_field.reshape(-1, 2)
+                vmax = np.max(np.abs(vector_field)) if vector_field.size else 0
+                if vmax > 0:
+                    vector_field = (vector_scale / vmax) * vector_field
+                    magnitudes = np.linalg.norm(vector_field, axis=1)
+                    zero_mask = magnitudes < threshold
+                    vector_field[zero_mask] = 0
+                    if curve:
+                        sort_idx = np.argsort(grid_points[:, 0])
+                        x_ = grid_points[sort_idx, 0]
+                        y_ = grid_points[sort_idx, 1]
+                        u_ = vector_field[sort_idx, 0]
+                        v_ = vector_field[sort_idx, 1]
+                        xi = np.linspace(x_.min(), x_.max(), 100)
+                        yi = np.linspace(y_.min(), y_.max(), 100)
+                        xi, yi = np.meshgrid(xi, yi)
+                        ui = griddata((x_, y_), u_, (xi, yi), method='linear')
+                        vi = griddata((x_, y_), v_, (xi, yi), method='linear')
+
+                        mag_grid = np.sqrt(np.square(ui) + np.square(vi))
+                        ui[mag_grid < threshold] = 0
+                        vi[mag_grid < threshold] = 0
+
+                        velovect(
+                            ax,
+                            xi[0, :], yi[:, 0], ui, vi,
+                            arrowstyle=arrowstyle,
+                            color=vector_color,
+                            arrowsize=arrowsize,
+                            linewidth=arrow_linewidth,
+                            scale=scale, grains=grains,
+                        )
+                    else:
+                        colors = None
+                        if vector_cmap is not None:
+                            try:
+                                cmap_obj = plt.get_cmap(vector_cmap)
+                            except Exception:
+                                cmap_obj = vector_cmap
+                            norm = (magnitudes - magnitudes.min()) / (magnitudes.max() - magnitudes.min() + 1e-12)
+                            colors = cmap_obj(norm)
+                        ax.quiver(
+                            grid_points[:, 0], grid_points[:, 1],
+                            vector_field[:, 0], vector_field[:, 1],
+                            angles='xy', scale_units='xy', scale=scale,
+                            headwidth=headwidth, headlength=headlength, headaxislength=headaxislength,
+                            width=width, alpha=1,
+                            color=(colors if colors is not None else vector_color)
+                        )
+
+            ax.set_frame_on(False)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_xlabel('')
+            ax.set_ylabel('')
+            ax.set_title('')
+            return ax, grid_points, vector_field, P
+        
         if highlight_clusters is not None:
-            # Create a copy of the data with modified colors
             highlight_color_dict = {ct: 'lightgrey' for ct in color_dict}
             for ct in highlight_clusters:
                 if ct in color_dict:
                     highlight_color_dict[ct] = color_dict[ct]
                     
-            # Create a mask for highlighted cells
             plot_df['highlighted'] = plot_df[hue].isin(highlight_clusters)
             
             sns.scatterplot(
@@ -976,7 +1128,6 @@ class Cartography:
                 legend=not legend_on_loc
             )
         else:
-            # Standard plotting
             plot_df['highlighted'] = True
             
             sns.scatterplot(
@@ -1031,7 +1182,6 @@ class Cartography:
                         ))
                 texts.append(text)
             
-            # Adjust text positions to prevent overlaps
             if texts:
                 adjust_text(texts, 
                            arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.7),
@@ -1039,7 +1189,6 @@ class Cartography:
         
         if not legend_on_loc:
             if highlight_clusters is not None:
-                # Include all clusters but use appropriate colors
                 handles = []
                 for label in all_cts.unique():
                     if label in highlight_clusters:

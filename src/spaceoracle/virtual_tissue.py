@@ -76,7 +76,7 @@ class VirtualTissue:
         
     def plot_gene_vs_proximity(
         self, perturb_target, perturbed_df, gene, color_gene, 
-        cell_filter, cell_groups, 
+        cell_filter, cell_groups, cmap='rainbow',
         proximity_threshold=150, gene_threshold=0.005, ax=None, mode='ko'):
         
         datadf = self.spf[
@@ -101,7 +101,7 @@ class VirtualTissue:
             datadf[0], 
             datadf[gene], 
             c=datadf[color_gene],
-            cmap='rainbow',
+            cmap=cmap,
         )
         plt.colorbar(scatter, label=f'{color_gene} % change', shrink=0.75, ax=ax, format='%.2f')
         ax.spines['top'].set_visible(False)
