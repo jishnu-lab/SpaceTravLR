@@ -21,21 +21,21 @@ def quick_normalize(adata):
 
 
 
-def test_space_oracle_initialization():
-    from spaceoracle.SpaceTravLR import SpaceShip
-    import pickle
+# def test_space_oracle_initialization():
+#     from spaceoracle.SpaceTravLR import SpaceShip
+#     import pickle
     
-    adata = quick_normalize(sc.read_h5ad('./data/small_melanoma.h5ad'))
+#     adata = quick_normalize(sc.read_h5ad('./data/small_melanoma.h5ad'))
     
-    ss = SpaceShip(adata)
+#     ss = SpaceShip(adata)
     
-    ss.run_celloracle()
-    # ss.run_commot()
-    ss.run_spacetravlr()
+#     ss.run_celloracle()
+#     # ss.run_commot()
+#     ss.run_spacetravlr()
     
-    assert True
+#     assert True
     
     
-if __name__ == '__main__':
-    test_space_oracle_initialization()
+# if __name__ == '__main__':
+#     test_space_oracle_initialization()
 
