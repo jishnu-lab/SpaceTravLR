@@ -168,4 +168,5 @@ cython_debug/
 
 /notebooks/models/
 /notebooks/
+/manuscript/
 /manuscript/*/figures/*
