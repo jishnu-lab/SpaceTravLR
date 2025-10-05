@@ -587,7 +587,7 @@ class GeneFactory(BaseTravLR):
         ))
         
     def genome_screen(
-        self, save_to, n_propagation=4, priority_genes=None, mode='knockout'):
+        self, save_to, n_propagation=4, priority_genes=None, mode='knockout', cells=None):
         """
         Perform a genome-wide knockout or overexpression of the target genes
         """
@@ -636,7 +636,7 @@ class GeneFactory(BaseTravLR):
                 target=target, 
                 n_propagation=n_propagation, 
                 gene_expr=0 if mode == 'knockout' else max_expr[target], 
-                cells=None, 
+                cells=cells, 
                 delta_dir=None
             )
             

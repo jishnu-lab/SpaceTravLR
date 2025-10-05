@@ -384,6 +384,75 @@ class Cartography:
         vector_field *= vector_scale
         
         return grid_point, vector_field
+    
+    
+    def get_vector_field(
+        self, 
+        perturbed_df,
+        limit_clusters=True, 
+        highlight_clusters=None, 
+        n_neighbors=200, 
+        remove_null=True, 
+        normalize=True, 
+        grid_scale=1,
+        annot='cell_type',
+        threshold=0,
+        vector_scale=0.4):
+        
+        layout_embedding = self.adata.obsm['X_umap']
+        perturbed_df = perturbed_df.loc[self.adata.obs_names]
+        
+        if limit_clusters and highlight_clusters is not None:
+            mask = ~self.adata.obs[annot].isin(highlight_clusters)
+            perturbed_df.loc[mask] = self.adata.to_df(layer='imputed_count').loc[mask]
+
+        delta_X = perturbed_df.values - self.adata.layers['imputed_count']
+        delta_X = delta_X.round(3)
+            
+            
+        P = self.compute_transition_probabilities(
+            delta_X, 
+            layout_embedding, 
+            n_neighbors=n_neighbors, 
+            remove_null=remove_null
+        )
+
+        V_simulated = project_probabilities(P, layout_embedding, normalize=normalize)
+        
+        grid_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))
+        grid_x, grid_y = get_grid_layout(layout_embedding, grid_scale=grid_scale)
+        grid_points = np.array(np.meshgrid(grid_x, grid_y)).T.reshape(-1, 2)
+        size_x, size_y = len(grid_x), len(grid_y)
+        vector_field = np.zeros((size_x, size_y, 2))
+        x_thresh = (grid_x[1] - grid_x[0]) / 2
+        y_thresh = (grid_y[1] - grid_y[0]) / 2
+        
+        get_neighborhood = lambda grid_point, layout_embedding: np.where(
+            (np.abs(layout_embedding[:, 0] - grid_point[0]) <= x_thresh) &  
+            (np.abs(layout_embedding[:, 1] - grid_point[1]) <= y_thresh)   
+        )[0]
+
+        for idx, grid_point in enumerate(grid_points):
+
+            indices = get_neighborhood(grid_point, layout_embedding)
+            if len(indices) <= 0:
+                continue
+            nbr_vector = np.mean(V_simulated[indices], axis=0)
+            nbr_vector *= len(indices)       # upweight vectors with lots of cells
+                
+            grid_idx_x, grid_idx_y = np.unravel_index(idx, (size_x, size_y))
+            vector_field[grid_idx_x, grid_idx_y] = nbr_vector
+
+        vector_field = vector_field.reshape(-1, 2)
+        
+        vector_scale = vector_scale / np.max(vector_field)
+        vector_field *= vector_scale
+
+        if threshold and threshold > 0:
+            mags = np.linalg.norm(vector_field, axis=1)
+            vector_field[mags < threshold] = 0
+        
+        return grid_points, vector_field
  
     def plot_umap_quiver(
             self, 
@@ -417,6 +486,7 @@ class Cartography:
             arrow_alpha_non_highlighted=0.3,
             threshold=0,
             dynamic_alpha=True,
+            lightgrey="#9c8d7c"
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
@@ -501,8 +571,7 @@ class Cartography:
             index=self.adata.obs_names).join(self.adata.obs)
         
         if highlight_clusters is not None:
-            # Create a copy of the data with modified colors
-            highlight_color_dict = {ct: 'lightgrey' for ct in color_dict}
+            highlight_color_dict = {ct: lightgrey for ct in color_dict}
             for ct in highlight_clusters:
                 if ct in color_dict:
                     highlight_color_dict[ct] = color_dict[ct]
@@ -641,7 +710,7 @@ class Cartography:
                 y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
                 
                 if highlight_clusters is not None and cluster not in highlight_clusters:
-                    color = 'lightgrey' if grey_out else alt_colors[cluster]
+                    color = lightgrey if grey_out else alt_colors[cluster]
                 else:
                     color = alt_colors[cluster]
                 
