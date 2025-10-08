@@ -41,23 +41,25 @@ class SpaceShip:
         adata.obs['cell_type_int'] = adata.obs[annot].apply(
             lambda x: encode_labels(adata.obs[annot], reverse_dict=True)[x])
         
-        sc.pp.pca(adata)
-        sc.pp.neighbors(adata)
-        sc.tl.umap(adata)
-
-        BaseTravLR.impute_clusterwise(
-            adata, 
-            annot=annot, 
-            layer='normalized_count', 
-            layer_added='imputed_count'
-        )
+        if 'X_umap' not in adata.obsm:
+            sc.pp.pca(adata)
+            sc.pp.neighbors(adata)
+            sc.tl.umap(adata)
+            
+        if 'imputed_count' not in adata.layers:
+            BaseTravLR.impute_clusterwise(
+                adata, 
+                annot=annot, 
+                layer='normalized_count', 
+                layer_added='imputed_count'
+            )
         
         self.adata = adata
         self.annot = annot
         
     def run_celloracle(self):
         sys.path.append('../')
-        import celloracle as co
+        import celloracle_tmp as co
         
         
         adata = self.adata
