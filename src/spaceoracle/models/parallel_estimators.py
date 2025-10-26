@@ -311,10 +311,6 @@ class SpatialCellularProgramsEstimator:
         assert target_gene in adata.var_names, 'target_gene must be in adata.var_names'
         assert layer in adata.layers, 'layer must be in adata.layers'
         assert cluster_annot in adata.obs.columns, 'cluster_annot must be in adata.obs.columns'
-        # assert 'spatial_unscaled' in adata.obsm
-        
-        if 'spatial_unscaled' not in adata.obsm:
-            print('!!! Make sure the xy coorniates are scaled')
           
         self.adata = adata
         self.scale_factor = scale_factor
@@ -668,8 +664,8 @@ class SpatialCellularProgramsEstimator:
         vision_model='cnn',
         score_threshold=0.2, 
         l1_reg=1e-9,
-        subsample=None,
-        skip_clusters=None):
+        skip_clusters=None
+    ):
         
         sp_maps, X, y, cluster_labels = self.init_data()
         
@@ -826,7 +822,7 @@ class SpatialCellularProgramsEstimator:
                     optimizer.zero_grad()
                     outputs = model(spatial_maps, inputs, spatial_features)
                     loss = criterion(outputs, targets)
-                    loss += torch.mean(outputs.mean(0) - model.anchors) * 1e-3
+                    loss += torch.mean(outputs.mean(0) - model.anchors) * 1e-5
                     loss.backward()
 
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, norm_type=2)
