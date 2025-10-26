@@ -295,9 +295,10 @@ class GeneFactory(BaseTravLR):
         target, 
         n_propagation=4, 
         gene_expr=0, 
-        save_layer=False,
         cells=None, 
-        delta_dir=None):
+        save_layer=False,
+        delta_dir=None,
+        ):
         
         payload_dict = {}
         output_name = None

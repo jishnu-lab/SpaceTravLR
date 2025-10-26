@@ -479,6 +479,13 @@ class Cartography:
             rename=None,
             ax=None,
             curve=True,
+            arrowstyle='fancy',
+            arrowsize=0.5,
+            arrow_linewidth=0.55,
+            quiver_headwidth=3,
+            quiver_headlength=3,
+            quiver_headaxislength=3,
+            quiver_width=0.002,
             grey_out=True,
             highlight_clusters=None,
             limit_clusters=False,
@@ -560,7 +567,11 @@ class Cartography:
             mags = np.linalg.norm(vector_field, axis=1)
             vector_field[mags < threshold] = 0
         
-        f, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        else:
+            fig = ax.get_figure()
+            ax = ax
         
         color_dict = self.color_dict.copy()
         
@@ -657,10 +668,10 @@ class Cartography:
 
                         velovect(ax, 
                             xi[0,:], yi[:,0], ui, vi,
-                            arrowstyle='fancy',
+                            arrowstyle=arrowstyle,
                             color='black',
-                            arrowsize=0.5,
-                            linewidth=0.55,
+                            arrowsize=arrowsize,
+                            linewidth=arrow_linewidth,
                             # alpha=alpha_values,
                             scale=scale, grains=grains)
                 else:
@@ -668,8 +679,8 @@ class Cartography:
                         highlighted_points[:, 0], highlighted_points[:, 1],   
                         highlighted_vectors[:, 0], highlighted_vectors[:, 1], 
                         angles='xy', scale_units='xy', scale=1, 
-                        headwidth=3, headlength=3, headaxislength=3,
-                        width=0.002, alpha=vector_magnitudes
+                        headwidth=quiver_headwidth, headlength=quiver_headlength, headaxislength=quiver_headaxislength,
+                        width=quiver_width, alpha=vector_magnitudes
                     )
                     
                 
@@ -684,8 +695,8 @@ class Cartography:
                         non_highlighted_points[:, 0], non_highlighted_points[:, 1],   
                         non_highlighted_vectors[:, 0], non_highlighted_vectors[:, 1], 
                         angles='xy', scale_units='xy', scale=1, 
-                        headwidth=3, headlength=3, headaxislength=3,
-                        width=0.002, alpha=arrow_alpha_non_highlighted
+                        headwidth=quiver_headwidth, headlength=quiver_headlength, headaxislength=quiver_headaxislength,
+                        width=quiver_width, alpha=arrow_alpha_non_highlighted
                     )
                 
 

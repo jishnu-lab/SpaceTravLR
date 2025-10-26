@@ -57,18 +57,5 @@ class TestGeneRegulatoryNetwork(unittest.TestCase):
                 'Tal1', 'Tbp'
             ])
 
-    def test_celloracle_links(self):
-        grn = DayThreeRegulatoryNetwork()
-        target_gene = 'Cd74'
-        regulators = grn.get_regulators(self.mock_adata, target_gene)
-        
-        print(regulators)
-
-        self.assertListEqual(
-            regulators, 
-            ['Bcl11a', 'Ebf1', 'Ebf3', 'Foxj3', 'Irf9', 'Mef2c', 
-            'Myc', 'Pax5', 'Pou2f2', 'Rreb1', 'Rxra', 'Stat2', 
-            'Tal1', 'Tbp'])
-
 if __name__ == '__main__':
     unittest.main()

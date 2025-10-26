@@ -76,7 +76,7 @@ class VirtualTissue:
         
     def plot_gene_vs_proximity(
         self, perturb_target, perturbed_df, gene, color_gene, 
-        cell_filter, cell_groups, cmap='rainbow',
+        cell_filter, cell_groups, cmap='rainbow_r',
         proximity_threshold=150, gene_threshold=0.005, ax=None, mode='ko'):
         
         datadf = self.spf[
@@ -147,7 +147,7 @@ class VirtualTissue:
         return grid_points, vector_field
     
         
-    def plot_arrows(self, perturb_target, perturbed_df=None, mode='max', **params):
+    def plot_arrows(self, perturb_target, threshold=0, perturbed_df=None, ax=None, mode='max', **params):
         if perturbed_df is None:
             perturbed_df = pd.read_parquet(
                 f'{self.ovx_path}/{perturb_target}_4n_{mode}x.parquet')
@@ -155,6 +155,8 @@ class VirtualTissue:
         params.setdefault('perturbed_df', perturbed_df)
         params.setdefault('perturb_target', perturb_target)
         params.setdefault('legend_on_loc', True)
+        params.setdefault('ax', ax)
+        params.setdefault('threshold', threshold)
                 
         grid_points, vector_field, P = self.chart.plot_umap_quiver(**params)
         
@@ -194,8 +196,6 @@ class VirtualTissue:
             pbar.refresh()
             
             data = pd.read_parquet(ko_file)
-            # data = self.adata.to_df(layer='imputed_count')
-            # data[kotarget] = 0
             
             data = data.loc[self.adata.obs_names] - self.adata.to_df(layer='imputed_count')
             data = data.join(self.adata.obs.cell_type).groupby('cell_type').mean().abs().mean(axis=1)

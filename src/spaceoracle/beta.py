@@ -205,7 +205,6 @@ class BetaFrame(pd.DataFrame):
             columns=self.tfl_regulators
         ).astype(float) * scale_factor
 
-        ## this might been some weighting factor(s)
         _df = pd.concat(
             [
                 rec_derivatives, 
@@ -296,7 +295,7 @@ class Betabase:
             beta = beta.join(self.obs[annot]).query(f'{annot}==@cell_type').drop(columns=[annot])
             
             for k, v in beta.mean().to_dict().items():
-                if abs(v) > 0 and gene_name != 'beta0':
+                if abs(v) > 0:
                     if '$' in k:
                         beta_lr[k].append((gene_name, v))
                     elif '#' in k:
@@ -324,8 +323,10 @@ class Betabase:
                     columns=['interaction', 'gene', 'beta'])
         beta_tfl_out.index.name = cell_type
         beta_tfl_out['interaction_type'] = 'ligand-tf'
+        out_df = pd.concat([beta_tf_out, beta_lr_out, beta_tfl_out])
+        out_df = out_df.query('interaction != "beta0"')
         
-        return pd.concat([beta_tf_out, beta_lr_out, beta_tfl_out])
+        return 
         
 
     def load_betadata(self, gene_name):
