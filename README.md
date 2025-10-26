@@ -30,7 +30,28 @@ Install dependencies
 pip install -r requirements.txt
 ```
 
-To start using SpaceTravLR, check out our [documentation](https://microsoft.github.io/agent-lightning/) and [examples](./examples).
+Load the example [Slide-tags]((https://www.nature.com/articles/s41586-023-06837-4)) Human Tonsil data.
+
+```python
+adata = sc.read_h5ad('data/snrna_germinal_center.h5ad')
+```
+
+Create a SpaceTravLR model
+```python
+import SpaceTravLR
+
+space_lab = SpaceTravLR()
+space_lab.fit(
+    adata,
+    radius=250, 
+    num_epochs=100, 
+    learning_rate=5e-3, 
+)
+```
+
+```python
+space_lab.plot()
+```
 
 ##  Example
 
