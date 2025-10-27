@@ -24,6 +24,7 @@ Cell intrinsic regulation is captured through transcription factor (TF) terms, w
 
 
 
+
 ## Core Features
 - inferring functional cell-cell communications events
 - *in-silico* modeling of functional and spatial reprogramming following perturbations
@@ -66,9 +67,25 @@ space_lab.plot()
 ##  Example
 
 ##  Outputs
+<pre>
+Output/
+├── run_params.json
+├── PAX5_betadata.parquet
+├── FOXO1_betadata.parquet
+├── CD79A_betadata.parquet
+├── ...
+├── IL21_betadata.parquet
+├── IL4_betadata.parquet
+├── CCR4_betadata.parquet
+
+</pre>
+
 
 ##  Results
 
+<p align="center">
+  <img src="./assets/GC_FOXO1_KO.svg" alt="overview" style="width:1200px"/>
+</p>
 
 
 ##  Parallel Training & Inference
