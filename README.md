@@ -87,6 +87,10 @@ Output/
   <img src="./assets/GC_FOXO1_KO.svg" alt="overview" style="width:1200px"/>
 </p>
 
+<p align="center">
+  <img src="./assets/KO_OVX.svg" alt="overview" style="width:1200px"/>
+</p>
+
 
 ##  Parallel Training & Inference
 SpaceTravLR implements a scalable pipeline leveraging high performance computing for parallelized tensor computations to estimate the target gene expression based on spatially varying regulatory and signaling dynamics. 
