@@ -60,12 +60,6 @@ space_lab.fit(
 )
 ```
 
-```python
-space_lab.plot()
-```
-
-##  Example
-
 ##  Outputs
 <pre>
 Output/
@@ -79,6 +73,34 @@ Output/
 ├── CCR4_betadata.parquet
 
 </pre>
+
+##  Example
+KO at a specific locations
+```python
+space_lab.perturb_at(
+  target='FOXO1', 
+  locations=[
+    (4.5, 5.6), (9.8, 1.1), (5.5, 6.5), (6.7, 8.8)
+  ]
+)
+```
+
+KO within specific cell types
+```python
+space_lab.perturb_in(
+  target='FOXO1', 
+  celltypes=['GC Dark Zone']
+)
+```
+
+KO combination of genes 
+```python
+space_lab.perturb_combo(
+  target=['FOXO1', 'CXCR4'], 
+  celltypes=['GC Dark Zone']
+)
+```
+
 
 
 ##  Results
