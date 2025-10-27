@@ -216,6 +216,7 @@ class VirtualTissue:
     
     def compute_ko_impact(self, genes, 
         annot='cell_type',
+        layer='imputed_count',
         baseline_only=False,
         ):
         
@@ -248,12 +249,12 @@ class VirtualTissue:
             pbar.refresh()
             
             if baseline_only:
-                data = self.adata.to_df(layer='imputed_count')
+                data = self.adata.to_df(layer=layer)
                 data[kotarget] = 0
             else:
                 data = pd.read_parquet(ko_file)
             
-            data = data.loc[self.adata.obs_names] - self.adata.to_df(layer='imputed_count')
+            data = data.loc[self.adata.obs_names] - self.adata.to_df(layer=layer)
             data = data.join(self.adata.obs[annot]).groupby(annot).mean().abs().mean(axis=1)
 
             ds = {}

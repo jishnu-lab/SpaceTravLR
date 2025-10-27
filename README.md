@@ -1,5 +1,8 @@
 [![Tests](https://github.com/Koushul/SpaceOracle/actions/workflows/python-package-conda.yml/badge.svg?branch=main)](https://github.com/Koushul/SpaceOracle/actions/workflows/python-package-conda.yml)
 
+# Why SpaceTravLR 🌔️ ?
+
+**SpaceTravLR** (**S**patially perturbing **T**ranscription factors, **L**igands & **R**eceptors)
 
 <p align="center">
   <img src="./assets/overview.svg" alt="overview" style="width:1200px"/>
@@ -7,7 +10,7 @@
 
 Cell intrinsic regulation is captured through transcription factor (TF) terms, while signaling is modeled via distance-weighted ligand expression from neighboring sender cells to each receiver cell Specifically, signaling is captured based on both ligand-receptor and ligand-TF associations. To integrate spatial information while maintaining biological interpretability, SpaceTravLR leverages convolutional neural networks to generate a sparse graph with differentiable edges. This architecture enables signals to propagate both within cells through regulatory edges and between cells through ligand–mediated connections, and is mathematically computed by efficient, gradient-based perturbation analysis via the chain rule. 
 
-# Why SpaceTravLR 🌔️ ?
+
 
 
 
