@@ -1,0 +1,37 @@
+name: Spaceship tests
+
+on: [push]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 8
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    - name: Add conda to system path
+      run: |
+        echo $CONDA/bin >> $GITHUB_PATH
+    - name: Install dependencies
+      run: |
+        eval "$(conda shell.bash hook)"
+        conda init bash
+        source ~/.bashrc
+        conda activate base
+        pip install --user setuptools
+        pip install uv
+        uv pip install pytest --system
+        uv pip install -r requirements.txt --system
+    - name: Test with pytest
+      run: |
+        eval "$(conda shell.bash hook)"
+        conda init bash
+        source ~/.bashrc
+        conda activate base
+        pytest -vv -p no:warnings
