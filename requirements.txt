@@ -28,6 +28,7 @@ group-lasso
 pqdm
 magic-impute
 wordcloud
+simple_slurm
 # pysankeybeta
 easydict
 # velocyto==0.17.17

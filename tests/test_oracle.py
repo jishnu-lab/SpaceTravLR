@@ -10,11 +10,11 @@ import shutil
 from unittest.mock import patch, MagicMock
 from scipy.spatial import KDTree
 
-from spaceoracle.tools.network import DayThreeRegulatoryNetwork
-from spaceoracle.oracles import *
-# from spaceoracle.models.probabilistic_estimators import ProbabilisticPixelModulators
-from spaceoracle.models.parallel_estimators import received_ligands
-from spaceoracle.gene_factory import GeneFactory
+from SpaceTravLR.tools.network import DayThreeRegulatoryNetwork
+from SpaceTravLR.oracles import *
+# from SpaceTravLR.models.probabilistic_estimators import ProbabilisticPixelModulators
+from SpaceTravLR.models.parallel_estimators import received_ligands
+from SpaceTravLR.gene_factory import GeneFactory
 
 import anndata as ad
 
@@ -247,7 +247,7 @@ def test_genome_screen(mock_adata_with_true_betas, temp_dir):
         )
         
         # Mock possible_targets property
-        with patch('spaceoracle.gene_factory.GeneFactory.possible_targets', new=test_genes):
+        with patch('SpaceTravLR.gene_factory.GeneFactory.possible_targets', new=test_genes):
             # Create a subdirectory for genome screen results
             screen_dir = os.path.join(temp_dir, 'screen_results')
             os.makedirs(screen_dir, exist_ok=True)

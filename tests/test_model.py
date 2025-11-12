@@ -15,9 +15,9 @@ import tempfile
 import shutil
 import matplotlib
 
-from spaceoracle.models.parallel_estimators import SpatialCellularProgramsEstimator
-from spaceoracle.models.pixel_attention import CellularNicheNetwork
-from spaceoracle.tools.network import RegulatoryFactory
+from SpaceTravLR.models.parallel_estimators import SpatialCellularProgramsEstimator
+from SpaceTravLR.models.pixel_attention import CellularNicheNetwork
+from SpaceTravLR.tools.network import RegulatoryFactory
 
 
 class MockRegulatoryFactory:
@@ -111,7 +111,7 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
         # Clean up temporary directory
         shutil.rmtree(self.temp_dir)
     
-    # @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
+    # @patch('SpaceTravLR.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
     # def test_initialization(self):
     #     """Test that the estimator initializes correctly with valid parameters."""
     #     estimator = SpatialCellularProgramsEstimator(
@@ -141,9 +141,9 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
     #     self.assertIsNotNone(estimator.ligands)
     #     self.assertIsNotNone(estimator.receptors)
     
-    @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
-    @patch('spaceoracle.tools.network.get_cellchat_db')
-    @patch('spaceoracle.models.parallel_estimators.init_ligands_and_receptors')
+    @patch('SpaceTravLR.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
+    @patch('SpaceTravLR.tools.network.get_cellchat_db')
+    @patch('SpaceTravLR.models.parallel_estimators.init_ligands_and_receptors')
     def test_init_ligands_and_receptors(self, mock_init_ligands, mock_get_cellchat_db):
         """Test the initialization of ligands and receptors."""
         # Mock the CellChat database
@@ -187,9 +187,9 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
         self.assertEqual(estimator.tfl_ligands, ['ligand1'])
         self.assertEqual(estimator.tfl_regulators, ['TF1'])
     
-    @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
-    @patch('spaceoracle.tools.network.get_cellchat_db')
-    @patch('spaceoracle.models.parallel_estimators.received_ligands')
+    @patch('SpaceTravLR.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
+    @patch('SpaceTravLR.tools.network.get_cellchat_db')
+    @patch('SpaceTravLR.models.parallel_estimators.received_ligands')
     def test_init_data(self, mock_received_ligands, mock_get_cellchat_db):
         """Test the data initialization process."""
         # Mock the CellChat database
@@ -326,14 +326,14 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
         expected_values = received_ligands_df.values * regulator_gex_df.values
         np.testing.assert_array_almost_equal(ltf_interactions.values, expected_values)
     
-    @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
-    @patch('spaceoracle.tools.network.get_cellchat_db')
-    @patch('spaceoracle.models.parallel_estimators.received_ligands')
-    @patch('spaceoracle.models.parallel_estimators.CellularNicheNetwork', MockCellularNicheNetwork)
-    @patch('spaceoracle.models.parallel_estimators.torch.optim.Adam')
-    @patch('spaceoracle.models.parallel_estimators.DataLoader')
-    @patch('spaceoracle.models.parallel_estimators.enlighten.get_manager')
-    @patch('spaceoracle.models.parallel_estimators.RotatedTensorDataset')
+    @patch('SpaceTravLR.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
+    @patch('SpaceTravLR.tools.network.get_cellchat_db')
+    @patch('SpaceTravLR.models.parallel_estimators.received_ligands')
+    @patch('SpaceTravLR.models.parallel_estimators.CellularNicheNetwork', MockCellularNicheNetwork)
+    @patch('SpaceTravLR.models.parallel_estimators.torch.optim.Adam')
+    @patch('SpaceTravLR.models.parallel_estimators.DataLoader')
+    @patch('SpaceTravLR.models.parallel_estimators.enlighten.get_manager')
+    @patch('SpaceTravLR.models.parallel_estimators.RotatedTensorDataset')
     def test_fit_and_get_betas(self, mock_dataset, mock_manager, mock_dataloader, mock_adam, mock_received_ligands, mock_get_cellchat_db):
         """Test the fit method and getting betas."""
         # Mock the CellChat database
@@ -424,14 +424,14 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
             # Check that the betas dataframe has the expected structure
             self.assertEqual(betas.shape[0], 5)  # 5 modulators (3 TFs + 2 LR pairs)
     
-    @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
-    @patch('spaceoracle.tools.network.get_cellchat_db')
-    @patch('spaceoracle.models.parallel_estimators.received_ligands')
-    @patch('spaceoracle.models.parallel_estimators.CellularNicheNetwork', MockCellularNicheNetwork)
-    @patch('spaceoracle.models.parallel_estimators.torch.optim.Adam')
-    @patch('spaceoracle.models.parallel_estimators.DataLoader')
-    @patch('spaceoracle.models.parallel_estimators.enlighten.get_manager')
-    @patch('spaceoracle.models.parallel_estimators.RotatedTensorDataset')
+    @patch('SpaceTravLR.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
+    @patch('SpaceTravLR.tools.network.get_cellchat_db')
+    @patch('SpaceTravLR.models.parallel_estimators.received_ligands')
+    @patch('SpaceTravLR.models.parallel_estimators.CellularNicheNetwork', MockCellularNicheNetwork)
+    @patch('SpaceTravLR.models.parallel_estimators.torch.optim.Adam')
+    @patch('SpaceTravLR.models.parallel_estimators.DataLoader')
+    @patch('SpaceTravLR.models.parallel_estimators.enlighten.get_manager')
+    @patch('SpaceTravLR.models.parallel_estimators.RotatedTensorDataset')
     def test_export_and_load(self, mock_dataset, mock_manager, mock_dataloader, mock_adam, mock_received_ligands, mock_get_cellchat_db):
         """Test exporting and loading the model."""
         # Mock the CellChat database
@@ -551,9 +551,9 @@ class SpatialCellularProgramsEstimatorTest(TestCase):
                 self.assertEqual(new_estimator.tfl_ligands, ['ligand1'])
                 self.assertEqual(new_estimator.tfl_regulators, ['TF1'])
     
-    @patch('spaceoracle.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
-    @patch('spaceoracle.tools.network.get_cellchat_db')
-    @patch('spaceoracle.models.parallel_estimators.WordCloud')
+    @patch('SpaceTravLR.models.parallel_estimators.RegulatoryFactory', MockRegulatoryFactory)
+    @patch('SpaceTravLR.tools.network.get_cellchat_db')
+    @patch('SpaceTravLR.models.parallel_estimators.WordCloud')
     @patch('matplotlib.pyplot')
     def test_plot_modulators(self, mock_plt, mock_wordcloud, mock_get_cellchat_db):
         """Test the plot_modulators method."""

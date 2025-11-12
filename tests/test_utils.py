@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
-from spaceoracle.tools.utils import is_mouse_data, gaussian_kernel_2d, scale_adata
+from SpaceTravLR.tools.utils import is_mouse_data, gaussian_kernel_2d, scale_adata
 
 
 class TestIsMouseData:

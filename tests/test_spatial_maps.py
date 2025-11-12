@@ -7,8 +7,8 @@ from unittest import TestCase
 import numpy as np
 import pandas as pd
 
-from spaceoracle.models.spatial_map import xyc2spatial, xyc2spatial_fast
-from spaceoracle.models.parallel_estimators import create_spatial_features
+from SpaceTravLR.models.spatial_map import xyc2spatial, xyc2spatial_fast
+from SpaceTravLR.models.parallel_estimators import create_spatial_features
 
 class SpatialMapsTest(TestCase):
 

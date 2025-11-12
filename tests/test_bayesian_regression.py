@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 's
 import pytest
 import torch
 import numpy as np
-from spaceoracle.models.probabilistic_estimators import BayesianRegression
+from SpaceTravLR.models.probabilistic_estimators import BayesianRegression
 from sklearn.datasets import make_regression
 
 @pytest.fixture
