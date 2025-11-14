@@ -7,7 +7,7 @@ import pickle
 import pandas as pd
 import numpy as np
 import anndata
-from spaceoracle.tools.network import GeneRegulatoryNetwork, DayThreeRegulatoryNetwork
+from SpaceTravLR.tools.network import GeneRegulatoryNetwork, DayThreeRegulatoryNetwork
 import pickle
 
 

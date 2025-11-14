@@ -11,8 +11,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 
-from spaceoracle.models.pixel_attention import CellularNicheNetwork
-from spaceoracle.models.spatial_map import xyc2spatial_fast
+from SpaceTravLR.models.pixel_attention import CellularNicheNetwork
+from SpaceTravLR.models.spatial_map import xyc2spatial_fast
 
 class CellularNicheNetworkTest(TestCase):
     
