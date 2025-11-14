@@ -1,0 +1,12 @@
+# Include README and LICENSE files
+include README.md
+include LICENSE
+include requirements.txt
+
+# Include data files if needed
+# Uncomment the following lines if you want to include data files in the package
+# recursive-include data *.csv *.parquet *.h5ad
+
+# Include documentation
+# recursive-include docs *.rst *.md
+

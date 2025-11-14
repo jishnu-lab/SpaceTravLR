@@ -1,0 +1,440 @@
+#                                _..._
+#                            .'     '.      _
+#                            /    .-""-\   _/ \
+#                        .-|   /:.   |  |   |
+#                        |  \  |:.   /.-'-./
+#                        | .-'-;:__.'    =/
+#                        .'=  *=|     _.='
+#                        /   _.  |    ;
+#                        ;-.-'|    \   |
+#                        /   | \    _\  _\
+#                        \__/'._;.  ==' ==\
+#                                \    \   |
+#                                /    /   /
+#                                /-._/-._/
+#                                \   `\  \
+#                                `-._/._/
+
+
+import os
+import sys 
+import pickle
+import functools
+import time
+
+import scanpy as sc
+import numpy as np
+import pandas as pd
+import anndata as ad
+
+from datetime import timedelta
+from tqdm import tqdm
+from collections import defaultdict
+from simple_slurm import Slurm  # pyright: ignore[reportMissingImports]
+
+from SpaceTravLR.tools.network import expand_paired_interactions, get_cellchat_db
+
+from enum import Enum
+
+class Status(Enum):
+    BORN        =   "Newly born"
+    BORED       =   "Ready but not doing anything"
+    RUNNING     =   "Running"
+    SUCCESS     =   "Completed everything gracefully"
+    FUBAR       =   "F- Up Beyond Repair"
+
+""" 
+default output directory is 'output' 
+'output/input_data' stores all the inputs
+'output/logs' stores logs
+'output/betadata'  stores the spatial gene-gene networks
+
+methods with trailing underscores have side-effects but return Nothing
+code philosophy is to fail early and loudly
+"""
+
+
+def catch_and_retry(retry=1):
+    def wrapper(f):
+        @functools.wraps(f)
+        def inner(*args, **kwargs):
+            for i in range(0, retry):
+                try:
+                    return f(*args, **kwargs)
+                except Exception as e:
+                    # print(e)
+                    raise e
+                    time.sleep(i+1)
+        return inner
+    return wrapper
+
+catch_errors = catch_and_retry(retry=1) #alias
+
+class SpaceShip:
+    def __init__(self, name: str = 'AlienTissue', outdir: str = './output'):
+        self.name = name
+        self.status = Status.BORED
+        self.outdir = outdir.rstrip("/\\")
+     
+    @catch_errors
+    def process_adata_(self, adata: ad.AnnData, annot: str = 'cell_type'):
+        
+        from .oracles import BaseTravLR
+        from .tools.utils import scale_adata, is_mouse_data
+        from .tools.network import encode_labels
+        
+        assert isinstance(adata, ad.AnnData)
+        assert annot in adata.obs.columns
+        assert 'spatial' in adata.obsm
+        
+        adata = adata.copy()
+        
+        if 'normalized_count' not in adata.layers:
+            adata.layers['normalized_count'] = adata.X.copy()
+        
+        self.species = 'mouse' if is_mouse_data(adata) else 'human'
+        
+        adata = scale_adata(adata)
+        
+        adata.obs['cell_type_int'] = adata.obs[annot].apply(
+            lambda x: encode_labels(adata.obs[annot], reverse_dict=True)[x])
+        
+        if 'X_umap' not in adata.obsm:
+            sc.pp.pca(adata)
+            sc.pp.neighbors(adata)
+            sc.tl.umap(adata)
+            
+        if 'imputed_count' not in adata.layers:
+            BaseTravLR.impute_clusterwise(
+                adata, 
+                annot=annot, 
+                layer='normalized_count', 
+                layer_added='imputed_count'
+            )
+        
+        self.annot = annot
+        # self.links = {}
+        
+        # for celltype in adata.obs[annot].unique():
+        #     self.links[celltype] = self.load_base_GRN(self.species)
+        
+        # if 'cell_thresholds' not in adata.uns:
+        #     adata.uns['cell_thresholds'] = self.load_base_cell_thresholds()
+        
+        adata.write_h5ad(f'{self.outdir}/input_data/_adata.h5ad')
+        self.adata = adata
+            
+    def load_base_cell_thresholds(self) -> pd.DataFrame:
+        df_ligrec = get_cellchat_db(self.species) 
+        df_ligrec['name'] = df_ligrec['ligand'] + '-' + df_ligrec['receptor']
+        expanded = expand_paired_interactions(df_ligrec)
+        genes = set(expanded.ligand) | set(expanded.receptor)
+        genes = list(genes)
+
+        return pd.DataFrame(
+            columns=genes, 
+            index=self.adata.obs_names
+        ).fillna(1).astype(int)
+        
+    @staticmethod 
+    def load_base_GRN(species) -> pd.DataFrame:
+        assert species in ['human', 'mouse']
+        
+        # df = pd.read_parquet(
+        #     f'../data/{species}_base_grn.parquet')
+
+        data_path = os.path.join(
+            os.path.dirname(__file__), '..', 'SpaceTravLR_data', f'{species}_base_grn.parquet')
+        df = pd.read_parquet(data_path)
+
+        tf_columns = [col for col in df.columns if col not in ['peak_id', 'gene_short_name']]
+        df = df.melt(
+            id_vars=['gene_short_name'], 
+            value_vars=tf_columns,
+            var_name='source', 
+            value_name='link').query(
+                'link == 1')[['source', 'gene_short_name']].rename(
+                    columns={'gene_short_name': 'target'})
+            
+        df['coef_mean'] = 1
+        df['coef_abs'] = 1
+        df['p'] = 1e-5
+        df['-logp'] = 5
+        
+        return df
+    
+    @catch_errors  
+    def run_celloracle_(self, alpha=5):
+        try:
+            import celloracle as co  # pyright: ignore[reportMissingImports]
+        except ImportError:
+            import celloracle_tmp as co
+
+        adata = self.adata
+        
+        oracle = co.Oracle()
+        adata.X = adata.layers["raw_count"].copy()
+        oracle.import_anndata_as_raw_count(
+            adata=adata,
+            cluster_column_name=self.annot,
+            embedding_name="X_umap"
+        )
+        oracle.pcs = [True]
+        oracle.k_knn_imputation = 1
+        oracle.knn = 1
+        
+        # if self.species == 'human':
+        #     base_GRN = co.data.load_human_promoter_base_GRN()
+        # else:
+        #     base_GRN = co.data.load_mouse_promoter_base_GRN()
+        base_GRN = self.load_base_GRN(self.species)
+
+        oracle.import_TF_data(TF_info_matrix=base_GRN)
+        
+        links = oracle.get_links(
+            cluster_name_for_GRN_unit=self.annot, 
+            alpha=alpha,
+            verbose_level=0
+        )
+        
+        links.filter_links()
+        oracle.get_cluster_specific_TFdict_from_Links(links_object=links)
+        
+        self.links = links.links_dict
+        
+        with open(f'{self.outdir}/input_data/celloracle_links.pkl', 'wb') as f:
+            pickle.dump(links.links_dict, f)
+    
+    @catch_errors
+    def run_commot_(self, radius=350):
+        from .tools.network import expand_paired_interactions
+        from .tools.network import get_cellchat_db
+        from .models.parallel_estimators import init_received_ligands
+        import commot as ct
+        
+        adata = self.adata
+        
+        df_ligrec = get_cellchat_db(self.species) 
+        df_ligrec['name'] = df_ligrec['ligand'] + '-' + df_ligrec['receptor']
+        
+        expanded = expand_paired_interactions(df_ligrec)
+        genes = set(expanded.ligand) | set(expanded.receptor)
+        genes = list(genes)
+
+        expanded = expanded[
+            expanded.ligand.isin(adata.var_names) & expanded.receptor.isin(adata.var_names)]
+        
+        adata.X = adata.layers['normalized_count']
+        
+        ct.tl.spatial_communication(adata,
+            database_name='user_database', 
+            df_ligrec=expanded, 
+            dis_thr=radius, 
+            heteromeric=False
+        )
+        
+        expanded['rename'] = expanded['ligand'] + '-' + expanded['receptor']
+            
+        for name in expanded['rename'].unique():
+            ct.tl.cluster_communication(
+                adata, 
+                database_name='user_database', 
+                pathway_name=name, 
+                clustering='cell_type',
+                random_seed=42, 
+                n_permutations=100
+            )
+            
+        data_dict = defaultdict(dict)
+
+        for name in expanded['rename']:
+            data_dict[name]['communication_matrix'] = adata.uns[
+                f'commot_cluster-cell_type-user_database-{name}']['communication_matrix']
+            data_dict[name]['communication_pvalue'] = adata.uns[
+                f'commot_cluster-cell_type-user_database-{name}']['communication_pvalue']
+
+        with open(f'{self.outdir}/input_data/communication.pkl', 'wb') as f:
+            pickle.dump(data_dict, f)
+            
+        info = data_dict
+        
+        def get_sig_interactions(value_matrix, p_matrix, pval=0.3):
+            p_matrix = np.where(p_matrix < pval, 1, 0)
+            return value_matrix * p_matrix
+        
+        interactions = {}
+        for lig, rec in tqdm(zip(expanded['ligand'], expanded['receptor'])):
+            name = lig + '-' + rec
+            if name in info.keys():
+                value_matrix = info[name]['communication_matrix']
+                p_matrix = info[name]['communication_pvalue']
+                sig_matrix = get_sig_interactions(value_matrix, p_matrix)
+                if sig_matrix.sum().sum() > 0:
+                    interactions[name] = sig_matrix
+                    
+                    
+        ct_masks = {ct: adata.obs[self.annot] == ct for ct in adata.obs[self.annot].unique()}
+        df = pd.DataFrame(index=adata.obs_names, columns=genes)
+        df = df.fillna(0)
+        for name in tqdm(interactions.keys(), total=len(interactions)):
+            lig, rec = name.rsplit('-', 1)
+            tmp = interactions[name].sum(axis=1)
+            for ct, val in zip(interactions[name].index, tmp):
+                df.loc[ct_masks[ct], lig] += tmp[ct]
+            tmp = interactions[name].sum(axis=0)
+            for ct, val in zip(interactions[name].columns, tmp):
+                df.loc[ct_masks[ct], rec] += tmp[ct]
+                
+        perc_filtered = np.where(df > 0, 1, 0).sum().sum() / (df.shape[0] * df.shape[1])      
+        
+        df.to_parquet(f'{self.outdir}/input_data/LRs.parquet')
+        
+        adata.uns['cell_thresholds'] = df.copy()
+        
+        adata = init_received_ligands(
+            adata, 
+            radius=radius, 
+            cell_threshes=df
+        )
+        
+        keys = list(adata.obsm.keys())
+        for key in keys:
+            if 'commot' in key:
+                del adata.obsm[key]
+                
+        keys = list(adata.uns.keys())
+        for key in keys:
+            if 'commot' in key:
+                del adata.uns[key]
+                
+        keys = list(adata.obsp.keys())
+        for key in keys:
+            if 'commot' in key:
+                del adata.obsp[key]
+                
+                
+        self.adata = adata.copy()
+        adata.write_h5ad(f'{self.outdir}/input_data/_adata.h5ad')
+
+    def setup_(self, adata: ad.AnnData, overwrite=False):
+        if os.path.exists(self.outdir) and not overwrite:
+            print("Warning: output directory already exists. Will not overwrite.")
+            self.status = Status.FUBAR
+            return
+        
+        os.makedirs(self.outdir, exist_ok=True)
+        os.makedirs(f'{self.outdir}/betadata', exist_ok=True)
+        os.makedirs(f'{self.outdir}/input_data', exist_ok=True)
+        os.makedirs(f'{self.outdir}/logs', exist_ok=True)
+        
+        self.status = Status.RUNNING
+        
+        self.process_adata_(adata)
+        self.run_celloracle_()
+        self.run_commot_()
+        self.get_nichenet_links_()
+        
+        self.status = Status.BORED
+        
+        return self
+    
+    def get_nichenet_links_(self):
+        # need to download the nichenet links from the zenodo repository before running on GPU
+        
+        data_path = f'https://zenodo.org/records/17594271/files/ligand_target_{self.species}.parquet'
+        nichenet_lt = pd.read_parquet(data_path)
+        nichenet_lt.to_parquet(f'{self.outdir}/input_data/tflinks.parquet')
+        return nichenet_lt
+        
+        
+    def spawn_worker(
+        self, 
+        partition='preempt', 
+        clusters='gpu', 
+        gres='gpu:1', 
+        job_name='SpaceTravLR',
+        lifespan=3, # hours
+        python_path='python',
+        ):
+        
+        outlog = f'{self.outdir}/logs/training_{str(time.strftime("%Y%m%d_%H%M%S"))}.log'
+        
+        slurm = Slurm(
+            cpus_per_task=1,
+            partition=partition,
+            clusters=clusters,
+            gres=gres,
+            ignore_pbs=True,
+            job_name=job_name+'_'+self.name,
+            output=outlog,
+            time=timedelta(hours=lifespan),
+        ) 
+        
+        # slurm.add_cmd("mamba activate SpaceOracle")
+        slurm.sbatch(python_path + ' launch.py')
+        # slurm.sbatch('python launch.py')
+        
+    @catch_errors
+    def run_spacetravlr(
+        self, 
+        max_epochs: int = 150, 
+        learning_rate: float = 5e-3, 
+        spatial_dim: int = 64, 
+        batch_size: int = 512, 
+        radius: int = 300, 
+        contact_distance: int = 50,
+    ):
+        
+        from .oracles import SpaceTravLR
+        from .tools.network import RegulatoryFactory
+        
+        base_dir = f'{self.outdir}/betadata/'
+        adata = sc.read_h5ad(f'{self.outdir}/input_data/_adata.h5ad')
+        tflinks = pd.read_parquet(f'{self.outdir}/input_data/tflinks.parquet')
+        links = pickle.load(open(f'{self.outdir}/input_data/celloracle_links.pkl', 'rb'))
+
+        co_grn = RegulatoryFactory(links=links)
+        
+        space_travlr = SpaceTravLR(
+            adata=adata,
+            max_epochs=max_epochs, 
+            learning_rate=learning_rate, 
+            spatial_dim=spatial_dim,
+            batch_size=batch_size,
+            grn=co_grn,
+            radius=radius,
+            contact_distance=contact_distance,
+            save_dir=base_dir,
+            tflinks=tflinks
+        )
+
+        space_travlr.run()
+
+    #@alias
+    def fit(self, **kwargs): return self.run_spacetravlr(**kwargs)
+    
+
+    def is_everything_ok(self) -> bool:
+        assert os.path.isfile(f'{self.outdir}/input_data/_adata.h5ad'), "AnnData file not found"
+        _adata = sc.read_h5ad(f'{self.outdir}/input_data/_adata.h5ad')
+        _links = pickle.load(open(f'{self.outdir}/input_data/celloracle_links.pkl', 'rb'))
+        
+        assert 'normalized_count' in _adata.layers, "Normalized count layer not found"
+        assert 'imputed_count' in _adata.layers, "Imputed count layer not found"
+        assert 'X_umap' in _adata.obsm, "UMAP embedding not found"
+        assert 'cell_type_int' in _adata.obs.columns, "Cell type integer column not found"
+        assert 'spatial' in _adata.obsm, "Spatial coordinates not found"
+        
+        assert os.path.isdir(self.outdir), "Output directory not found"
+        assert os.path.isdir(f'{self.outdir}/betadata'), "Betadata directory not found"
+        assert os.path.isdir(f'{self.outdir}/input_data'), "Input data directory not found"
+        assert os.path.isfile(f'{self.outdir}/input_data/celloracle_links.pkl'), "Base links file not found"
+        assert os.path.isdir(f'{self.outdir}/logs'), "Logs directory not found"
+        assert os.path.isfile('launch.py'), "Launch script not found"
+        
+        print("We're going on a trip in our favorite rocket ship 🚀️")
+        
+        return True
+
+
+
