@@ -66,10 +66,12 @@ class GeneRegulatoryNetwork:
         if organism == 'mouse':
             # self.data = co.data.load_mouse_scATAC_atlas_base_GRN()
             
+            # data_path = os.path.join(
+            #     os.path.dirname(__file__), '..', '..', '..', 'data', 'mm9_mouse_atac_atlas_data_TSS.parquet')
             data_path = os.path.join(
-                os.path.dirname(__file__), '..', '..', '..', 'data', 'mm9_mouse_atac_atlas_data_TSS.parquet')
+                os.path.dirname(__file__), '..', '..', 'SpaceTravLR_data', 'mouse_base_grn.parquet')
             self.data = pd.read_parquet(data_path)
-            
+    
     def get_regulators(self, adata, target_gene):
         base_GRN = self.data
         
@@ -78,7 +80,7 @@ class GeneRegulatoryNetwork:
         df = df[df!=0]
         
         return df.index.tolist()
-        
+            
 
 class CellOracleLinks:
     
