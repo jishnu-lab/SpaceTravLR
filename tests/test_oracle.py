@@ -4,7 +4,7 @@ import pandas as pd
 import os
 import sys
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 import tempfile
 import shutil
 from unittest.mock import patch, MagicMock
@@ -112,9 +112,13 @@ class MockRegulatoryFactory:
 
 def generate_realistic_data(noise_level=0.1):
     np.random.seed(42)
-    adata = ad.read_h5ad('./data/snrna_germinal_center.h5ad')
-    grn = MockRegulatoryFactory(
-    )
+    print(os.getcwd())
+    # Get path relative to test file location
+    test_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(test_dir, '..', 'data', 'snrna_germinal_center.h5ad')
+    data_path = os.path.abspath(data_path)
+    adata = ad.read_h5ad(data_path)
+    grn = MockRegulatoryFactory()
 
     regulators = grn.get_regulators(adata, 'Cd74')[:5]
 

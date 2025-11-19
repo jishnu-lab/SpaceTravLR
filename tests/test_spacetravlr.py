@@ -2,8 +2,8 @@ import unittest
 import numpy as np
 import pandas as pd 
 import os
-import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
+# import sys
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 import tempfile
 import shutil
 import pickle
@@ -45,6 +45,12 @@ def create_test_adata(n_cells=100, n_genes=50, species='human'):
     
     return adata
 
+def create_test_tfls(gene_names, n_ligands=10, n_tfs=10):
+    cols = np.random.choice(gene_names, size=n_ligands, replace=False)
+    tfs = np.random.choice(gene_names, size=n_tfs, replace=False)
+    df_vals = np.random.rand(n_ligands, n_tfs)
+    df = pd.DataFrame(df_vals, index=cols, columns=tfs)
+    return df
 
 class TestSpaceShip(unittest.TestCase):
     
@@ -61,11 +67,13 @@ class TestSpaceShip(unittest.TestCase):
     def test_init(self):
         ship = SpaceShip()
         assert ship.name == 'AlienTissue'
-        assert ship.status == Status.BORED
+        assert ship.status == Status.BORN
+        del ship
         
         ship = SpaceShip(name='TestShip')
         assert ship.name == 'TestShip'
-        assert ship.status == Status.BORED
+        assert ship.status == Status.BORN
+        del ship
     
     def test_process_adata_basic(self):
         os.makedirs('output/input_data', exist_ok=True)
@@ -139,6 +147,8 @@ class TestSpaceShip(unittest.TestCase):
         
         with patch('pandas.read_parquet', return_value=mock_df):
             result = SpaceShip.load_base_GRN('human')
+
+            print(result.head())
             
             assert isinstance(result, pd.DataFrame)
             assert 'source' in result.columns
@@ -186,7 +196,7 @@ class TestSpaceShip(unittest.TestCase):
         mock_co.data.load_human_promoter_base_GRN.return_value = pd.DataFrame()
         
         with patch('SpaceTravLR.spaceship.sys.path'), \
-             patch.dict('sys.modules', {'celloracle': mock_co}):
+             patch.dict('sys.modules', {'celloracle_tmp': mock_co}):
             ship.run_celloracle_(alpha=5)
             
             self.assertTrue(hasattr(ship, 'links'))
@@ -228,10 +238,6 @@ class TestSpaceShip(unittest.TestCase):
              patch.object(ship, 'run_commot_') as mock_commot, \
              patch.object(ship, 'get_nichenet_links_') as mock_nichenet:
             
-            def set_species(*args, **kwargs):
-                ship.species = 'human'
-            mock_process.side_effect = set_species
-            
             result = ship.setup_(adata, overwrite=False)
             
             assert ship.status == Status.BORED
@@ -263,10 +269,6 @@ class TestSpaceShip(unittest.TestCase):
              patch.object(ship, 'run_celloracle_') as mock_celloracle, \
              patch.object(ship, 'run_commot_') as mock_commot, \
              patch.object(ship, 'get_nichenet_links_') as mock_nichenet:
-            
-            def set_species(*args, **kwargs):
-                ship.species = 'human'
-            mock_process.side_effect = set_species
             
             result = ship.setup_(adata, overwrite=True)
             
@@ -307,6 +309,9 @@ class TestSpaceShip(unittest.TestCase):
         mock_links = {'TypeA': pd.DataFrame(), 'TypeB': pd.DataFrame()}
         with open('output/input_data/celloracle_links.pkl', 'wb') as f:
             pickle.dump(mock_links, f)
+
+        mock_nichenet_links = create_test_tfls(adata.var_names, n_ligands=3, n_tfs=10)
+        mock_nichenet_links.to_parquet('output/input_data/tflinks.parquet')
         
         mock_tflinks = pd.DataFrame({'ligand': ['Lig1'], 'target': ['Gene1'], 'weight': [0.5]})
         
@@ -314,9 +319,7 @@ class TestSpaceShip(unittest.TestCase):
         mock_regulatory_factory = MagicMock()
         
         with patch('SpaceTravLR.oracles.SpaceTravLR', return_value=mock_space_travlr), \
-             patch('SpaceTravLR.tools.network.RegulatoryFactory', return_value=mock_regulatory_factory), \
-             patch('SpaceTravLR.spaceship.pd.read_parquet', return_value=mock_tflinks):
-            
+             patch('SpaceTravLR.tools.network.RegulatoryFactory', return_value=mock_regulatory_factory):            
             ship.run_spacetravlr(
                 max_epochs=10,
                 learning_rate=1e-3,

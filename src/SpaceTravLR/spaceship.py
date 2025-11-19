@@ -26,6 +26,7 @@ import scanpy as sc
 import numpy as np
 import pandas as pd
 import anndata as ad
+import enlighten
 
 from datetime import timedelta
 from tqdm import tqdm
@@ -35,6 +36,9 @@ from simple_slurm import Slurm  # pyright: ignore[reportMissingImports]
 from SpaceTravLR.tools.network import expand_paired_interactions, get_cellchat_db
 
 from enum import Enum
+
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning)
 
 class Status(Enum):
     BORN        =   "Newly born"
@@ -73,8 +77,11 @@ catch_errors = catch_and_retry(retry=1) #alias
 class SpaceShip:
     def __init__(self, name: str = 'AlienTissue', outdir: str = './output'):
         self.name = name
-        self.status = Status.BORED
         self.outdir = outdir.rstrip("/\\")
+        self.manager = None
+        self.status_bar = None
+        
+        self.status = Status.BORN
      
     @catch_errors
     def process_adata_(self, adata: ad.AnnData, annot: str = 'cell_type'):
@@ -83,6 +90,9 @@ class SpaceShip:
         from .tools.utils import scale_adata, is_mouse_data
         from .tools.network import encode_labels
         
+        if self.status_bar:
+            self.status_bar.update('📊 Processing AnnData: Validating input...')
+        
         assert isinstance(adata, ad.AnnData)
         assert annot in adata.obs.columns
         assert 'spatial' in adata.obsm
@@ -90,21 +100,31 @@ class SpaceShip:
         adata = adata.copy()
         
         if 'normalized_count' not in adata.layers:
+            if self.status_bar:
+                self.status_bar.update('📊 Processing AnnData: Creating normalized count layer...')
             adata.layers['normalized_count'] = adata.X.copy()
         
         self.species = 'mouse' if is_mouse_data(adata) else 'human'
         
+        if self.status_bar:
+            self.status_bar.update('📊 Processing AnnData: Scaling data...')
         adata = scale_adata(adata)
         
+        if self.status_bar:
+            self.status_bar.update('📊 Processing AnnData: Encoding cell types...')
         adata.obs['cell_type_int'] = adata.obs[annot].apply(
             lambda x: encode_labels(adata.obs[annot], reverse_dict=True)[x])
         
         if 'X_umap' not in adata.obsm:
+            if self.status_bar:
+                self.status_bar.update('📊 Processing AnnData: Computing PCA, neighbors, and UMAP...')
             sc.pp.pca(adata)
             sc.pp.neighbors(adata)
             sc.tl.umap(adata)
             
         if 'imputed_count' not in adata.layers:
+            if self.status_bar:
+                self.status_bar.update('📊 Processing AnnData: Imputing cluster-wise counts...')
             BaseTravLR.impute_clusterwise(
                 adata, 
                 annot=annot, 
@@ -113,16 +133,14 @@ class SpaceShip:
             )
         
         self.annot = annot
-        # self.links = {}
         
-        # for celltype in adata.obs[annot].unique():
-        #     self.links[celltype] = self.load_base_GRN(self.species)
-        
-        # if 'cell_thresholds' not in adata.uns:
-        #     adata.uns['cell_thresholds'] = self.load_base_cell_thresholds()
-        
+        if self.status_bar:
+            self.status_bar.update('📊 Processing AnnData: Saving processed data...')
         adata.write_h5ad(f'{self.outdir}/input_data/_adata.h5ad')
         self.adata = adata
+        
+        if self.status_bar:
+            self.status_bar.update('✅ Processing AnnData: Complete')
             
     def load_base_cell_thresholds(self) -> pd.DataFrame:
         df_ligrec = get_cellchat_db(self.species) 
@@ -139,9 +157,6 @@ class SpaceShip:
     @staticmethod 
     def load_base_GRN(species) -> pd.DataFrame:
         assert species in ['human', 'mouse']
-        
-        # df = pd.read_parquet(
-        #     f'../data/{species}_base_grn.parquet')
 
         data_path = os.path.join(
             os.path.dirname(__file__), '..', 'SpaceTravLR_data', f'{species}_base_grn.parquet')
@@ -165,15 +180,16 @@ class SpaceShip:
     
     @catch_errors  
     def run_celloracle_(self, alpha=5):
-        try:
-            import celloracle as co  # pyright: ignore[reportMissingImports]
-        except ImportError:
-            import celloracle_tmp as co
+        if self.status_bar:
+            self.status_bar.update('Building base GRN...')
+        
+        import celloracle_tmp as co
 
         adata = self.adata
         
         oracle = co.Oracle()
         adata.X = adata.layers["raw_count"].copy()
+        
         oracle.import_anndata_as_raw_count(
             adata=adata,
             cluster_column_name=self.annot,
@@ -183,20 +199,19 @@ class SpaceShip:
         oracle.k_knn_imputation = 1
         oracle.knn = 1
         
-        # if self.species == 'human':
-        #     base_GRN = co.data.load_human_promoter_base_GRN()
-        # else:
-        #     base_GRN = co.data.load_mouse_promoter_base_GRN()
         base_GRN = self.load_base_GRN(self.species)
 
         oracle.import_TF_data(TF_info_matrix=base_GRN)
+        
+        if self.status_bar:
+            self.status_bar.update('Computing & filtering TF links...')
         
         links = oracle.get_links(
             cluster_name_for_GRN_unit=self.annot, 
             alpha=alpha,
             verbose_level=0
         )
-        
+
         links.filter_links()
         oracle.get_cluster_specific_TFdict_from_Links(links_object=links)
         
@@ -204,6 +219,7 @@ class SpaceShip:
         
         with open(f'{self.outdir}/input_data/celloracle_links.pkl', 'wb') as f:
             pickle.dump(links.links_dict, f)
+
     
     @catch_errors
     def run_commot_(self, radius=350):
@@ -214,9 +230,13 @@ class SpaceShip:
         
         adata = self.adata
         
+        if self.status_bar:
+            self.status_bar.update('Loading ligand-receptor database...')
         df_ligrec = get_cellchat_db(self.species) 
         df_ligrec['name'] = df_ligrec['ligand'] + '-' + df_ligrec['receptor']
         
+        if self.status_bar:
+            self.status_bar.update('🔬 Commot: Expanding paired interactions...')
         expanded = expand_paired_interactions(df_ligrec)
         genes = set(expanded.ligand) | set(expanded.receptor)
         genes = list(genes)
@@ -226,6 +246,8 @@ class SpaceShip:
         
         adata.X = adata.layers['normalized_count']
         
+        if self.status_bar:
+            self.status_bar.update('🔬 COMMOT: Computing spatial communication...')
         ct.tl.spatial_communication(adata,
             database_name='user_database', 
             df_ligrec=expanded, 
@@ -234,8 +256,13 @@ class SpaceShip:
         )
         
         expanded['rename'] = expanded['ligand'] + '-' + expanded['receptor']
-            
-        for name in expanded['rename'].unique():
+        
+        if self.status_bar:
+            self.status_bar.update(f'Computing cluster communication for {len(expanded["rename"].unique())} pathways...')
+        unique_pathways = expanded['rename'].unique()
+        for idx, name in enumerate(unique_pathways):
+            if self.status_bar:
+                self.status_bar.update(f'🔬 Commot: Cluster communication {idx+1}/{len(unique_pathways)}: {name[:30]}...')
             ct.tl.cluster_communication(
                 adata, 
                 database_name='user_database', 
@@ -262,6 +289,8 @@ class SpaceShip:
             p_matrix = np.where(p_matrix < pval, 1, 0)
             return value_matrix * p_matrix
         
+        if self.status_bar:
+            self.status_bar.update('Processing significant interactions...')
         interactions = {}
         for lig, rec in tqdm(zip(expanded['ligand'], expanded['receptor'])):
             name = lig + '-' + rec
@@ -272,18 +301,19 @@ class SpaceShip:
                 if sig_matrix.sum().sum() > 0:
                     interactions[name] = sig_matrix
                     
-                    
-        ct_masks = {ct: adata.obs[self.annot] == ct for ct in adata.obs[self.annot].unique()}
+        if self.status_bar:
+            self.status_bar.update('Computing ligand-receptor thresholds...')
+        ct_masks = {cell_type: adata.obs[self.annot] == cell_type for cell_type in adata.obs[self.annot].unique()}
         df = pd.DataFrame(index=adata.obs_names, columns=genes)
         df = df.fillna(0)
         for name in tqdm(interactions.keys(), total=len(interactions)):
             lig, rec = name.rsplit('-', 1)
             tmp = interactions[name].sum(axis=1)
-            for ct, val in zip(interactions[name].index, tmp):
-                df.loc[ct_masks[ct], lig] += tmp[ct]
+            for cell_type, val in zip(interactions[name].index, tmp):
+                df.loc[ct_masks[cell_type], lig] += tmp[cell_type]
             tmp = interactions[name].sum(axis=0)
-            for ct, val in zip(interactions[name].columns, tmp):
-                df.loc[ct_masks[ct], rec] += tmp[ct]
+            for cell_type, val in zip(interactions[name].columns, tmp):
+                df.loc[ct_masks[cell_type], rec] += tmp[cell_type]
                 
         perc_filtered = np.where(df > 0, 1, 0).sum().sum() / (df.shape[0] * df.shape[1])      
         
@@ -291,6 +321,8 @@ class SpaceShip:
         
         adata.uns['cell_thresholds'] = df.copy()
         
+        if self.status_bar:
+            self.status_bar.update('Caching received ligands...')
         adata = init_received_ligands(
             adata, 
             radius=radius, 
@@ -311,10 +343,10 @@ class SpaceShip:
         for key in keys:
             if 'commot' in key:
                 del adata.obsp[key]
-                
-                
+
         self.adata = adata.copy()
         adata.write_h5ad(f'{self.outdir}/input_data/_adata.h5ad')
+        self.status = Status.BORED
 
     def setup_(self, adata: ad.AnnData, overwrite=False):
         if os.path.exists(self.outdir) and not overwrite:
@@ -322,6 +354,16 @@ class SpaceShip:
             self.status = Status.FUBAR
             return
         
+        self.manager = enlighten.get_manager()
+        self.status_bar = self.manager.status_bar(
+            f'🚀 SpaceShip {self.name}: Initializing...',
+            color='black_on_cyan',
+            justify=enlighten.Justify.CENTER,
+            auto_refresh=True
+        )
+        
+        if self.status_bar:
+            self.status_bar.update('🚀 SpaceShip: Creating output directories...')
         os.makedirs(self.outdir, exist_ok=True)
         os.makedirs(f'{self.outdir}/betadata', exist_ok=True)
         os.makedirs(f'{self.outdir}/input_data', exist_ok=True)
@@ -334,16 +376,25 @@ class SpaceShip:
         self.run_commot_()
         self.get_nichenet_links_()
         
+        if self.status_bar:
+            self.status_bar.update('✅ SpaceShip: Setup complete!')
         self.status = Status.BORED
         
         return self
     
     def get_nichenet_links_(self):
-        # need to download the nichenet links from the zenodo repository before running on GPU
+        if self.status_bar:
+            self.status_bar.update('🔗 NicheNet: Downloading ligand-target links...')
         
         data_path = f'https://zenodo.org/records/17594271/files/ligand_target_{self.species}.parquet'
         nichenet_lt = pd.read_parquet(data_path)
+        
+        if self.status_bar:
+            self.status_bar.update('🔗 NicheNet: Saving links...')
         nichenet_lt.to_parquet(f'{self.outdir}/input_data/tflinks.parquet')
+        
+        if self.status_bar:
+            self.status_bar.update('✅ NicheNet: Complete')
         return nichenet_lt
         
         
@@ -370,9 +421,7 @@ class SpaceShip:
             time=timedelta(hours=lifespan),
         ) 
         
-        # slurm.add_cmd("mamba activate SpaceOracle")
         slurm.sbatch(python_path + ' launch.py')
-        # slurm.sbatch('python launch.py')
         
     @catch_errors
     def run_spacetravlr(

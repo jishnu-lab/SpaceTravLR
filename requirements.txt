@@ -23,7 +23,7 @@ torchvision
 pyarrow
 enlighten
 pyro-ppl
-# commot
+commot
 group-lasso
 pqdm
 magic-impute

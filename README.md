@@ -17,12 +17,9 @@ SpaceTravLR leverages convolutional neural networks to generate a sparse graph w
 
 
 ## Core Features
+- predicting niche-specific perturbation outcome at single cell resolution
 - inferring functional cell-cell communications events
-- *in-silico* modeling of functional and spatial reprogramming following perturbations
 - identifying spatial domains and functional microniches and their driver genes
-
-Read more on our [documentation website](https://).
-
 
 
 ##  Quick start
@@ -32,10 +29,17 @@ Make & sync your Environment the [modern](https://docs.astral.sh/uv/) way
 ~~pip install -r requirements.txt~~
 
 ```bash
-uv env
+uv pip install SpaceTravLR==0.1.16
+```
+
+
+## Installing from Source
+```bash
+uv venv
 source .venv/bin/activate
 uv sync
 ```
+
 
 Load the example [Slide-tags]((https://www.nature.com/articles/s41586-023-06837-4)) Human Tonsil data.
 
@@ -51,11 +55,13 @@ spacetravlr = SpaceShip(name='myTonsil').setup_(adata)
 
 assert spacetravlr.is_everything_ok()
 
-spacetravlr.spawn_worker(partition='l40s')
+spacetravlr.spawn_worker(
+    python_path='.venv/bin/python',
+    partition='preempt'
+)
 ```
 
-SpaceTravLR generates a queue of genes that each worker consumes in parallel. 
-spacetravlr.spawn_worker submits a new job to the clusters.
+SpaceTravLR generates a queue of genes that each worker consumes in parallel. spacetravlr.spawn_worker submits a new job to the clusters.
 
 
 ##  Outputs
