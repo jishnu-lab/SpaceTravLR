@@ -29,7 +29,7 @@ Make & sync your Environment the [modern](https://docs.astral.sh/uv/) way
 ~~pip install -r requirements.txt~~
 
 ```bash
-uv pip install SpaceTravLR==0.1.16
+uv pip install SpaceTravLR==0.1.17
 ```
 
 

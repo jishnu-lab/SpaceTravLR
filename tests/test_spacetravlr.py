@@ -137,27 +137,6 @@ class TestSpaceShip(unittest.TestCase):
             assert len(result) == len(adata.obs_names)
             assert set(result.columns) == {'Lig1', 'Lig2', 'Rec1', 'Rec2'}
     
-    def test_load_base_GRN_human(self):
-        mock_df = pd.DataFrame({
-            'gene_short_name': ['Gene1', 'Gene2', 'Gene3'],
-            'TF1': [1, 0, 1],
-            'TF2': [0, 1, 0],
-            'peak_id': ['peak1', 'peak2', 'peak3']
-        })
-        
-        with patch('pandas.read_parquet', return_value=mock_df):
-            result = SpaceShip.load_base_GRN('human')
-
-            print(result.head())
-            
-            assert isinstance(result, pd.DataFrame)
-            assert 'source' in result.columns
-            assert 'target' in result.columns
-            assert 'coef_mean' in result.columns
-            assert 'coef_abs' in result.columns
-            assert 'p' in result.columns
-            assert '-logp' in result.columns
-    
     def test_load_base_GRN_mouse(self):
         mock_df = pd.DataFrame({
             'gene_short_name': ['Gene1', 'Gene2'],

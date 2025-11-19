@@ -162,19 +162,19 @@ class SpaceShip:
             os.path.dirname(__file__), '..', 'SpaceTravLR_data', f'{species}_base_grn.parquet')
         df = pd.read_parquet(data_path)
 
-        tf_columns = [col for col in df.columns if col not in ['peak_id', 'gene_short_name']]
-        df = df.melt(
-            id_vars=['gene_short_name'], 
-            value_vars=tf_columns,
-            var_name='source', 
-            value_name='link').query(
-                'link == 1')[['source', 'gene_short_name']].rename(
-                    columns={'gene_short_name': 'target'})
+        # tf_columns = [col for col in df.columns if col not in ['peak_id', 'gene_short_name']]
+        # df = df.melt(
+        #     id_vars=['gene_short_name'], 
+        #     value_vars=tf_columns,
+        #     var_name='source', 
+        #     value_name='link').query(
+        #         'link == 1')[['source', 'gene_short_name']].rename(
+        #             columns={'gene_short_name': 'target'})
             
-        df['coef_mean'] = 1
-        df['coef_abs'] = 1
-        df['p'] = 1e-5
-        df['-logp'] = 5
+        # df['coef_mean'] = 1
+        # df['coef_abs'] = 1
+        # df['p'] = 1e-5
+        # df['-logp'] = 5
         
         return df
     
@@ -229,97 +229,102 @@ class SpaceShip:
         import commot as ct
         
         adata = self.adata
-        
-        if self.status_bar:
-            self.status_bar.update('Loading ligand-receptor database...')
-        df_ligrec = get_cellchat_db(self.species) 
-        df_ligrec['name'] = df_ligrec['ligand'] + '-' + df_ligrec['receptor']
-        
-        if self.status_bar:
-            self.status_bar.update('🔬 Commot: Expanding paired interactions...')
-        expanded = expand_paired_interactions(df_ligrec)
-        genes = set(expanded.ligand) | set(expanded.receptor)
-        genes = list(genes)
 
-        expanded = expanded[
-            expanded.ligand.isin(adata.var_names) & expanded.receptor.isin(adata.var_names)]
-        
-        adata.X = adata.layers['normalized_count']
-        
-        if self.status_bar:
-            self.status_bar.update('🔬 COMMOT: Computing spatial communication...')
-        ct.tl.spatial_communication(adata,
-            database_name='user_database', 
-            df_ligrec=expanded, 
-            dis_thr=radius, 
-            heteromeric=False
-        )
-        
-        expanded['rename'] = expanded['ligand'] + '-' + expanded['receptor']
-        
-        if self.status_bar:
-            self.status_bar.update(f'Computing cluster communication for {len(expanded["rename"].unique())} pathways...')
-        unique_pathways = expanded['rename'].unique()
-        for idx, name in enumerate(unique_pathways):
+        if 'cell_thresholds' not in adata.uns:
+
             if self.status_bar:
-                self.status_bar.update(f'🔬 Commot: Cluster communication {idx+1}/{len(unique_pathways)}: {name[:30]}...')
-            ct.tl.cluster_communication(
-                adata, 
+                self.status_bar.update('Loading ligand-receptor database...')
+            df_ligrec = get_cellchat_db(self.species) 
+            df_ligrec['name'] = df_ligrec['ligand'] + '-' + df_ligrec['receptor']
+            
+            if self.status_bar:
+                self.status_bar.update('🔬 Commot: Expanding paired interactions...')
+            expanded = expand_paired_interactions(df_ligrec)
+            genes = set(expanded.ligand) | set(expanded.receptor)
+            genes = list(genes)
+
+            expanded = expanded[
+                expanded.ligand.isin(adata.var_names) & expanded.receptor.isin(adata.var_names)]
+            
+            adata.X = adata.layers['normalized_count']
+            
+            if self.status_bar:
+                self.status_bar.update('🔬 COMMOT: Computing spatial communication...')
+            ct.tl.spatial_communication(adata,
                 database_name='user_database', 
-                pathway_name=name, 
-                clustering='cell_type',
-                random_seed=42, 
-                n_permutations=100
+                df_ligrec=expanded, 
+                dis_thr=radius, 
+                heteromeric=False
             )
             
-        data_dict = defaultdict(dict)
-
-        for name in expanded['rename']:
-            data_dict[name]['communication_matrix'] = adata.uns[
-                f'commot_cluster-cell_type-user_database-{name}']['communication_matrix']
-            data_dict[name]['communication_pvalue'] = adata.uns[
-                f'commot_cluster-cell_type-user_database-{name}']['communication_pvalue']
-
-        with open(f'{self.outdir}/input_data/communication.pkl', 'wb') as f:
-            pickle.dump(data_dict, f)
+            expanded['rename'] = expanded['ligand'] + '-' + expanded['receptor']
             
-        info = data_dict
-        
-        def get_sig_interactions(value_matrix, p_matrix, pval=0.3):
-            p_matrix = np.where(p_matrix < pval, 1, 0)
-            return value_matrix * p_matrix
-        
-        if self.status_bar:
-            self.status_bar.update('Processing significant interactions...')
-        interactions = {}
-        for lig, rec in tqdm(zip(expanded['ligand'], expanded['receptor'])):
-            name = lig + '-' + rec
-            if name in info.keys():
-                value_matrix = info[name]['communication_matrix']
-                p_matrix = info[name]['communication_pvalue']
-                sig_matrix = get_sig_interactions(value_matrix, p_matrix)
-                if sig_matrix.sum().sum() > 0:
-                    interactions[name] = sig_matrix
-                    
-        if self.status_bar:
-            self.status_bar.update('Computing ligand-receptor thresholds...')
-        ct_masks = {cell_type: adata.obs[self.annot] == cell_type for cell_type in adata.obs[self.annot].unique()}
-        df = pd.DataFrame(index=adata.obs_names, columns=genes)
-        df = df.fillna(0)
-        for name in tqdm(interactions.keys(), total=len(interactions)):
-            lig, rec = name.rsplit('-', 1)
-            tmp = interactions[name].sum(axis=1)
-            for cell_type, val in zip(interactions[name].index, tmp):
-                df.loc[ct_masks[cell_type], lig] += tmp[cell_type]
-            tmp = interactions[name].sum(axis=0)
-            for cell_type, val in zip(interactions[name].columns, tmp):
-                df.loc[ct_masks[cell_type], rec] += tmp[cell_type]
+            if self.status_bar:
+                self.status_bar.update(f'Computing cluster communication for {len(expanded["rename"].unique())} pathways...')
+            unique_pathways = expanded['rename'].unique()
+            for idx, name in enumerate(unique_pathways):
+                if self.status_bar:
+                    self.status_bar.update(f'🔬 Commot: Cluster communication {idx+1}/{len(unique_pathways)}: {name[:30]}...')
+                ct.tl.cluster_communication(
+                    adata, 
+                    database_name='user_database', 
+                    pathway_name=name, 
+                    clustering='cell_type',
+                    random_seed=42, 
+                    n_permutations=100
+                )
                 
-        perc_filtered = np.where(df > 0, 1, 0).sum().sum() / (df.shape[0] * df.shape[1])      
-        
-        df.to_parquet(f'{self.outdir}/input_data/LRs.parquet')
-        
-        adata.uns['cell_thresholds'] = df.copy()
+            data_dict = defaultdict(dict)
+
+            for name in expanded['rename']:
+                data_dict[name]['communication_matrix'] = adata.uns[
+                    f'commot_cluster-cell_type-user_database-{name}']['communication_matrix']
+                data_dict[name]['communication_pvalue'] = adata.uns[
+                    f'commot_cluster-cell_type-user_database-{name}']['communication_pvalue']
+
+            with open(f'{self.outdir}/input_data/communication.pkl', 'wb') as f:
+                pickle.dump(data_dict, f)
+                
+            info = data_dict
+            
+            def get_sig_interactions(value_matrix, p_matrix, pval=0.3):
+                p_matrix = np.where(p_matrix < pval, 1, 0)
+                return value_matrix * p_matrix
+            
+            if self.status_bar:
+                self.status_bar.update('Processing significant interactions...')
+            interactions = {}
+            for lig, rec in tqdm(zip(expanded['ligand'], expanded['receptor'])):
+                name = lig + '-' + rec
+                if name in info.keys():
+                    value_matrix = info[name]['communication_matrix']
+                    p_matrix = info[name]['communication_pvalue']
+                    sig_matrix = get_sig_interactions(value_matrix, p_matrix)
+                    if sig_matrix.sum().sum() > 0:
+                        interactions[name] = sig_matrix
+                        
+            if self.status_bar:
+                self.status_bar.update('Computing ligand-receptor thresholds...')
+            ct_masks = {cell_type: adata.obs[self.annot] == cell_type for cell_type in adata.obs[self.annot].unique()}
+            df = pd.DataFrame(index=adata.obs_names, columns=genes)
+            df = df.fillna(0)
+            for name in tqdm(interactions.keys(), total=len(interactions)):
+                lig, rec = name.rsplit('-', 1)
+                tmp = interactions[name].sum(axis=1)
+                for cell_type, val in zip(interactions[name].index, tmp):
+                    df.loc[ct_masks[cell_type], lig] += tmp[cell_type]
+                tmp = interactions[name].sum(axis=0)
+                for cell_type, val in zip(interactions[name].columns, tmp):
+                    df.loc[ct_masks[cell_type], rec] += tmp[cell_type]
+                    
+            perc_filtered = np.where(df > 0, 1, 0).sum().sum() / (df.shape[0] * df.shape[1])      
+            
+            df.to_parquet(f'{self.outdir}/input_data/LRs.parquet')
+            
+            adata.uns['cell_thresholds'] = df.copy()
+        else:
+            print('Cell thresholds already computed, skipping COMMOT...')
+            df = adata.uns['cell_thresholds']
         
         if self.status_bar:
             self.status_bar.update('Caching received ligands...')
