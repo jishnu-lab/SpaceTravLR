@@ -383,6 +383,7 @@ class GeneFactory(BaseTravLR):
         cells=None, 
         save_layer=False,
         delta_dir=None,
+        track_gradients=False
         ):
         """
         Simulates perturbation of a target gene and propagates the effect.
@@ -550,7 +551,11 @@ class GeneFactory(BaseTravLR):
             # the model sees delta wL, not delta L
             # delta_simulated contains delta L, so remove and replace with wL
             delta_simulated = delta_simulated + delta_rw_ligands - delta_ligands
-            _simulated = self._perturb_all_cells(delta_simulated, splashed_beta_dict)
+            if track_gradients and n == n_propagation - 1:
+                _simulated, gradients = self._perturb_all_cells_track(delta_simulated, splashed_beta_dict)
+            else:
+                _simulated = self._perturb_all_cells(delta_simulated, splashed_beta_dict)
+            
             delta_simulated = np.array(_simulated)
             
             # ensure values in delta_simulated match our desired KO / input
@@ -593,6 +598,9 @@ class GeneFactory(BaseTravLR):
         gex_out = pd.DataFrame(gem_simulated, index=obs, columns=self.adata.var_names)
         gex_out.index.name = output_name
             
+        if track_gradients:
+            return gex_out, gradients
+        
         return gex_out
     
     @staticmethod
@@ -777,4 +785,28 @@ class GeneFactory(BaseTravLR):
             file_name = f'{target}_{n_propagation}n_{suffix}'
             gex_out.to_parquet(
                 f'{save_to}/{file_name}.parquet')
+
+    def _perturb_all_cells_track(self, gex_delta, betas_dict):
+        n_obs, n_genes = gex_delta.shape
+        result = np.zeros((n_obs, n_genes))
+        n_vars = len(self.adata.var_names)
+
+        gradients = {}
+
+        for i, gene in enumerate(self.adata.var_names):
+            self.update_status(
+                f'[{self.iter}/{self.max_iter}] | Perturbing 🧬️🐝️ {i+1}/{n_vars} ', 
+                color='black_on_cyan'
+            )
+            
+            _beta_out = betas_dict.get(gene, None)
+
+            if _beta_out is not None:
+                mod_idx = self.beta_dict.data[gene].modulator_gene_indices
+                grad = _beta_out * gex_delta[:, mod_idx]
+                gradients[gene] = grad
+                result[:, i] = np.sum(grad.values, axis=1)
+                
+        assert not np.isnan(result).any(), "NaN values found in delta_simulated"
+        return result, gradients
                 
