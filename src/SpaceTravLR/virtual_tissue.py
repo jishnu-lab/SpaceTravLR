@@ -941,7 +941,7 @@ class VirtualTissue:
         norm_r_rand = np.linalg.norm(ref_flow_rand, axis=1)
         cosine_sim_rand = inner_prod_rand / ((norm_v_rand * norm_r_rand) + eps)
 
-        cell_coords = self.chart.adata.obsm['X_umap']
+        cell_coords = self.chart.adata.obsm['X_umap'][:, :2]
         cell_types = self.chart.adata.obs[annot].values
 
         alignment_df, df = self.calculate_cell_type_alignment(

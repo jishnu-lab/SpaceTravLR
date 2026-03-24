@@ -161,6 +161,10 @@ class SpaceShip:
         
         if self.status_bar:
             self.status_bar.update('📊 Processing AnnData: Saving processed data...')
+        
+        adata.obs.index = adata.obs.index.astype(str)
+        adata.var.index = adata.var.index.astype(str)
+
         adata.write_h5ad(f'{self.outdir}/input_data/_adata.h5ad')
         self.adata = adata
         
@@ -438,7 +442,13 @@ class SpaceShip:
         adata.write_h5ad(f'{self.outdir}/input_data/_adata.h5ad')
         self.status = Status.BORED
 
-    def setup_(self, adata: ad.AnnData, overwrite=False, run_commot=False):
+    def setup_(
+            self, 
+            adata: ad.AnnData, 
+            overwrite=False,
+            run_celloracle=True,
+            run_commot=True,
+        ):
         """
         Sets up the SpaceShip environment and runs the preprocessing pipeline.
         
@@ -480,17 +490,53 @@ class SpaceShip:
         self.status = Status.RUNNING
         
         self.process_adata_(adata)
-        self.run_celloracle_()
 
-        if run_commot:
-            self.run_commot_()
-        self.get_nichenet_links_()
-        
+        self.setup_tf_modulators_(run_celloracle=run_celloracle)
+        self.setup_lr_modulators_(run_commot=run_commot)
+        self.setup_tfl_modulators_()
+
         if self.status_bar:
             self.status_bar.update('✅ SpaceShip: Setup complete!')
         self.status = Status.BORED
         
         return self
+    
+    def setup_tf_modulators_(self, run_celloracle=True):
+        if run_celloracle:
+            self.run_celloracle_()
+        else:
+            from itertools import product
+
+            base_grn = self.load_base_GRN(self.species)
+            tfs = base_grn.columns
+            tfs = list(set(tfs) & set(self.adata.var_names) - {'peak_id', 'gene_short_name'})
+            targets = base_grn['gene_short_name'].unique()
+            targets = list(set(targets) & set(self.adata.var_names))
+
+            # this is inefficient but uses the same structure as with TF-target priors
+            
+            pairs = list(product(tfs, targets))
+            df = pd.DataFrame(pairs, columns=['source', 'target'])
+            df['coef_mean'] = 1
+            df['coef_abs'] = 1
+            df['p'] = 1e-5
+            df['-logp'] = 5
+
+            links_dict = {ct: df for ct in self.adata.obs[self.annot].unique()}
+            self.links = links_dict
+        
+            with open(f'{self.outdir}/input_data/celloracle_links.pkl', 'wb') as f:
+                pickle.dump(links_dict, f)
+
+    def setup_lr_modulators_(self, run_commot=True):
+        if run_commot:
+            self.run_commot_()
+        else:
+            return
+    
+    def setup_tfl_modulators_(self):
+        # this is species-specific, not dataset specific
+        self.get_nichenet_links_()
     
     def get_nichenet_links_(self):
         if self.status_bar:
@@ -559,6 +605,10 @@ class SpaceShip:
         batch_size: int = 512, 
         radius: int = 300, 
         contact_distance: int = 50,
+        extra_modulators: list[str] = None,
+        extra_lr: list[tuple[str, str]] = None,
+        activation: str = 'identity',
+        scale_factor: int = 100
     ):
         """
         Trains the SpaceTravLR model to learn spatial gene regulation.
@@ -603,7 +653,11 @@ class SpaceShip:
             radius=radius,
             contact_distance=contact_distance,
             save_dir=base_dir,
-            tflinks=tflinks
+            tflinks=tflinks,
+            scale_factor=scale_factor,
+            activation=activation,
+            extra_modulators=extra_modulators,
+            extra_lr=extra_lr
         )
 
         space_travlr.run()

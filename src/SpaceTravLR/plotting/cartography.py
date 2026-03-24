@@ -1,7 +1,8 @@
 # refer to /scvelo/plotting/velocity_embedding_grid.py
 from collections import Counter
 from functools import cache, lru_cache
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, Normalize, to_rgba
+from matplotlib.cm import ScalarMappable
 import pandas as pd
 
 from matplotlib import pyplot as plt
@@ -329,6 +330,7 @@ class Cartography:
         assert 'cell_type' in self.adata.obs
         
         layout_embedding = self.adata.obsm['X_umap']
+        layout_embedding = layout_embedding[:, :2]
         
         if rename is None:
             rename = {}
@@ -399,7 +401,8 @@ class Cartography:
         threshold=0,
         vector_scale=0.4):
         
-        layout_embedding = self.adata.obsm['X_umap']
+        layout_embedding = self.adata.obsm['X_umap'].copy()
+        layout_embedding = layout_embedding[:, :2]
         perturbed_df = perturbed_df.loc[self.adata.obs_names]
         
         if limit_clusters and highlight_clusters is not None:
@@ -494,12 +497,16 @@ class Cartography:
             threshold=0,
             dynamic_alpha=True,
             lightgrey="#9c8d7c",
-            make_plot=True
+            make_plot=True,
+            categorical_hue=False,
+            continuous_hue=False,
+            hue_cmap='viridis',
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
         
-        layout_embedding = self.adata.obsm['X_umap']
+        layout_embedding = self.adata.obsm['X_umap'].copy()
+        layout_embedding = layout_embedding[:, :2]
         
         if rename is None:
             rename = {}
@@ -516,13 +523,12 @@ class Cartography:
         
         perturbed_df = perturbed_df.loc[self.adata.obs_names]
         
-        if limit_clusters and highlight_clusters is not None:
-            mask = ~self.adata.obs[hue].isin(highlight_clusters)
-            perturbed_df.loc[mask] = self.adata.to_df(layer='imputed_count').loc[mask]
+        # if limit_clusters and highlight_clusters is not None:
+        #     mask = ~self.adata.obs[hue].isin(highlight_clusters)
+        #     perturbed_df.loc[mask] = self.adata.to_df(layer='imputed_count').loc[mask]
 
         delta_X = perturbed_df.values - self.adata.layers['imputed_count']
         delta_X = delta_X.round(3)
-            
             
         P = self.compute_transition_probabilities(
             delta_X * rescale, 
@@ -557,8 +563,6 @@ class Cartography:
             grid_idx_x, grid_idx_y = np.unravel_index(idx, (size_x, size_y))
             vector_field[grid_idx_x, grid_idx_y] = nbr_vector
 
-
-
         vector_field = vector_field.reshape(-1, 2)
         
         vector_scale = vector_scale / np.max(vector_field)
@@ -575,13 +579,71 @@ class Cartography:
             ax = ax
         
         color_dict = self.color_dict.copy()
+        categorical_scatter_palette = None
         
         # Create a modified color dictionary if highlighting specific clusters
         plot_df = pd.DataFrame(
-            self.adata.obsm['X_umap'], 
+            layout_embedding, 
             columns=['x', 'y'], 
             index=self.adata.obs_names).join(self.adata.obs)
         
+        def _scatter_continuous(ax_, fig_, highlight_mask=None):
+            """Colormap by numeric hue; optional colorbar. No categorical legend."""
+            vals = pd.to_numeric(plot_df[hue], errors='coerce').to_numpy()
+            valid = np.isfinite(vals)
+            if np.any(valid):
+                vmin = float(np.min(vals[valid]))
+                vmax = float(np.max(vals[valid]))
+            else:
+                vmin, vmax = 0.0, 1.0
+            if vmin == vmax:
+                vmax = vmin + 1e-12
+            norm = Normalize(vmin=vmin, vmax=vmax)
+            cmap = plt.get_cmap(hue_cmap)
+            c_rgba = np.zeros((len(plot_df), 4))
+            c_rgba[valid] = cmap(norm(vals[valid]))
+            c_rgba[~valid] = to_rgba(lightgrey)
+            if highlight_mask is not None:
+                hm = np.asarray(highlight_mask, dtype=bool)
+                if grey_out:
+                    c_rgba[~hm] = to_rgba(lightgrey)
+            alphas = (
+                np.clip(
+                    np.linalg.norm(V_simulated, axis=1),
+                    0.01,
+                    1.0,
+                )
+                if (highlight_mask is not None and dynamic_alpha)
+                else None
+            )
+            if alphas is not None:
+                mag_range = alphas.max() - alphas.min()
+                if mag_range > 0:
+                    alphas = 0.1 + 0.9 * (alphas - alphas.min()) / mag_range
+                else:
+                    alphas = np.full_like(alphas, 0.5)
+                alphas = np.clip(alphas * alpha, 0.01, 1)
+                c_rgba = c_rgba.copy()
+                c_rgba[:, 3] *= alphas
+            ax_.scatter(
+                plot_df['x'],
+                plot_df['y'],
+                c=c_rgba,
+                s=scatter_size,
+                linewidths=linewidth,
+                edgecolors='black',
+                alpha=1.0 if alphas is not None else alpha,
+            )
+            sm = ScalarMappable(norm=norm, cmap=cmap)
+            sm.set_array([])
+            fig_.colorbar(
+                sm,
+                ax=ax_,
+                fraction=0.046,
+                pad=0.04,
+                label=str(rename.get(hue, hue)),
+            )
+
         if highlight_clusters is not None:
             highlight_color_dict = {ct: lightgrey for ct in color_dict}
             for ct in highlight_clusters:
@@ -591,7 +653,22 @@ class Cartography:
             if not grey_out:
                 for ct in color_dict:
                     highlight_color_dict[ct] = color_dict[ct]
-                    
+            
+            if categorical_hue and not continuous_hue:
+                hue_levels = sorted(
+                    plot_df[hue].dropna().unique().tolist(),
+                    key=lambda x: str(x),
+                )
+                n_hue = max(len(hue_levels), 1)
+                base_colors = sns.color_palette(n_colors=n_hue)
+                hc = np.asarray(highlight_clusters)
+                categorical_scatter_palette = {}
+                for lvl, c in zip(hue_levels, base_colors):
+                    is_highlighted = bool(np.any(np.equal(hc, lvl))) if hc.size else False
+                    categorical_scatter_palette[lvl] = (
+                        c if is_highlighted else (lightgrey if grey_out else c)
+                    )
+
             plot_df['highlighted'] = plot_df[hue].isin(highlight_clusters)
             
             vector_magnitudes = np.linalg.norm(V_simulated, axis=1)
@@ -602,33 +679,49 @@ class Cartography:
                 vector_magnitudes = np.full_like(vector_magnitudes, 0.5)
             vector_magnitudes = np.clip(vector_magnitudes * alpha, 0.01, 1)
 
-            sns.scatterplot(
-                data=plot_df,
-                x='x', y='y',
-                hue=hue, 
-                s=scatter_size,
-                ax=ax,
-                alpha=vector_magnitudes if dynamic_alpha else alpha,
-                edgecolor='black',
-                linewidth=linewidth,
-                palette=highlight_color_dict,
-                legend=not legend_on_loc
-            )
+            # Per-point alpha breaks seaborn's legend (Line2D needs scalar alpha).
+            use_per_point_alpha = dynamic_alpha
+            sns_legend = not legend_on_loc and not use_per_point_alpha
+
+            if continuous_hue:
+                _scatter_continuous(
+                    ax, fig, highlight_mask=plot_df['highlighted'].to_numpy()
+                )
+            else:
+                sns.scatterplot(
+                    data=plot_df,
+                    x='x', y='y',
+                    hue=hue, 
+                    s=scatter_size,
+                    ax=ax,
+                    alpha=vector_magnitudes if dynamic_alpha else alpha,
+                    edgecolor='black',
+                    linewidth=linewidth,
+                    palette=(
+                        categorical_scatter_palette
+                        if categorical_hue
+                        else highlight_color_dict
+                    ),
+                    legend=sns_legend
+                )
         else:
             plot_df['highlighted'] = True
             
-            sns.scatterplot(
-                data=plot_df,
-                x='x', y='y',
-                hue=hue, 
-                s=scatter_size,
-                ax=ax,
-                alpha=alpha,
-                edgecolor='black',
-                linewidth=linewidth,
-                palette=color_dict,
-                legend=not legend_on_loc
-            )
+            if continuous_hue:
+                _scatter_continuous(ax, fig, highlight_mask=None)
+            else:
+                sns.scatterplot(
+                    data=plot_df,
+                    x='x', y='y',
+                    hue=hue, 
+                    s=scatter_size,
+                    ax=ax,
+                    alpha=alpha,
+                    edgecolor='black',
+                    linewidth=linewidth,
+                    palette=color_dict if not categorical_hue else None,
+                    legend=not legend_on_loc
+                )
             
         if highlight_clusters is not None:
             highlighted_regions = np.zeros(len(grid_points), dtype=bool)
@@ -716,14 +809,43 @@ class Cartography:
             ax.set_title('')
             
             alt_colors = self.color_dict
-            all_cts = self.adata.obs[hue]
+        all_cts = self.adata.obs[hue]
 
-        if legend_on_loc:
+        if (
+            not legend_on_loc
+            and highlight_clusters is not None
+            and dynamic_alpha
+            and categorical_hue
+            and not continuous_hue
+            and categorical_scatter_palette is not None
+        ):
+            handles = []
+            for label in sorted(
+                all_cts.dropna().unique().tolist(), key=lambda x: str(x)
+            ):
+                color = categorical_scatter_palette[label]
+                handles.append(
+                    plt.scatter(
+                        [],
+                        [],
+                        c=color,
+                        label=str(rename.get(label, label)),
+                    )
+                )
+            ax.legend(
+                handles=handles,
+                bbox_to_anchor=(1.05, 1),
+                loc="upper left",
+                borderaxespad=0.0,
+                fontsize=legend_fontsize,
+            )
+
+        if legend_on_loc and not continuous_hue:
             texts = []
             for cluster in sorted(all_cts.unique()):
                 cluster_cells = all_cts == cluster
-                x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
-                y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
+                x = np.mean(layout_embedding[cluster_cells, 0])
+                y = np.mean(layout_embedding[cluster_cells, 1])
                 
                 if highlight_clusters is not None and cluster not in highlight_clusters:
                     color = lightgrey if grey_out else alt_colors[cluster]
@@ -750,8 +872,11 @@ class Cartography:
                            ax=ax)
                 
         
-        if not legend_on_loc:
-            handles = [plt.scatter([], [], c=alt_colors[label], label=label) for label in sorted(all_cts.unique())]
+        if not legend_on_loc and not categorical_hue and not continuous_hue:
+            handles = [
+                plt.scatter([], [], 
+                c=alt_colors[label] if not categorical_hue else None, 
+                label=label) for label in sorted(all_cts.unique())]
             legend = ax.legend(handles=handles, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=legend_fontsize)
         
         return grid_points, vector_field, P
@@ -794,6 +919,7 @@ class Cartography:
         assert 'cell_type' in self.adata.obs
         
         layout_embedding = self.adata.obsm['X_umap']
+        layout_embedding = layout_embedding[:, :2]
         
         if rename is None:
             rename = {}
@@ -847,7 +973,7 @@ class Cartography:
                 continue
             nbr_vector = np.mean(V_simulated[indices], axis=0)
             nbr_vector *= len(indices)       # upweight vectors with lots of cells
-                
+            
             grid_idx_x, grid_idx_y = np.unravel_index(idx, (size_x, size_y))
             vector_field[grid_idx_x, grid_idx_y] = nbr_vector
 
@@ -921,8 +1047,8 @@ class Cartography:
             texts = []
             for cluster in all_cts.unique():
                 cluster_cells = all_cts == cluster
-                x = np.mean(self.adata.obsm['X_umap'][cluster_cells, 0])
-                y = np.mean(self.adata.obsm['X_umap'][cluster_cells, 1])
+                x = np.mean(layout_embedding[cluster_cells, 0])
+                y = np.mean(layout_embedding[cluster_cells, 1])
                 
                 # Use the appropriate color
                 if highlight_clusters is not None and cluster not in highlight_clusters:
