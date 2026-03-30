@@ -57,7 +57,7 @@ def compute_all_derivatives(tf_vals, lr_betas, lr_ligs, lr_recs, tfl_betas, tfl_
 class BetaFrame(pd.DataFrame):
 
     @classmethod
-    def from_path(cls, path, obs_names=None, float16=False, randomize=False):
+    def from_path(cls, path, obs_names=None, float16=False, randomize=False, zero_low_betas=False):
         if randomize:
             columns = pq.read_schema(path).names
             columns = [c for c in columns if c.startswith('beta')]
@@ -72,9 +72,9 @@ class BetaFrame(pd.DataFrame):
         
         if obs_names is not None:
             df = df.loc[obs_names]
-
-
-            
+        
+        if zero_low_betas:
+            df = df.mask(df.abs() < 1e-3, 0)
         return cls(df)
 
     def reindex(self, *args, **kwargs):
@@ -260,7 +260,9 @@ class Betabase:
         obs_names=None,
         genes=None,
         randomize=False,
-        auto_load=True):
+        auto_load=True,
+        zero_low_betas=False,
+        ):
         
         assert os.path.exists(folder), f'Folder {folder} does not exist'
         # self.adata = adata
@@ -290,7 +292,8 @@ class Betabase:
         self.tfs_set = set()
         self.float16 = float16
         self.randomize = randomize
-        
+        self.zero_low_betas = zero_low_betas
+
         if auto_load:
             self.load_betas_from_disk(obs_names=obs_names)
 
@@ -299,7 +302,6 @@ class Betabase:
     
     def __getitem__(self, gene_name):
         return self.data.get(gene_name, None)
-    
     
     def collect_interactions(self, cell_type, annot='cell_type', aggregate='mean'):
         assert cell_type in self.obs[annot].unique()
@@ -392,7 +394,7 @@ class Betabase:
                 continue
 
             self.data[gene_name] = BetaFrame.from_path(
-                path, obs_names=obs_names, randomize=self.randomize)
+                path, obs_names=obs_names, randomize=self.randomize, zero_low_betas=self.zero_low_betas)
             
             self.ligands_set.update(self.data[gene_name]._ligands)
             self.tfl_ligands_set.update(self.data[gene_name]._tfl_ligands)

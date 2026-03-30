@@ -382,8 +382,9 @@ class Cartography:
 
         vector_field = vector_field.reshape(-1, 2)
         
-        vector_scale = vector_scale / np.max(vector_field)
-        vector_field *= vector_scale
+        denom = np.nanmax(np.abs(vector_field))
+        if np.isfinite(denom) and denom > 0:
+            vector_field *= vector_scale / denom
         
         return grid_point, vector_field
     
@@ -448,15 +449,16 @@ class Cartography:
 
         vector_field = vector_field.reshape(-1, 2)
         
-        vector_scale = vector_scale / np.max(vector_field)
-        vector_field *= vector_scale
+        denom = np.nanmax(np.abs(vector_field))
+        if np.isfinite(denom) and denom > 0:
+            vector_field *= vector_scale / denom
 
         if threshold and threshold > 0:
             mags = np.linalg.norm(vector_field, axis=1)
             vector_field[mags < threshold] = 0
         
         return grid_points, vector_field
- 
+    
     def plot_umap_quiver(
             self, 
             perturb_target='', 
@@ -501,6 +503,7 @@ class Cartography:
             categorical_hue=False,
             continuous_hue=False,
             hue_cmap='viridis',
+            border_buffer = 3
         ):
         assert 'X_umap' in self.adata.obsm
         assert 'cell_type' in self.adata.obs
@@ -523,9 +526,9 @@ class Cartography:
         
         perturbed_df = perturbed_df.loc[self.adata.obs_names]
         
-        # if limit_clusters and highlight_clusters is not None:
-        #     mask = ~self.adata.obs[hue].isin(highlight_clusters)
-        #     perturbed_df.loc[mask] = self.adata.to_df(layer='imputed_count').loc[mask]
+        if limit_clusters and highlight_clusters is not None:
+            mask = ~self.adata.obs[hue].isin(highlight_clusters)
+            perturbed_df.loc[mask] = self.adata.to_df(layer='imputed_count').loc[mask]
 
         delta_X = perturbed_df.values - self.adata.layers['imputed_count']
         delta_X = delta_X.round(3)
@@ -565,8 +568,9 @@ class Cartography:
 
         vector_field = vector_field.reshape(-1, 2)
         
-        vector_scale = vector_scale / np.max(vector_field)
-        vector_field *= vector_scale
+        denom = np.nanmax(np.abs(vector_field))
+        if np.isfinite(denom) and denom > 0:
+            vector_field *= vector_scale / denom
 
         if threshold and threshold > 0:
             mags = np.linalg.norm(vector_field, axis=1)
@@ -723,91 +727,131 @@ class Cartography:
                     legend=not legend_on_loc
                 )
             
-        if highlight_clusters is not None:
-            highlighted_regions = np.zeros(len(grid_points), dtype=bool)
-            
-            for i, grid_point in enumerate(grid_points):
-                indices = get_neighborhood(grid_point, layout_embedding)
-                if len(indices) > 0:
-                    cell_indices = self.adata.obs_names[indices]
-                    if plot_df.loc[cell_indices, 'highlighted'].any():
-                        highlighted_regions[i] = True
-            
-            highlighted_points = grid_points[highlighted_regions]
-            highlighted_vectors = vector_field[highlighted_regions]
-            
-            
-            non_highlighted_points = grid_points[~highlighted_regions]
-            non_highlighted_vectors = vector_field[~highlighted_regions]
-            
-            if make_plot:
-                if len(highlighted_points) > 0:
-                    if curve:
-                            sort_idx = np.argsort(grid_points[:, 0])
-                            x_ = grid_points[sort_idx, 0]
-                            y_ = grid_points[sort_idx, 1]
-                            u_ = vector_field[sort_idx, 0] 
-                            v_ = vector_field[sort_idx, 1]
-                            xi = np.linspace(x_.min(), x_.max(), 100)
-                            yi = np.linspace(y_.min(), y_.max(), 100)
-                            xi, yi = np.meshgrid(xi, yi)
-                            ui = griddata((x_, y_), u_, (xi, yi), method='linear')
-                            vi = griddata((x_, y_), v_, (xi, yi), method='linear')
-                            
-                            alpha_values = np.full_like(ui, 0.15)
-                            for i in range(len(xi)):
-                                for j in range(len(yi)):
-                                    point = np.array([xi[i,j], yi[i,j]])
-                                    indices = get_neighborhood(point, layout_embedding)
-                                    if len(indices) > 0:
-                                        cell_indices = self.adata.obs_names[indices]
-                                        if plot_df.loc[cell_indices, 'highlighted'].any():
-                                            alpha_values[i,j] = 1.0
-
-                            velovect(ax, 
-                                xi[0,:], yi[:,0], ui, vi,
-                                arrowstyle=arrowstyle,
-                                color='black',
-                                arrowsize=arrowsize,
-                                linewidth=arrow_linewidth,
-                                # alpha=alpha_values,
-                                scale=scale, grains=grains)
-                    else:
-                        ax.quiver(
-                            highlighted_points[:, 0], highlighted_points[:, 1],   
-                            highlighted_vectors[:, 0], highlighted_vectors[:, 1], 
-                            angles='xy', scale_units='xy', scale=1, 
-                            headwidth=quiver_headwidth, headlength=quiver_headlength, headaxislength=quiver_headaxislength,
-                            width=quiver_width, alpha=vector_magnitudes
-                        )
-                        
-                    
-                
-                if len(non_highlighted_points) > 0:
-                    
-                    if curve:
-                        pass
-                        
-                    else:
-                        ax.quiver(
-                            non_highlighted_points[:, 0], non_highlighted_points[:, 1],   
-                            non_highlighted_vectors[:, 0], non_highlighted_vectors[:, 1], 
-                            angles='xy', scale_units='xy', scale=1, 
-                            headwidth=quiver_headwidth, headlength=quiver_headlength, headaxislength=quiver_headaxislength,
-                            width=quiver_width, alpha=arrow_alpha_non_highlighted
-                        )
-                    
-
+        if highlight_clusters is None:
+            vector_magnitudes = np.linalg.norm(V_simulated, axis=1)
+            mag_range = vector_magnitudes.max() - vector_magnitudes.min()
+            if mag_range > 0:
+                vector_magnitudes = (
+                    0.1 + 0.9 * (vector_magnitudes - vector_magnitudes.min()) / mag_range
+                )
             else:
-                plot_quiver(grid_points, vector_field, background=None, ax=ax)
-            
+                vector_magnitudes = np.full_like(vector_magnitudes, 0.5)
+            vector_magnitudes = np.clip(vector_magnitudes * alpha, 0.01, 1)
+
+        highlighted_regions = np.zeros(len(grid_points), dtype=bool)
+        for i, grid_point in enumerate(grid_points):
+            indices = get_neighborhood(grid_point, layout_embedding)
+            if len(indices) > 0:
+                cell_indices = self.adata.obs_names[indices]
+                if plot_df.loc[cell_indices, 'highlighted'].any():
+                    highlighted_regions[i] = True
+
+        highlighted_points = grid_points[highlighted_regions]
+        highlighted_vectors = vector_field[highlighted_regions]
+
+        non_highlighted_points = grid_points[~highlighted_regions]
+        non_highlighted_vectors = vector_field[~highlighted_regions]
+
+        if make_plot:
+            if len(highlighted_points) > 0:
+                if curve:
+                    sort_idx = np.argsort(grid_points[:, 0])
+                    x_ = grid_points[sort_idx, 0]
+                    y_ = grid_points[sort_idx, 1]
+                    u_ = vector_field[sort_idx, 0]
+                    v_ = vector_field[sort_idx, 1]
+                    xi = np.linspace(x_.min(), x_.max(), 100)
+                    yi = np.linspace(y_.min(), y_.max(), 100)
+                    xi, yi = np.meshgrid(xi, yi)
+                    ui = griddata((x_, y_), u_, (xi, yi), method='linear')
+                    vi = griddata((x_, y_), v_, (xi, yi), method='linear')
+                    ui = np.nan_to_num(ui, nan=0.0)
+                    vi = np.nan_to_num(vi, nan=0.0)
+                    if threshold and threshold > 0:
+                        mag_grid = np.hypot(ui, vi)
+                        faint = mag_grid < threshold
+                        ui = np.where(faint, 0.0, ui)
+                        vi = np.where(faint, 0.0, vi)
+
+                    alpha_values = np.full_like(ui, 0.15)
+                    for i in range(len(xi)):
+                        for j in range(len(yi)):
+                            point = np.array([xi[i, j], yi[i, j]])
+                            indices = get_neighborhood(point, layout_embedding)
+                            if len(indices) > 0:
+                                cell_indices = self.adata.obs_names[indices]
+                                if plot_df.loc[cell_indices, 'highlighted'].any():
+                                    alpha_values[i, j] = 1.0
+
+                    velovect(
+                        ax,
+                        xi[0, :],
+                        yi[:, 0],
+                        ui,
+                        vi,
+                        arrowstyle=arrowstyle,
+                        color='black',
+                        arrowsize=arrowsize,
+                        linewidth=arrow_linewidth,
+                        # alpha=alpha_values,
+                        scale=scale,
+                        grains=grains,
+                    )
+                else:
+                    ax.quiver(
+                        highlighted_points[:, 0],
+                        highlighted_points[:, 1],
+                        highlighted_vectors[:, 0],
+                        highlighted_vectors[:, 1],
+                        angles='xy',
+                        scale_units='xy',
+                        scale=1,
+                        headwidth=quiver_headwidth,
+                        headlength=quiver_headlength,
+                        headaxislength=quiver_headaxislength,
+                        width=quiver_width,
+                        alpha=vector_magnitudes,
+                    )
+
+                ax.set_xlim(
+                    highlighted_points[:, 0].min() - border_buffer,
+                    highlighted_points[:, 0].max() + border_buffer,
+                )
+                ax.set_ylim(
+                    highlighted_points[:, 1].min() - border_buffer,
+                    highlighted_points[:, 1].max() + border_buffer,
+                )
+
+            if len(non_highlighted_points) > 0 and highlight_clusters is not None:
+                if curve:
+                    pass
+                else:
+                    ax.quiver(
+                        non_highlighted_points[:, 0],
+                        non_highlighted_points[:, 1],
+                        non_highlighted_vectors[:, 0],
+                        non_highlighted_vectors[:, 1],
+                        angles='xy',
+                        scale_units='xy',
+                        scale=1,
+                        headwidth=quiver_headwidth,
+                        headlength=quiver_headlength,
+                        headaxislength=quiver_headaxislength,
+                        width=quiver_width,
+                        alpha=arrow_alpha_non_highlighted,
+                    )
+
+        else:
+            plot_quiver(grid_points, vector_field, background=None, ax=ax)
+
+        if highlight_clusters is not None:
             ax.set_frame_on(False)
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_xlabel('')
             ax.set_ylabel('')
             ax.set_title('')
-            
+
             alt_colors = self.color_dict
         all_cts = self.adata.obs[hue]
 
@@ -979,8 +1023,9 @@ class Cartography:
 
         vector_field = vector_field.reshape(-1, 2)
         
-        vector_scale = vector_scale / np.max(vector_field)
-        vector_field *= vector_scale
+        denom = np.nanmax(np.abs(vector_field))
+        if np.isfinite(denom) and denom > 0:
+            vector_field *= vector_scale / denom
         
         # Pseudotime analysis
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)

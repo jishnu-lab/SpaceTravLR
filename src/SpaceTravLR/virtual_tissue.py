@@ -140,7 +140,7 @@ class VirtualTissue:
 
         return model.predict(data_new)
 
-    def signature2gradient(self, grid_points, vector_field, n_knn=30, genes=None, precomputed=None):
+    def signature2gradient(self, grid_points, n_knn=30, genes=None, precomputed=None):
         embedding = self.chart.adata.obsm['X_umap']
         x, y = embedding[:, 0], embedding[:, 1]
         x_new, y_new = grid_points[:, 0], grid_points[:, 1]
@@ -158,9 +158,6 @@ class VirtualTissue:
         l2_norm = np.linalg.norm(gradient, ord=2, axis=1)
         scale_factor = 1 / l2_norm.mean()
         ref_flow = gradient * 2
-
-        zero_mask = (vector_field[:,0] == 0) & (vector_field[:,1] == 0)
-        ref_flow[zero_mask] = 0
 
         return ref_flow
     
@@ -909,22 +906,27 @@ class VirtualTissue:
         vector_field_b, 
         annot='cell_type_2',
         obs_key='pseudotime', 
-        k=300):
+        k=300,
+        smooth=True
+        ):
 
         assert obs_key in self.chart.adata.obs
 
-        self.chart.adata = self.smooth_over_manifold(k=k, obs_key=obs_key)
+        if smooth:
+            self.chart.adata = self.smooth_over_manifold(k=k, obs_key=obs_key)
+        else:
+            self.chart.adata.obs[obs_key+'_smoothed'] = self.chart.adata.obs[obs_key]
 
         ref_flow = self.signature2gradient(
             grid_points=grid_points,
-            vector_field=vector_field_a,
+            # vector_field=vector_field_a,
             n_knn=100,
             precomputed=obs_key+'_smoothed'
         )
 
         ref_flow_rand = self.signature2gradient(
             grid_points=grid_points,
-            vector_field=vector_field_b,
+            # vector_field=vector_field_b,
             n_knn=100,
             precomputed=obs_key+'_smoothed'
         )

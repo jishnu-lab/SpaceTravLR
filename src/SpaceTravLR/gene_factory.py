@@ -178,7 +178,7 @@ class GeneFactory(BaseTravLR):
     def compute_betas(self, **kwargs):
         self.load_betas(**kwargs)
 
-    def load_betas(self, subsample=None, float16=False, obs_names=None):
+    def load_betas(self, subsample=None, float16=False, obs_names=None, zero_low_betas=False):
         """
         Loads the spatial gene regulatory coefficients (betas) from disk.
         
@@ -204,7 +204,8 @@ class GeneFactory(BaseTravLR):
         self.beta_dict = self._get_spatial_betas_dict(
             subsample=subsample, 
             float16=float16, 
-            obs_names=obs_names
+            obs_names=obs_names,
+            zero_low_betas=zero_low_betas
         )
         
         self.obs_names = obs_names
@@ -296,14 +297,15 @@ class GeneFactory(BaseTravLR):
         
         return betas_df
         
-    def _get_spatial_betas_dict(self, subsample=None, float16=False, obs_names=None, randomize=False):
+    def _get_spatial_betas_dict(self, subsample=None, float16=False, obs_names=None, randomize=False, zero_low_betas=False):
         bdb = Betabase(
             self.adata, 
             self.save_dir, 
             subsample=subsample, 
             float16=float16, 
             obs_names=obs_names,
-            randomize=randomize
+            randomize=randomize,
+            zero_low_betas=zero_low_betas
         )
         self.ligands = list(bdb.ligands_set)
         self.tfl_ligands = list(bdb.tfl_ligands_set)
@@ -411,6 +413,7 @@ class GeneFactory(BaseTravLR):
         
         payload_dict = {}
         output_name = None
+        gradients = {}
         
         if isinstance(target, str):
             assert isinstance(gene_expr, (int, float))
@@ -551,8 +554,16 @@ class GeneFactory(BaseTravLR):
             # the model sees delta wL, not delta L
             # delta_simulated contains delta L, so remove and replace with wL
             delta_simulated = delta_simulated + delta_rw_ligands - delta_ligands
-            if track_gradients and n == n_propagation - 1:
-                _simulated, gradients = self._perturb_all_cells_track(delta_simulated, splashed_beta_dict)
+
+            if n == 0:
+                assert np.allclose(delta_rw_ligands, delta_ligands), "delta_rw_ligands - delta_ligands is not zero"
+
+            if track_gradients:
+                _simulated, gradients_hop = self._perturb_all_cells_track(delta_simulated, splashed_beta_dict)
+                if n > 1:
+                    gradients[n] = {k: v - gradients[n-1][k] for k, v in gradients_hop.items()}
+                else:
+                    gradients[n] = gradients_hop
             else:
                 _simulated = self._perturb_all_cells(delta_simulated, splashed_beta_dict)
             

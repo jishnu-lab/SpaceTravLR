@@ -100,7 +100,7 @@ def permutation_test_probabilities(
     z_df = pd.DataFrame(z_scores, index=unique_zones, columns=unique_zones)
     p_df = pd.DataFrame(p_values, index=unique_zones, columns=unique_zones)
     
-    return z_df, p_df
+    return z_df, p_df, obs_val
 
 def permutation_test_transitions(
     chart,
@@ -194,7 +194,7 @@ def permutation_test_transitions(
     z_df = pd.DataFrame(z_scores, index=observed.index, columns=observed.columns)
     p_df = pd.DataFrame(p_values, index=observed.index, columns=observed.columns)
     
-    return z_df, p_df
+    return z_df, p_df, obs_val
 
 
 def get_spatial_perturbation_degs(
