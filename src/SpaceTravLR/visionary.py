@@ -58,12 +58,19 @@ class Visionary(GeneFactory):
 
     def reformat(self):
         # Create cell_thresholds for test adata
-        cell_thresholds = self.ref_adata.uns['cell_thresholds'].loc[
-            self.matching['reference_cell']
-        ]
-        self.adata.uns['cell_thresholds'] = cell_thresholds.set_index(
-            pd.Index(self.adata.obs.index)
-        )
+        if 'cell_thresholds' in self.ref_adata.uns.keys():
+            
+            cell_thresholds = self.ref_adata.uns['cell_thresholds'].loc[
+                self.matching['reference_cell']
+            ]
+            self.adata.uns['cell_thresholds'] = cell_thresholds.set_index(
+                pd.Index(self.adata.obs.index)
+            )
+        else:
+            self.adata.uns['cell_thresholds'] = pd.DataFrame(
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names
+            ).fillna(1)
     
     def compute_betas(self, subsample=None, float16=True):
 
@@ -127,12 +134,15 @@ class CyberBoss(Visionary):
         with open(ref_json_path, 'r') as f:
             params = json.load(f)
 
-        GeneFactory.__init__(self, adata=test_adata, 
-                         models_dir=params['save_dir'], 
-                         annot=params['annot'], 
-                         radius=params['radius'], 
-                         contact_distance=params['contact_distance'])
-    
+        GeneFactory.__init__(
+            self, adata=test_adata, 
+            models_dir=params['save_dir'], 
+            annot=params['annot'], 
+            radius=params['radius'], 
+            contact_distance=params['contact_distance']
+        )
+
+        self.adata = test_adata
         self.ref_adata = ref_adata
         self.matching = prematching.reindex(self.adata.obs.index, axis=0)
         self.adata.obs['reference_centroid'] = self.matching['nn_0']
@@ -141,11 +151,10 @@ class CyberBoss(Visionary):
         self.compute_betas(subsample=subsample)
 
     def compute_betas(self, subsample=None, float16=False):
-        GeneFactory.compute_betas(
-            self,
+        self.compute_betas(
             subsample=subsample, 
-            float16=float16, 
-            obs_names=self.ref_adata.obs_names)
+            float16=float16
+        )
 
         # Take the median of all reference cell betas for each spot in test adata
         manager = enlighten.get_manager()
@@ -182,7 +191,15 @@ class CyberBoss(Visionary):
     def reformat(self):
         # Create cell_thresholds for test adata
         test_thresholds = []
-        ref_thresholds = self.ref_adata.uns['cell_thresholds']
+
+        if 'cell_thresholds' in self.ref_adata.uns.keys():
+            ref_thresholds = self.ref_adata.uns['cell_thresholds']
+        else:
+            # this is so highly inefficient but we can fix this later
+            ref_thresholds = pd.DataFrame(
+                index=self.ref_adata.obs_names, 
+                columns=self.ref_adata.var_names
+            ).fillna(1)
 
         # for test_cell, row in self.matching.iterrows():
         #     test_thresholds.append(

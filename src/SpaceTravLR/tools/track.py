@@ -142,11 +142,10 @@ class GraphTracker:
                 break
             last_layer_nodes = next_layer_candidates
 
-        # 3. Add all edges from lowest layer to perturbation source
-        lowest_layer = min([d['layer'] for n, d in G_pt.nodes(data=True)])
+        # 3. Add all edges from all layers to perturbation source
         source_edges = [
             (perturb_source, x, self.G[perturb_source][x]['weight']) for x, d in G_pt.nodes(data=True) 
-            if d['layer'] == lowest_layer and x in self.G[perturb_source]
+            if x in self.G[perturb_source]
         ]
         G_pt.add_weighted_edges_from(source_edges)
 

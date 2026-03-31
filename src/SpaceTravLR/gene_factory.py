@@ -534,7 +534,7 @@ class GeneFactory(BaseTravLR):
                 columns=self.adata.var_names
             )
 
-            delta_rw_ligands = rw_ligands_1.values - rw_ligands_0.values
+            delta_rw_ligands = rw_ligands_1 - rw_ligands_0
 
             # get the change in ligand expression within the gene_df that should be replaced with rw_ligand
             gene_df_1 = pd.DataFrame(
@@ -549,14 +549,20 @@ class GeneFactory(BaseTravLR):
                 fill_value=0
             )
 
-            delta_ligands = ligands_1.values - ligands_0.values
+            delta_ligands = ligands_1 - ligands_0
             
             # the model sees delta wL, not delta L
             # delta_simulated contains delta L, so remove and replace with wL
-            delta_simulated = delta_simulated + delta_rw_ligands - delta_ligands
+            delta_simulated = (delta_simulated + delta_rw_ligands - delta_ligands).values
 
             if n == 0:
-                assert np.allclose(delta_rw_ligands, delta_ligands), "delta_rw_ligands - delta_ligands is not zero"
+
+                rw_tmp = delta_rw_ligands[[x for x in delta_rw_ligands.columns if x not in payload_dict.keys()]]
+                lig_tmp = delta_ligands[[x for x in delta_ligands.columns if x not in payload_dict.keys()]]
+                
+                if not np.allclose(rw_tmp, lig_tmp):
+                    print("most likely issue is that adata.uns['received_ligands'] was precomputed with a different radius")
+                    raise ValueError("delta_rw_ligands - delta_ligands is not zero")
 
             if track_gradients:
                 _simulated, gradients_hop = self._perturb_all_cells_track(delta_simulated, splashed_beta_dict)
