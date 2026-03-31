@@ -19,15 +19,21 @@ actual effect).
 
 
 class GraphTracker:
-    def __init__(self, adata, gradients):
+    def __init__(self, adata, gradients, min_delta=1e-5, min_edge=1e-3):
         self.gradients = gradients
         self.adata = adata
-
+        self.min_delta=min_delta
+        self.min_edge=min_edge
+        self.obs_names = self.adata.obs_names
         self.target_genes = self.adata.var_names
         self.modulator_names = ['beta_' + g for g in self.adata.var_names]
 
-        self.graphs = {layer: self.build_graph(layer=layer) for layer in gradients.keys()}
-        self.G = self.get_total_graph()
+        self.graphs = {layer: self.build_graph(
+            obs_names=self.adata.obs_names,
+            layer=layer, 
+            min_delta=self.min_delta
+        ) for layer in gradients.keys()}
+        self.G = self.get_total_graph(min_edge_weight=self.min_edge)
         self.G_pt = {}
 
 
@@ -40,7 +46,7 @@ class GraphTracker:
         return "\n".join(lines)
 
     
-    def build_graph(self, layer=0, min_delta=1e-5):
+    def build_graph(self, obs_names, layer=0, min_delta=1e-5):
         G = nx.DiGraph()
         grad_layer = self.gradients[layer]
 
@@ -49,6 +55,7 @@ class GraphTracker:
         for g in self.target_genes:
             grad_gene = grad_layer.get(g)
             if grad_gene is not None:
+                grad_gene = grad_gene.loc[obs_names]
                 delta_hop = grad_gene.mean(axis=0)
                 delta_hop = delta_hop[delta_hop.abs() > min_delta]
                 delta_hop.index = delta_hop.index.str.replace('beta_', '')

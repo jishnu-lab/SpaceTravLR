@@ -254,6 +254,7 @@ class CellularNicheNetwork(nn.Module):
         sp_out = self.spatial_features_mlp(spatial_features)
         out = out+sp_out
         betas = self.mlp(out)
+
         betas = self.output_activation(betas)
 
         return betas*self.anchors

@@ -847,7 +847,7 @@ class SpatialCellularProgramsEstimator:
                     cluster_sp_maps.to(self.device),
                     spf.to(self.device)
                 ).cpu().numpy()
-        
+            
             betas.extend(b)
             
 
@@ -1007,7 +1007,8 @@ class SpatialCellularProgramsEstimator:
                         n_modulators = len(self.modulators), 
                         anchors=_betas,
                         spatial_dim=self.spatial_dim,
-                        n_clusters=self.n_clusters
+                        n_clusters=self.n_clusters, 
+                        activation=self.activation
                     ).to(self.device)
                 
             elif self.vision_model == 'transformer':
@@ -1087,7 +1088,8 @@ class SpatialCellularProgramsEstimator:
                 n_modulators=len(self.modulators),
                 anchors=state['anchors'],
                 spatial_dim=self.spatial_dim, 
-                n_clusters=self.n_clusters
+                n_clusters=self.n_clusters,
+                activation=self.activation
             ).to(self.device)
             model.load_state_dict(state)
             self.models[cluster] = model
