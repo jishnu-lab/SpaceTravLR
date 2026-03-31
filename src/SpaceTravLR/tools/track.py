@@ -9,6 +9,14 @@ import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 
+'''
+Important note: In the perturb function, we sometimes clip the delta of the genes to remain within the previously 
+observed values. This is done to prevent the simulation from generating unrealistic gene expression profiles.
+
+Thus, the gradients that we plot may be sometimes greater than the actual effect (since we have clipped the 
+actual effect). 
+'''
+
 
 class GraphTracker:
     def __init__(self, adata, gradients):
