@@ -277,7 +277,7 @@ class Betabase:
         )
         self.gene_subset = gene_subset
         self.obs = adata.obs.copy()
-        self.beta_paths = glob.glob(f'{self.folder}/*_betadata.parquet')
+        self.beta_paths = glob.glob(f'{self.folder}/*_betadata.*')
         
         if genes is not None:
             self.beta_paths = [path for path in self.beta_paths if any(gene in path for gene in genes)]
@@ -321,8 +321,12 @@ class Betabase:
         )   
         
         for j, f in enumerate(self.beta_paths):
-            gene_name = f.split('/')[-1].replace('_betadata.parquet', '')
-            beta = pd.read_parquet(f)
+            if f.endswith('.parquet'):
+                gene_name = f.split('/')[-1].replace('_betadata.parquet', '')
+                beta = pd.read_parquet(f)
+            elif f.endswith('.feather'):
+                gene_name = f.split('/')[-1].replace('_betadata.feather', '')
+                beta = pd.read_feather(f)
             beta = beta.join(self.obs[annot]).query(f'{annot}==@cell_type').drop(columns=[annot])
 
             if aggregate == 'mean':
@@ -374,7 +378,12 @@ class Betabase:
         
 
     def load_betadata(self, gene_name):
-        return BetaFrame.from_path(f'{self.folder}/{gene_name}_betadata.parquet')
+        if os.path.exists(f'{self.folder}/{gene_name}_betadata.parquet'):
+            return BetaFrame.from_path(f'{self.folder}/{gene_name}_betadata.parquet')
+        elif os.path.exists(f'{self.folder}/{gene_name}_betadata.feather'):
+            return BetaFrame.from_path(f'{self.folder}/{gene_name}_betadata.feather')
+        else:
+            raise FileNotFoundError(f'No betadata found for gene {gene_name}')
 
     def load_betas_from_disk(self, obs_names=None):
         "obs_names are the str cell index from adata.obs_names"

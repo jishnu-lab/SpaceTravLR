@@ -994,7 +994,7 @@ class Cartography:
             n_neighbors=n_neighbors, 
             remove_null=remove_null
         )
-        
+
         V_simulated = project_probabilities(P, layout_embedding, normalize=normalize)
         
         grid_scale = 10 * grid_scale / np.mean(abs(np.diff(layout_embedding)))

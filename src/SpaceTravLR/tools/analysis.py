@@ -14,12 +14,13 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 from collections import defaultdict
 
-def randomize_delta_X(delta_X, method='permute_rows'):
+def randomize_delta_X(delta_X, method='permute_all'):
     """
     Randomize delta_X for permutation null.
     
     method: 'permute_rows' - shuffle which cell gets which perturbation (breaks cell-perturbation link)
             'permute_genes' - shuffle genes within each cell (breaks gene-level structure)
+            'permute_all' - shuffle all values in delta_X (breaks all structure)
     """
     if method == 'permute_rows':
         perm_idx = np.random.permutation(len(delta_X))
@@ -28,6 +29,10 @@ def randomize_delta_X(delta_X, method='permute_rows'):
         vals = delta_X.values.copy()
         for row in vals:
             np.random.shuffle(row)
+        return pd.DataFrame(vals, index=delta_X.index, columns=delta_X.columns)
+    elif method == 'permute_all':
+        vals = delta_X.values.copy()
+        np.random.shuffle(vals.flatten())
         return pd.DataFrame(vals, index=delta_X.index, columns=delta_X.columns)
     else:
         raise ValueError(f"method must be 'permute_rows' or 'permute_genes', got {method}")
@@ -39,7 +44,7 @@ def permutation_test_probabilities(
     n_permutations=100,
     n_neighbors=240,
     annot='banksy_cluster',
-    randomize_method='permute_rows',
+    randomize_method='permute_all',
 ):
     """
     Permutation test: randomize delta_X, recompute probabilities, compare to observed.

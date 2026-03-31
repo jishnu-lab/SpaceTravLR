@@ -874,7 +874,7 @@ class VirtualTissue:
             'alignment': cell_cosine_sim,
             'cell_type': cell_types
         })
-        
+
         alignment_per_ctype = df.groupby('cell_type')['alignment'].agg(agg_func)
         
         return alignment_per_ctype.sort_values(ascending=False), df
@@ -907,7 +907,8 @@ class VirtualTissue:
         annot='cell_type_2',
         obs_key='pseudotime', 
         k=300,
-        smooth=True
+        smooth=True,
+        multiple_celltypes=True
         ):
 
         assert obs_key in self.chart.adata.obs
@@ -919,50 +920,83 @@ class VirtualTissue:
 
         ref_flow = self.signature2gradient(
             grid_points=grid_points,
-            # vector_field=vector_field_a,
-            n_knn=100,
-            precomputed=obs_key+'_smoothed'
-        )
-
-        ref_flow_rand = self.signature2gradient(
-            grid_points=grid_points,
-            # vector_field=vector_field_b,
             n_knn=100,
             precomputed=obs_key+'_smoothed'
         )
 
         eps = 1e-8
 
-        inner_prod = np.sum(vector_field_a * ref_flow, axis=1)
+
+        if multiple_celltypes:
+            
+            vector_field_a = vector_field_a
+            vector_field_b = vector_field_b
+            ref_flow_a = ref_flow
+            ref_flow_b = ref_flow
+        
+        else:
+
+            # since we will be computing vector to vector (rather than cell)
+            # we need to make sure that we're not including areas without any cells
+            mask_a = vector_field_a.sum(axis=1) != 0
+            mask_b = vector_field_b.sum(axis=1) != 0
+
+            vector_field_a = vector_field_a[mask_a]
+            vector_field_b = vector_field_b[mask_b]
+            ref_flow_a = ref_flow[mask_a]
+            ref_flow_b = ref_flow[mask_b]
+        
+
+        inner_prod = np.sum(vector_field_a * ref_flow_a, axis=1)
         norm_v = np.linalg.norm(vector_field_a, axis=1)
-        norm_r = np.linalg.norm(ref_flow, axis=1)
+        norm_r = np.linalg.norm(ref_flow_a, axis=1)
         cosine_sim = inner_prod / ((norm_v * norm_r) + eps)
 
-        inner_prod_rand = np.sum(vector_field_b * ref_flow_rand, axis=1)
+        inner_prod_rand = np.sum(vector_field_b * ref_flow_b, axis=1)
         norm_v_rand = np.linalg.norm(vector_field_b, axis=1)
-        norm_r_rand = np.linalg.norm(ref_flow_rand, axis=1)
+        norm_r_rand = np.linalg.norm(ref_flow_b, axis=1)
         cosine_sim_rand = inner_prod_rand / ((norm_v_rand * norm_r_rand) + eps)
 
         cell_coords = self.chart.adata.obsm['X_umap'][:, :2]
         cell_types = self.chart.adata.obs[annot].values
 
-        alignment_df, df = self.calculate_cell_type_alignment(
-            cell_coords=cell_coords,
-            grid_points=grid_points,
-            grid_cosine_sim=cosine_sim,
-            # grid_cosine_sim=inner_prod,
-            cell_types=cell_types
-        )
+        if multiple_celltypes:
 
-        alignment_df_rand, df_rand = self.calculate_cell_type_alignment(
-            cell_coords=cell_coords,
-            grid_points=grid_points,
-            grid_cosine_sim=cosine_sim_rand,
-            # grid_cosine_sim=inner_prod,
-            cell_types=cell_types
-        )
+            # In order to get cell-type level alignment, we need to find out
+            # which grid points belong to which cell type
+
+            alignment_df, df = self.calculate_cell_type_alignment(
+                cell_coords=cell_coords,
+                grid_points=grid_points,
+                grid_cosine_sim=cosine_sim,
+                # grid_cosine_sim=inner_prod,
+                cell_types=cell_types,
+            )
+
+            alignment_df_rand, df_rand = self.calculate_cell_type_alignment(
+                cell_coords=cell_coords,
+                grid_points=grid_points,
+                grid_cosine_sim=cosine_sim_rand,
+                # grid_cosine_sim=inner_prod,
+                cell_types=cell_types
+            )
+
+
+        else:
+        
+            alignment_df = cosine_sim.mean()
+            alignment_df_rand = cosine_sim_rand.mean()
+            df = pd.DataFrame({
+                'alignment': cosine_sim,
+            })
+            df_rand = pd.DataFrame({
+                'alignment': cosine_sim_rand,
+            })
 
         return alignment_df, df, alignment_df_rand, df_rand
+        
+
+
 
 
 
