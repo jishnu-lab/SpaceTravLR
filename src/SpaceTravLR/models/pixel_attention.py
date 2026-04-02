@@ -212,7 +212,7 @@ class CellularNicheNetwork(nn.Module):
         if anchors is None:
             anchors = np.ones(self.dim)
 
-        self.anchors = torch.from_numpy(anchors).float().to(device)
+        self.register_buffer('anchors', torch.from_numpy(anchors).float())
 
         # self.anchors = torch.nn.Parameter(self.anchors, requires_grad=True)
         # self.conditional_conv = nn.Conv2d(self.in_channels, self.in_channels, 1)
@@ -293,13 +293,7 @@ class CellularViT(nn.Module):
         if anchors is None:
             anchors = np.ones(self.dim)
 
-        self.anchors = torch.from_numpy(anchors).float().to(device)
-        
-        self.dim = n_modulators+1
-        if anchors is None:
-            anchors = np.ones(self.dim)
-
-        self.anchors = torch.from_numpy(anchors).float().to(device)
+        self.register_buffer('anchors', torch.from_numpy(anchors).float())
         
         self.in_channels = in_channels
         self.spatial_dim = spatial_dim

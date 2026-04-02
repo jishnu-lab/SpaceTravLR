@@ -23,7 +23,6 @@ import functools
 import time
 
 import jscatter
-import jscatter
 import scanpy as sc
 import numpy as np
 import pandas as pd
@@ -608,7 +607,8 @@ class SpaceShip:
         extra_modulators: list[str] = None,
         extra_lr: list[tuple[str, str]] = None,
         activation: str = 'identity',
-        scale_factor: int = 100
+        scale_factor: int = 100,
+        save_models: bool = False
     ):
         """
         Trains the SpaceTravLR model to learn spatial gene regulation.
@@ -657,13 +657,80 @@ class SpaceShip:
             scale_factor=scale_factor,
             activation=activation,
             extra_modulators=extra_modulators,
-            extra_lr=extra_lr
+            extra_lr=extra_lr,
+            save_models=save_models
         )
+
 
         space_travlr.run()
 
     #@alias
     def fit(self, **kwargs): return self.run_spacetravlr(**kwargs)
+    
+    def load_estimators(self, genes=None):
+        """
+        Loads trained SpatialCellularProgramsEstimator objects from the output directory.
+        
+        Parameters
+        ----------
+        genes : list, optional
+            List of genes to load models for. If None, loads all available models.
+        """
+        import glob
+        import pickle
+        from .oracles import CPU_Unpickler
+        
+        model_dir = os.path.join(self.outdir, 'betadata', 'models')
+        if not os.path.exists(model_dir):
+            raise FileNotFoundError(f"Model directory not found at {model_dir}")
+            
+        if genes is None:
+            model_paths = glob.glob(os.path.join(model_dir, '*.pkl'))
+        else:
+            model_paths = [os.path.join(model_dir, f'{gene}.pkl') for gene in genes]
+            model_paths = [p for p in model_paths if os.path.exists(p)]
+            
+        self.estimators = {}
+        for path in tqdm(model_paths, desc="Loading estimators"):
+            gene = os.path.basename(path).replace('.pkl', '')
+            with open(path, 'rb') as f:
+                # Use CPU_Unpickler in case models were saved on GPU
+                self.estimators[gene] = CPU_Unpickler(f).load()
+                
+        print(f"Loaded {len(self.estimators)} estimators.")
+        return self.estimators
+
+    def get_betas_on_new_data(self, new_adata):
+        """
+        Applies loaded trained models to a new AnnData object to compute spatial betas.
+        
+        Parameters
+        ----------
+        new_adata : ad.AnnData
+            The new AnnData object to compute betas for.
+            Must have 'spatial' in obsm and the same cell type annotations.
+        
+        Returns
+        -------
+        dict
+            A dictionary of beta DataFrames for each gene.
+        """
+        if not hasattr(self, 'estimators') or not self.estimators:
+            print("No estimators loaded. Loading all available estimators...")
+            self.load_estimators()
+            
+        if not self.estimators:
+            raise ValueError("No estimators found to perform prediction.")
+
+        all_betas = {}
+        for gene, estimator in tqdm(self.estimators.items(), desc="Predicting betas"):
+            # Ensure the estimator uses the new adata
+            # We call init_data on the estimator with the new adata 
+            # to compute spatial features and received ligands
+            estimator.init_data(new_adata)
+            all_betas[gene] = estimator.get_betas()
+            
+        return all_betas
     
     def setup_perturbations(self, adata, override_params=None, subsample=None, use_float16=False):
         """

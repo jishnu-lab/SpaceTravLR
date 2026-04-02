@@ -237,9 +237,9 @@ def init_received_ligands(adata, radius, cell_threshes=None, contact_distance=50
 
 
     
-def create_spatial_features(x, y, celltypes, obs_index, radius=200):
+def create_spatial_features(x, y, celltypes, obs_index, celltypes_order, radius=200):
     coords = np.column_stack((x, y))
-    unique_celltypes = np.unique(celltypes)
+    unique_celltypes = celltypes_order
     result = np.zeros((len(x), len(unique_celltypes)))
     distances = cdist(coords, coords)
     for i, celltype in enumerate(unique_celltypes):
@@ -450,8 +450,7 @@ class SpatialCellularProgramsEstimator:
         assert target_gene in adata.var_names, 'target_gene must be in adata.var_names'
         assert layer in adata.layers, 'layer must be in adata.layers'
         assert cluster_annot in adata.obs.columns, 'cluster_annot must be in adata.obs.columns'
-          
-        self.adata = adata
+
         self.scale_factor = scale_factor
         self.use_ligands = use_ligands
         self.target_gene = target_gene
@@ -465,11 +464,6 @@ class SpatialCellularProgramsEstimator:
         self.receptor_thresh = receptor_thresh
         self.tflinks = tflinks
         self.activation = activation
-        self.xy = pd.DataFrame(
-            adata.obsm['spatial'], 
-            index=adata.obs.index, 
-            columns=['x', 'y']
-        )
         self.extra_lr = extra_lr
 
         self.species = 'mouse' if is_mouse_data(adata) else 'human'
@@ -481,20 +475,20 @@ class SpatialCellularProgramsEstimator:
             else:
                 self.grn = grn
 
-            self.regulators = self.grn.get_regulators(self.adata, self.target_gene)
+            self.regulators = self.grn.get_regulators(adata, self.target_gene)
 
         else:
             self.regulators = regulators
             self.grn = None
         
         assert self.target_gene not in self.regulators, 'target_gene must not be in regulators'
-        assert self.target_gene in self.adata.var_names, 'target_gene must be in adata.var_names'
+        assert self.target_gene in adata.var_names, 'target_gene must be in adata.var_names'
 
         if self.use_ligands:
         
             ligand_mixtures = init_ligands_and_receptors(
                 species=self.species,
-                adata=self.adata,
+                adata=adata,
                 annot=self.cluster_annot,
                 target_gene=self.target_gene,
                 receptor_thresh=self.receptor_thresh,
@@ -525,7 +519,7 @@ class SpatialCellularProgramsEstimator:
             
         self.lr_pairs = self.lr['pairs']
         
-        self.n_clusters = len(self.adata.obs[self.cluster_annot].unique())
+        self.n_clusters = len(adata.obs[self.cluster_annot].unique())
         modulators = self.regulators + list(self.lr_pairs) + self.tfl_pairs
         modulators_genes = list(np.unique(
             self.regulators+self.ligands+self.receptors+self.tfl_regulators+self.tfl_ligands))
@@ -546,12 +540,33 @@ class SpatialCellularProgramsEstimator:
         self.modulators = modulators + self.extra_modulators
         self.modulators_genes = list(set(modulators_genes + self.extra_modulators))
 
+
         assert len(self.ligands) == len(self.receptors)
-        assert np.isin(self.ligands, self.adata.var_names).all()
-        assert np.isin(self.receptors, self.adata.var_names).all()
-        assert np.isin(self.regulators, self.adata.var_names).all()
+        assert np.isin(self.ligands, adata.var_names).all()
+        assert np.isin(self.receptors, adata.var_names).all()
+        assert np.isin(self.regulators, adata.var_names).all()
 
+        self.celltypes_order = np.unique(adata.obs[self.cluster_annot])
+        self.load_adata_info(adata)
 
+    
+    def load_adata_info(self, adata):
+
+        self.adata = adata
+
+        self.xy = pd.DataFrame(
+            adata.obsm['spatial'], 
+            index=adata.obs.index, 
+            columns=['x', 'y']
+        )
+
+        sp_maps, X, y, cluster_labels = self.init_data(adata)
+
+        self.Xn = X
+        self.yn = y
+        self.sp_maps = sp_maps
+        self.cell_indices = self.adata.obs.index.copy()
+        self.cluster_labels = cluster_labels
 
 
     def plot_modulators(self, use_expression=True):
@@ -661,9 +676,9 @@ class SpatialCellularProgramsEstimator:
     
     @torch.no_grad()
     def predict(self, cluster, adata, batch_size=512):
-        sp_maps, X, y, cluster_labels = self.init_data(adata)
-        mask = cluster_labels == cluster
-        X_cell, y_cell = X[mask], y[mask]
+        # sp_maps, X, y, cluster_labels = self.init_data(adata)
+        mask = self.cluster_labels == cluster
+        X_cell, y_cell = self.Xn[mask], self.yn[mask]
 
         loader = DataLoader(
             RotatedTensorDataset(
@@ -766,10 +781,11 @@ class SpatialCellularProgramsEstimator:
 
         if not 'spatial_features' in adata.obsm.keys():
             self.spatial_features = create_spatial_features(
-                adata.obsm['spatial'][:, 0], 
-                adata.obsm['spatial'][:, 1], 
-                adata.obs[self.cluster_annot], 
-                adata.obs.index,
+                x=adata.obsm['spatial'][:, 0], 
+                y=adata.obsm['spatial'][:, 1], 
+                celltypes=adata.obs[self.cluster_annot], 
+                obs_index=adata.obs.index,
+                celltypes_order=self.celltypes_order,
                 radius=self.radius
             )
 
@@ -874,10 +890,9 @@ class SpatialCellularProgramsEstimator:
         score_threshold=0.2, 
         l1_reg=1e-9,
         skip_clusters=None,
-        lasso_params=None
+        lasso_params=None,
     ):
         
-        sp_maps, X, y, cluster_labels = self.init_data()
         
         if skip_clusters is None:
             skip_clusters = []
@@ -885,19 +900,15 @@ class SpatialCellularProgramsEstimator:
         assert estimator in ['lasso', 'bayesian', 'ard']
         assert vision_model in ['cnn', 'transformer']
         
+
         self.estimator = estimator
         self.vision_model = vision_model
         self.models = {}
-        self.Xn = X
-        self.yn = y
-        self.sp_maps = sp_maps
-        self.cell_indices = self.adata.obs.index.copy()
-        self.cluster_labels = cluster_labels
 
         if pbar is None and use_pbar:
             manager = enlighten.get_manager()
             pbar = manager.counter(
-                total=sp_maps.shape[0]*num_epochs, 
+                total=self.sp_maps.shape[0]*num_epochs, 
                 desc='Estimating Spatial Betas', unit='cells',
                 color='green',
                 auto_refresh=True
@@ -914,13 +925,13 @@ class SpatialCellularProgramsEstimator:
         
         self.loss_dict = {}
 
-        for cluster in np.unique(cluster_labels):
+        for cluster in np.unique(self.cluster_labels):
             if int(cluster) in skip_clusters:
                 if use_pbar:
                     pbar.update(num_epochs*len(self.cell_indices[cluster_labels == cluster]))
                 continue
             
-            mask = cluster_labels == cluster
+            mask = self.cluster_labels == cluster
             X_cell, y_cell = self.Xn[mask], self.yn[mask]
 
             if self.estimator == 'ard': 
@@ -989,7 +1000,7 @@ class SpatialCellularProgramsEstimator:
             
             loader = DataLoader(
                 RotatedTensorDataset(
-                    sp_maps[mask],
+                    self.sp_maps[mask],
                     X_cell,
                     y_cell,
                     cluster,
@@ -1070,26 +1081,54 @@ class SpatialCellularProgramsEstimator:
             self.models[cluster] = model
         
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        if 'models' in state:
+            models_state = {}
+            for cluster, model in state['models'].items():
+                if model is not None:
+                    models_state[cluster] = model.state_dict()
+                else:
+                    models_state[cluster] = None
+            state['models'] = models_state
+        
+        # Don't pickle the large data objects if possible, but they might be needed for later
+        # self.adata, self.Xn, self.yn, self.sp_maps, self.spatial_features etc.
+        # But if the user wants to pass it another sample, they might not need the original data.
+        # For now, let's keep them as pickle will handle them, but maybe exclude adata to save space.
+        # However, the current code relies on them. Let's keep them for now.
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if 'models' in state:
+            reconstructed_models = {}
+            for cluster, model_state in state['models'].items():
+                if model_state is not None:
+                    if getattr(self, 'vision_model', 'cnn') == 'cnn':
+                        model = CellularNicheNetwork(
+                            n_modulators=len(self.modulators),
+                            anchors=None, 
+                            spatial_dim=self.spatial_dim,
+                            n_clusters=self.n_clusters,
+                            activation=self.activation
+                        ).to(self.device)
+                    else:
+                        model = CellularViT(
+                            n_modulators=len(self.modulators),
+                            anchors=None,
+                            spatial_dim=self.spatial_dim,
+                            n_clusters=self.n_clusters
+                        ).to(self.device)
+                    model.load_state_dict(model_state)
+                    reconstructed_models[cluster] = model
+                else:
+                    reconstructed_models[cluster] = None
+            self.models = reconstructed_models
             
     def load(self, path):
         """Load an exported estimator from disk"""
         with open(path, 'rb') as f:
             loaded = pickle.load(f)
-            
-        # Copy all attributes except models
-        for attr, val in loaded.__dict__.items():
-            if attr != 'models':
-                setattr(self, attr, val)
-                
-        # Reconstruct models from state dicts
-        self.models = {}
-        for cluster, state in loaded.models.items():
-            model = CellularNicheNetwork(
-                n_modulators=len(self.modulators),
-                anchors=state['anchors'],
-                spatial_dim=self.spatial_dim, 
-                n_clusters=self.n_clusters,
-                activation=self.activation
-            ).to(self.device)
-            model.load_state_dict(state)
-            self.models[cluster] = model
+        
+        self.__setstate__(loaded.__getstate__())

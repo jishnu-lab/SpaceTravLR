@@ -81,6 +81,7 @@ class Visionary(GeneFactory):
                         .set_index(pd.Index(self.adata.obs.index))
             for k, v in self.beta_dict.data.items()
         }
+        self.obs_names = self.adata.obs_names
 
     @staticmethod
     def load_betadata(gene, save_dir, matching):
@@ -151,9 +152,11 @@ class CyberBoss(Visionary):
         self.compute_betas(subsample=subsample)
 
     def compute_betas(self, subsample=None, float16=False):
-        self.compute_betas(
+        GeneFactory.compute_betas(
+            self, 
             subsample=subsample, 
-            float16=float16
+            float16=float16,
+            obs_names=self.ref_adata.obs_names
         )
 
         # Take the median of all reference cell betas for each spot in test adata
@@ -169,8 +172,6 @@ class CyberBoss(Visionary):
         test_beta_dict_data = {}
 
         for target_gene, betadata in self.beta_dict.data.items():
-            betadata = self.beta_dict.data[target_gene]
-
             # df = self.matching.apply(lambda row: betadata.loc[row].median(axis=0), axis=1)
             df = self.matching.apply(lambda row: betadata.loc[row].mean(axis=0), axis=1)
 
@@ -186,6 +187,7 @@ class CyberBoss(Visionary):
             pbar.update()
 
         self.beta_dict.data = test_beta_dict_data
+        self.obs_names = self.adata.obs_names
 
     
     def reformat(self):
@@ -194,21 +196,18 @@ class CyberBoss(Visionary):
 
         if 'cell_thresholds' in self.ref_adata.uns.keys():
             ref_thresholds = self.ref_adata.uns['cell_thresholds']
+
+
+            # for test_cell, row in self.matching.iterrows():
+            #     test_thresholds.append(
+            #         ref_thresholds.loc[self.matching.loc[test_cell]].sum(axis=0) 
+            #     )
+            test_thresholds = ref_thresholds.loc[self.matching.values.flatten()].groupby(level=0).sum()
+            
+
+            test_thresholds = pd.DataFrame(test_thresholds, index=self.matching.index)
+            test_thresholds.columns = ref_thresholds.columns
+            test_thresholds.index.name = 'test_cell'
+            self.adata.uns['cell_thresholds'] = test_thresholds
         else:
-            # this is so highly inefficient but we can fix this later
-            ref_thresholds = pd.DataFrame(
-                index=self.ref_adata.obs_names, 
-                columns=self.ref_adata.var_names
-            ).fillna(1)
-
-        # for test_cell, row in self.matching.iterrows():
-        #     test_thresholds.append(
-        #         ref_thresholds.loc[self.matching.loc[test_cell]].sum(axis=0) 
-        #     )
-        test_thresholds = ref_thresholds.loc[self.matching.values.flatten()].groupby(level=0).sum()
-        
-
-        test_thresholds = pd.DataFrame(test_thresholds, index=self.matching.index)
-        test_thresholds.columns = ref_thresholds.columns
-        test_thresholds.index.name = 'test_cell'
-        self.adata.uns['cell_thresholds'] = test_thresholds
+            self.adata.uns['cell_thresholds'] = None

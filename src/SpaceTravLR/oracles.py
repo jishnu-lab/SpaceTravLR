@@ -370,7 +370,8 @@ class SpaceTravLR(BaseTravLR):
         scale_factor=1,
         activation='identity',
         extra_modulators=None,
-        extra_lr=None
+        extra_lr=None,
+        save_models=False
         ):
         
         super().__init__(adata, fields_to_keep=[annot, 'cell_thresholds'])
@@ -409,6 +410,10 @@ class SpaceTravLR(BaseTravLR):
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
         self.skip_clusters = skip_clusters
+
+        if save_models:
+            self.model_dir = os.path.join(self.save_dir, 'models')
+            os.makedirs(self.model_dir, exist_ok=True)
         
         if not os.path.exists(self.save_dir+'/run_params.json'):
             with open(self.save_dir+'/run_params.json', 'w') as f:
@@ -501,7 +506,7 @@ class SpaceTravLR(BaseTravLR):
                     learning_rate=self.learning_rate,
                     batch_size=self.batch_size,
                     pbar=train_bar,
-                    skip_clusters=self.skip_clusters
+                    skip_clusters=self.skip_clusters,
                 )
                 
                 ## filter out columns with all zeros
@@ -511,6 +516,9 @@ class SpaceTravLR(BaseTravLR):
                         f'{self.save_dir}/{gene}_betadata.parquet')
                 else:
                     self.queue.add_orphan(gene)
+
+                if self.model_dir:
+                    pickle.dump(estimator, open(f'{self.model_dir}/{gene}.pkl', 'wb'))
 
                 self.trained_genes.append(gene)
                 self.queue.delete_lock(gene)

@@ -556,7 +556,6 @@ class GeneFactory(BaseTravLR):
             delta_simulated = (delta_simulated + delta_rw_ligands - delta_ligands).values
 
             if n == 0:
-
                 rw_tmp = delta_rw_ligands[[x for x in delta_rw_ligands.columns if x not in payload_dict.keys()]]
                 lig_tmp = delta_ligands[[x for x in delta_ligands.columns if x not in payload_dict.keys()]]
                 
