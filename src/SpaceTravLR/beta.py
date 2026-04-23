@@ -193,11 +193,21 @@ class BetaFrame(pd.DataFrame):
             columns=self.ligands
         ).astype(float) * scale_factor
 
-        lig_tfl_derivatives = pd.DataFrame(
-            tfl_betas.values * gex_df[self.tfl_regulators].values, 
-            index=self.index, 
-            columns=self.tfl_ligands
-        ).astype(float) * scale_factor
+        if len(self.tfl_regulators) > 0 :
+            lig_tfl_derivatives = pd.DataFrame(
+                tfl_betas.values * gex_df[self.tfl_regulators].values, 
+                index=self.index, 
+                columns=self.tfl_ligands
+            ).astype(float) * scale_factor
+
+            tf_tfl_derivatives = pd.DataFrame(
+                tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
+                index=self.index,
+                columns=self.tfl_regulators
+            ).astype(float) * scale_factor
+        else:
+            lig_tfl_derivatives = pd.DataFrame(0, index=self.index, columns=self.tfl_ligands)
+            tf_tfl_derivatives = pd.DataFrame(0, index=self.index, columns=self.tfl_regulators)
 
         tf_derivatives = pd.DataFrame(
             self[self.tf_columns].values,
@@ -210,11 +220,7 @@ class BetaFrame(pd.DataFrame):
             grn_tfs = [f'beta_{t}' for t in grn_tfs]
             tf_derivatives.loc[:, ~tf_derivatives.columns.isin(grn_tfs)] = 0
 
-        tf_tfl_derivatives = pd.DataFrame(
-            tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
-            index=self.index,
-            columns=self.tfl_regulators
-        ).astype(float) * scale_factor
+       
 
         _df = pd.concat(
             [
@@ -224,7 +230,6 @@ class BetaFrame(pd.DataFrame):
                 tf_derivatives,
                 tf_tfl_derivatives
             ], axis=1).groupby(level=0, axis=1).sum()
-            # ], axis=1).groupby(level=0).sum()
                 
         
         if beta_cap is not None:

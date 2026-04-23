@@ -154,7 +154,7 @@ class SpaceShip:
                 layer_added='imputed_count'
             )
             
-            del adata.layers['normalized_count']
+            # del adata.layers['normalized_count']
         
         self.annot = annot
         
@@ -240,11 +240,12 @@ class SpaceShip:
         # df['coef_abs'] = 1
         # df['p'] = 1e-5
         # df['-logp'] = 5
-        
+
         return df
+            
     
     @catch_errors  
-    def run_celloracle_(self, alpha=5):
+    def run_celloracle_(self, alpha=5, base_GRN=None):
         """
         Runs CellOracle to infer the base Gene Regulatory Network (GRN).
         
@@ -275,7 +276,8 @@ class SpaceShip:
         oracle.k_knn_imputation = 1
         oracle.knn = 1
         
-        base_GRN = self.load_base_GRN(self.species)
+        if not base_GRN:
+            base_GRN = self.load_base_GRN(self.species)
 
         oracle.import_TF_data(TF_info_matrix=base_GRN)
         
@@ -447,6 +449,7 @@ class SpaceShip:
             overwrite=False,
             run_celloracle=True,
             run_commot=True,
+            base_GRN=None
         ):
         """
         Sets up the SpaceShip environment and runs the preprocessing pipeline.
@@ -490,7 +493,7 @@ class SpaceShip:
         
         self.process_adata_(adata)
 
-        self.setup_tf_modulators_(run_celloracle=run_celloracle)
+        self.setup_tf_modulators_(run_celloracle=run_celloracle, base_GRN=base_GRN)
         self.setup_lr_modulators_(run_commot=run_commot)
         self.setup_tfl_modulators_()
 
@@ -500,13 +503,16 @@ class SpaceShip:
         
         return self
     
-    def setup_tf_modulators_(self, run_celloracle=True):
+    def setup_tf_modulators_(self, run_celloracle=True, base_GRN=None):
         if run_celloracle:
-            self.run_celloracle_()
+            self.run_celloracle_(base_GRN=base_GRN)
         else:
             from itertools import product
 
-            base_grn = self.load_base_GRN(self.species)
+            if base_GRN is None:
+                base_grn = self.load_base_GRN(self.species)
+            else:
+                base_grn = base_GRN
             tfs = base_grn.columns
             tfs = list(set(tfs) & set(self.adata.var_names) - {'peak_id', 'gene_short_name'})
             targets = base_grn['gene_short_name'].unique()
@@ -683,7 +689,7 @@ class SpaceShip:
         model_dir = os.path.join(self.outdir, 'betadata', 'models')
         if not os.path.exists(model_dir):
             raise FileNotFoundError(f"Model directory not found at {model_dir}")
-            
+
         if genes is None:
             model_paths = glob.glob(os.path.join(model_dir, '*.pkl'))
         else:
@@ -697,7 +703,7 @@ class SpaceShip:
                 # Use CPU_Unpickler in case models were saved on GPU
                 self.estimators[gene] = CPU_Unpickler(f).load()
                 
-        print(f"Loaded {len(self.estimators)} estimators.")
+        # print(f"Loaded {len(self.estimators)} estimators.")
         return self.estimators
 
     def get_betas_on_new_data(self, new_adata):

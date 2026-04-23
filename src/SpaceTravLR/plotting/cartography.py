@@ -500,7 +500,7 @@ class Cartography:
             dynamic_alpha=True,
             lightgrey="#9c8d7c",
             make_plot=True,
-            categorical_hue=False,
+            categorical_hue=True,
             continuous_hue=False,
             hue_cmap='viridis',
             border_buffer = 3
@@ -583,7 +583,6 @@ class Cartography:
             ax = ax
         
         color_dict = self.color_dict.copy()
-        categorical_scatter_palette = None
         
         # Create a modified color dictionary if highlighting specific clusters
         plot_df = pd.DataFrame(
@@ -658,20 +657,20 @@ class Cartography:
                 for ct in color_dict:
                     highlight_color_dict[ct] = color_dict[ct]
             
-            if categorical_hue and not continuous_hue:
-                hue_levels = sorted(
-                    plot_df[hue].dropna().unique().tolist(),
-                    key=lambda x: str(x),
-                )
-                n_hue = max(len(hue_levels), 1)
-                base_colors = sns.color_palette(n_colors=n_hue)
-                hc = np.asarray(highlight_clusters)
-                categorical_scatter_palette = {}
-                for lvl, c in zip(hue_levels, base_colors):
-                    is_highlighted = bool(np.any(np.equal(hc, lvl))) if hc.size else False
-                    categorical_scatter_palette[lvl] = (
-                        c if is_highlighted else (lightgrey if grey_out else c)
-                    )
+            # if categorical_hue and not continuous_hue:
+            #     hue_levels = sorted(
+            #         plot_df[hue].dropna().unique().tolist(),
+            #         key=lambda x: str(x),
+            #     )
+            #     n_hue = max(len(hue_levels), 1)
+            #     base_colors = sns.color_palette(n_colors=n_hue)
+            #     hc = np.asarray(highlight_clusters)
+            #     categorical_scatter_palette = {}
+            #     for lvl, c in zip(hue_levels, base_colors):
+            #         is_highlighted = bool(np.any(np.equal(hc, lvl))) if hc.size else False
+            #         categorical_scatter_palette[lvl] = (
+            #             c if is_highlighted else (lightgrey if grey_out else c)
+            #         )
 
             plot_df['highlighted'] = plot_df[hue].isin(highlight_clusters)
             
@@ -702,7 +701,7 @@ class Cartography:
                     edgecolor='black',
                     linewidth=linewidth,
                     palette=(
-                        categorical_scatter_palette
+                        color_dict
                         if categorical_hue
                         else highlight_color_dict
                     ),
@@ -723,7 +722,7 @@ class Cartography:
                     alpha=alpha,
                     edgecolor='black',
                     linewidth=linewidth,
-                    palette=color_dict if not categorical_hue else None,
+                    palette=color_dict,
                     legend=not legend_on_loc
                 )
             
@@ -861,13 +860,12 @@ class Cartography:
             and dynamic_alpha
             and categorical_hue
             and not continuous_hue
-            and categorical_scatter_palette is not None
         ):
             handles = []
             for label in sorted(
                 all_cts.dropna().unique().tolist(), key=lambda x: str(x)
             ):
-                color = categorical_scatter_palette[label]
+                color = color_dict[label]
                 handles.append(
                     plt.scatter(
                         [],
@@ -915,7 +913,6 @@ class Cartography:
                            arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.7),
                            ax=ax)
                 
-        
         if not legend_on_loc and not categorical_hue and not continuous_hue:
             handles = [
                 plt.scatter([], [], 

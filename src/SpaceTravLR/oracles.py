@@ -42,7 +42,8 @@ warnings.filterwarnings("ignore")
 class CPU_Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
         if module == 'torch.storage' and name == '_load_from_bytes':
-            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+            from .models.parallel_estimators import device as best_device
+            return lambda b: torch.load(io.BytesIO(b), map_location=best_device)
         else:
             return super().find_class(module, name)
 
@@ -414,6 +415,8 @@ class SpaceTravLR(BaseTravLR):
         if save_models:
             self.model_dir = os.path.join(self.save_dir, 'models')
             os.makedirs(self.model_dir, exist_ok=True)
+        else:
+            self.model_dir = None
         
         if not os.path.exists(self.save_dir+'/run_params.json'):
             with open(self.save_dir+'/run_params.json', 'w') as f:

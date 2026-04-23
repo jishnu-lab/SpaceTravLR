@@ -385,7 +385,8 @@ class GeneFactory(BaseTravLR):
         cells=None, 
         save_layer=False,
         delta_dir=None,
-        track_gradients=False
+        track_gradients=False,
+        clip_gex=True
         ):
         """
         Simulates perturbation of a target gene and propagates the effect.
@@ -503,7 +504,10 @@ class GeneFactory(BaseTravLR):
         self.max_iter = n_propagation
         # min_ = gene_mtx.min(axis=0)
         min_ = 0.0
-        max_ = gene_mtx.max(axis=0)
+        if clip_gex:
+            max_ = gene_mtx.max(axis=0)
+        else:
+            max_ = np.inf
         
         ## refer: src/celloracle/trajectory/oracle_GRN.py
 

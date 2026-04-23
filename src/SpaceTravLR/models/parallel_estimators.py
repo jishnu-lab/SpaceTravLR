@@ -762,7 +762,10 @@ class SpatialCellularProgramsEstimator:
                 xyc = np.column_stack([self.xy, cluster_labels]),
                 m=self.spatial_dim,
                 n=self.spatial_dim,
+                clusters=self.celltypes_order
             )
+
+            # create empty layer where there are no celltypes
             
             adata.obsm['spatial_maps'] = self.spatial_maps
         
@@ -837,7 +840,6 @@ class SpatialCellularProgramsEstimator:
 
         if use_self_adata:
             self.adata = adata
-
         return sp_maps, X, y, cluster_labels
 
 
@@ -1092,15 +1094,13 @@ class SpatialCellularProgramsEstimator:
                     models_state[cluster] = None
             state['models'] = models_state
         
-        # Don't pickle the large data objects if possible, but they might be needed for later
-        # self.adata, self.Xn, self.yn, self.sp_maps, self.spatial_features etc.
-        # But if the user wants to pass it another sample, they might not need the original data.
-        # For now, let's keep them as pickle will handle them, but maybe exclude adata to save space.
-        # However, the current code relies on them. Let's keep them for now.
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        # Ensure we use an available device, even if the model was saved on a different one
+        global device
+        self.device = device
         if 'models' in state:
             reconstructed_models = {}
             for cluster, model_state in state['models'].items():

@@ -104,7 +104,7 @@ def xyc2spatial(x, y, c, m, n, split_channels=True, disable_tqdm=True):
     
     
 @jit(nopython=True, parallel=True)
-def xyc2spatial_fast(xyc, m, n):
+def xyc2spatial_fast(xyc, m, n, clusters):
     """
     Converts spatial coordinates (x, y) and cluster labels (c) to a spatial \
         distance map with grid sizes m x n. 
@@ -119,7 +119,7 @@ def xyc2spatial_fast(xyc, m, n):
     xmin, xmax, ymin, ymax = np.min(x), np.max(x), np.min(y), np.max(y)
     
     centers = generate_grid_centers(m, n, xmin, xmax, ymin, ymax)
-    clusters = np.unique(c).astype(np.int32)
+    # clusters = np.unique(c).astype(np.int32)
     num_clusters = len(clusters)
     
     spatial_maps = np.zeros((len(xyc), num_clusters, m, n), dtype=np.float32)

@@ -175,6 +175,14 @@ class GraphTracker:
 
         self.G_pt[(perturb_source, target_gene)] = G
 
+        color_dict = {
+            'ligand': '#8bfcef',
+            'receptor': '#69d2ff',
+            'TF': 'royalblue',
+            'pos_edge': 'salmon',
+            'neg_edge': 'lightgreen'
+        }
+
         pos = {}
         nodes_by_layer = defaultdict(list)
         for node, data in G.nodes(data=True):
@@ -192,11 +200,11 @@ class GraphTracker:
         node_colors = []
         for node in G.nodes():
             if node in ligands:
-                node_colors.append('green')
+                node_colors.append(color_dict['ligand'])
             elif node in receptors:
-                node_colors.append('blue')
+                node_colors.append(color_dict['receptor'])
             else: 
-                node_colors.append('skyblue')
+                node_colors.append(color_dict['TF'])
 
         nx.draw_networkx_nodes(
             G, pos, 
@@ -204,7 +212,7 @@ class GraphTracker:
             node_color=node_colors, 
             edgecolors='black', 
             linewidths=0.4,
-            alpha=0.6,
+            alpha=0.8,
         )
 
         edges_data = list(G.edges(data=True))
@@ -213,7 +221,12 @@ class GraphTracker:
         for _, _, d in edges_data:
             w = d['weight'] if isinstance(d, dict) and 'weight' in d else 1.0
             edges_weights.append(w)
-            edges_colors.append("gray")
+            if w > 0:
+                edges_colors.append(color_dict['pos_edge'])
+            else:
+                edges_colors.append(color_dict['neg_edge'])
+            # edges_colors.append("gray")
+    
 
         max_w = max(abs(float(w)) for w in edges_weights) if edges_weights else 1.0
         widths = [abs(float(w))/(max_w+1e-10)*5+0.5 for w in edges_weights]
@@ -242,9 +255,9 @@ class GraphTracker:
         nx.draw_networkx_labels(G, pos, labels=labels, font_size=14)
 
         node_patches = [
-            mpatches.Patch(facecolor='green', edgecolor='black', label='Ligand'),
-            mpatches.Patch(facecolor='royalblue', edgecolor='black', label='Receptor'),
-            # mpatches.Patch(facecolor='skyblue', edgecolor='black', label='Other gene')
+            mpatches.Patch(facecolor=color_dict['ligand'], edgecolor='black', label='Ligand'),
+            mpatches.Patch(facecolor=color_dict['receptor'], edgecolor='black', label='Receptor'),
+            mpatches.Patch(facecolor=color_dict['TF'], edgecolor='black', label='TF'),
         ]
 
         plt.legend(handles=node_patches,  #+ edge_patches, 
