@@ -127,7 +127,6 @@ class GeneFactory(BaseTravLR):
             self.radius, self.contact_distance
         )
         
-        
     @classmethod
     def from_json(cls, adata, json_path, override_params=None, 
                   beta_scale_factor=1, beta_cap=None, co_grn=None):
