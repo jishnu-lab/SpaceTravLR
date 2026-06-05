@@ -201,7 +201,7 @@ class Cartography:
         range_df.index.name = 'Transition Target'
         return range_df.sort_values(by='mean', ascending=False)
     
-    def get_cellfate(self, transition_df, allowed_fates, thresh=0.002, annot='cell_type', null_ct='null', self_thresh=0):
+    def get_cellfate(self, transition_df, allowed_fates, thresh=0.000, annot='cell_type', null_ct='null', self_thresh=0):
         source_ct = transition_df.columns.name
         assert source_ct in allowed_fates
 

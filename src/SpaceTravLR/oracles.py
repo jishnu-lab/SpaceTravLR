@@ -10,6 +10,7 @@ from tqdm import tqdm
 import os
 import datetime
 import re
+import gc
 import glob
 import pickle
 import io
@@ -49,7 +50,7 @@ class CPU_Unpickler(pickle.Unpickler):
 
 class BaseTravLR(ABC):
     
-    def __init__(self, adata, fields_to_keep=['cell_type', 'cell_type_int', 'cell_thresholds']):
+    def __init__(self, adata, fields_to_keep=['cell_type', 'cell_type_int', 'cell_thresholds', 'received_ligands', 'received_ligands_tfl']):
         assert 'normalized_count' in adata.layers
         
         self.settings = EasyDict()
@@ -87,7 +88,7 @@ class BaseTravLR(ABC):
         import warnings
         import enlighten
         warnings.filterwarnings("ignore")
-        
+
         X = _adata_to_matrix(adata, layer)
         X = X.T
         X = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names)
@@ -102,11 +103,20 @@ class BaseTravLR(ABC):
         )
 
         for cell_type in adata.obs[annot].unique():
-            magic_operator = magic.MAGIC(verbose=0)
+            if pd.isna(cell_type):
+                mask = adata.obs[annot].isna()
+            else:
+                mask = adata.obs[annot] == cell_type
             
-            mask = adata.obs[annot] == cell_type
             X_subset = X.loc[mask]
-            X_magic_subset = magic_operator.fit_transform(X_subset, genes='all_genes')
+            
+            try:
+                magic_operator = magic.MAGIC(verbose=0)
+                X_magic_subset = magic_operator.fit_transform(X_subset, genes='all_genes')
+            except Exception as e:
+                print('cell type', cell_type, 'has', X_subset.shape[0], 'cells, skipping imputation')
+                X_magic_subset = X_subset.copy()
+            
             X_magic_list.append(X_magic_subset)
             pbar.update()
             
@@ -375,7 +385,7 @@ class SpaceTravLR(BaseTravLR):
         save_models=False
         ):
         
-        super().__init__(adata, fields_to_keep=[annot, 'cell_thresholds'])
+        super().__init__(adata, fields_to_keep=[annot, 'cell_thresholds', 'received_ligands', 'received_ligands_tfl'])
         if grn is None:
             self.grn = DayThreeRegulatoryNetwork() # CellOracle GRN
         else: 
@@ -525,6 +535,13 @@ class SpaceTravLR(BaseTravLR):
 
                 self.trained_genes.append(gene)
                 self.queue.delete_lock(gene)
+
+                del estimator
+                if 'betadata' in locals():
+                    del betadata
+                
+                gc.collect()
+                torch.cuda.empty_cache()
                 
                 if self.queue.last_refresh_age() > self.queue.lock_timeout:
                     self.queue.kill_old_locks()

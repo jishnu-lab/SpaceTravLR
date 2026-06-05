@@ -673,7 +673,7 @@ class SpaceShip:
     #@alias
     def fit(self, **kwargs): return self.run_spacetravlr(**kwargs)
     
-    def load_estimators(self, genes=None):
+    def load_estimators(self, n_clusters=-1, genes=None, rust_version=False):
         """
         Loads trained SpatialCellularProgramsEstimator objects from the output directory.
         
@@ -686,27 +686,62 @@ class SpaceShip:
         import pickle
         from .oracles import CPU_Unpickler
         
-        model_dir = os.path.join(self.outdir, 'betadata', 'models')
-        if not os.path.exists(model_dir):
-            raise FileNotFoundError(f"Model directory not found at {model_dir}")
+        
+        if rust_version:
 
-        if genes is None:
-            model_paths = glob.glob(os.path.join(model_dir, '*.pkl'))
-        else:
-            model_paths = [os.path.join(model_dir, f'{gene}.pkl') for gene in genes]
-            model_paths = [p for p in model_paths if os.path.exists(p)]
-            
-        self.estimators = {}
-        for path in tqdm(model_paths, desc="Loading estimators"):
-            gene = os.path.basename(path).replace('.pkl', '')
-            with open(path, 'rb') as f:
-                # Use CPU_Unpickler in case models were saved on GPU
-                self.estimators[gene] = CPU_Unpickler(f).load()
+            model_dir = os.path.join(self.outdir, 'betadata', 'CNN_weights')
+            if not os.path.exists(model_dir):
+                raise FileNotFoundError(f"Model directory not found at {model_dir}")
+
+
+            from .models.load_cnn_npz_pytorch import load_cluster_model
+
+            if genes is None:
+                model_paths = glob.glob(os.path.join(model_dir, '*.npz'))
+            else:
+                model_paths = [os.path.join(model_dir, f'{gene}_cnn_weights.npz') for gene in genes]
+                model_paths = [p for p in model_paths if os.path.exists(p)]
+
+            self.estimators = {}
+            for path in tqdm(model_paths, desc="Loading estimators"):
+                gene = os.path.basename(path).replace('_cnn_weights.npz', '')
+
+                if n_clusters <= 0:
+                    import numpy as np
+                    data = np.load(path, allow_pickle=False)
+                    cluster_keys = [f for f in data.files if f.endswith('_spatial_l1_weight')]
+                    n_cl = len(cluster_keys)
+                    if n_cl == 0:
+                        raise ValueError(f"Could not determine number of clusters from weights file: {path}")
+                else:
+                    n_cl = n_clusters
+
+                self.estimators[gene] = {
+                    cluster_id: load_cluster_model(path, cluster_id=cluster_id)
+                    for cluster_id in range(n_cl)
+                }
+
+        else: 
+            model_dir = os.path.join(self.outdir, 'betadata', 'models')
+            if not os.path.exists(model_dir):
+                raise FileNotFoundError(f"Model directory not found at {model_dir}")
+
+            if genes is None:
+                model_paths = glob.glob(os.path.join(model_dir, '*.pkl'))
+            else:
+                model_paths = [os.path.join(model_dir, f'{gene}.pkl') for gene in genes]
+                model_paths = [p for p in model_paths if os.path.exists(p)]
                 
-        # print(f"Loaded {len(self.estimators)} estimators.")
-        return self.estimators
+            self.estimators = {}
+            for path in tqdm(model_paths, desc="Loading estimators"):
+                gene = os.path.basename(path).replace('.pkl', '')
+                with open(path, 'rb') as f:
+                    # Use CPU_Unpickler in case models were saved on GPU
+                    self.estimators[gene] = CPU_Unpickler(f).load()
+                    
+        print(f"Loaded {len(self.estimators)} estimators.")
 
-    def get_betas_on_new_data(self, new_adata):
+    def get_betas_on_new_data(self, new_adata, rust_version=False):
         """
         Applies loaded trained models to a new AnnData object to compute spatial betas.
         
@@ -728,14 +763,108 @@ class SpaceShip:
         if not self.estimators:
             raise ValueError("No estimators found to perform prediction.")
 
-        all_betas = {}
-        for gene, estimator in tqdm(self.estimators.items(), desc="Predicting betas"):
-            # Ensure the estimator uses the new adata
-            # We call init_data on the estimator with the new adata 
-            # to compute spatial features and received ligands
-            estimator.init_data(new_adata)
-            all_betas[gene] = estimator.get_betas()
+        if rust_version:
+
+            from .models.parallel_estimators import create_spatial_features
+            from .models.spatial_map import xyc2spatial_fast
+            from sklearn.preprocessing import MinMaxScaler
+            import tomllib
+            import torch
+
+            with open(f"{self.outdir}/betadata/spacetravlr_run_repro.toml", "rb") as f:
+                config = tomllib.load(f)
             
+            dummy_gene = list(self.estimators.keys())[0]
+            annot = config['data']['cluster_annot']
+
+            new_adata.obs[annot] = new_adata.obs[annot].astype(int)
+            
+            # Determine the full set of cluster IDs from the loaded estimators
+            # to guarantee input feature dimensions match the trained model shapes
+            trained_clusters = sorted(list(self.estimators[dummy_gene].keys()))
+            n_clusters = len(trained_clusters)
+
+            print('WARNING: extra LRs are not compatible yet')
+            # Generate spatial maps using the full set of trained clusters
+            sp_maps = xyc2spatial_fast(
+                xyc = np.column_stack([new_adata.obsm['spatial'], new_adata.obs[annot]]),
+                m=config['spatial']['spatial_dim'],
+                n=config['spatial']['spatial_dim'],
+                clusters=trained_clusters
+            )
+
+            # Generate spatial features using the full set of trained clusters
+            spatial_features = create_spatial_features(
+                x=new_adata.obsm['spatial'][:, 0], 
+                y=new_adata.obsm['spatial'][:, 1], 
+                celltypes=new_adata.obs[annot], 
+                obs_index=new_adata.obs.index,
+                celltypes_order=trained_clusters,
+                radius=config['spatial']['radius']
+            )
+            # Scale spatial features as done during model training
+            spatial_features = pd.DataFrame(
+                MinMaxScaler().fit_transform(spatial_features.values), 
+                columns=spatial_features.columns, 
+                index=spatial_features.index
+            )
+
+            all_betas = {}
+            for gene, estimator in tqdm(self.estimators.items(), desc="Predicting betas"):
+                
+                betadata_ref = pd.read_feather(f'{self.outdir}/betadata/{gene}_betadata.feather')
+                betadata_ref.set_index('CellID', inplace=True)
+                goi_betadata = pd.DataFrame(index=new_adata.obs.index, columns=betadata_ref.columns)
+                
+                # Predict betas for the cell types present in the new data
+                unique_new_clusters = sorted(new_adata.obs[annot].unique().tolist())
+                for cluster_id in unique_new_clusters:
+                    if cluster_id not in estimator:
+                        continue
+                    
+                    # Create boolean mask for cells belonging to this cluster
+                    mask = (new_adata.obs[annot] == cluster_id).values
+                    if not np.any(mask):
+                        continue
+                    
+                    # Get the model and its device
+                    model = estimator[cluster_id]
+                    device = next(model.parameters()).device
+                    
+                    # Correctly slice sp_maps to (n_cells_in_cluster, 1, m, n) and send to device
+                    cluster_idx = trained_clusters.index(cluster_id)
+                    cluster_sp_maps = torch.from_numpy(
+                        sp_maps[mask][:, cluster_idx:cluster_idx+1, :, :]
+                    ).float().to(device)
+                    
+                    # Correctly slice spatial features to (n_cells_in_cluster, n_clusters) and send to device
+                    spf = torch.from_numpy(
+                        spatial_features.values[mask]
+                    ).float().to(device)
+                    
+                    # Predict betas and convert back to numpy
+                    cluster_betas = model.get_betas(
+                        spatial_maps=cluster_sp_maps, 
+                        spatial_features=spf
+                    ).detach().cpu().numpy()
+
+                    import pdb; pdb.set_trace()
+
+                    # Assign predicted betas to the corresponding rows in goi_betadata
+                    goi_betadata.loc[mask, betadata_ref.columns] = cluster_betas
+
+                all_betas[gene] = goi_betadata
+
+        else:
+
+            all_betas = {}
+            for gene, estimator in tqdm(self.estimators.items(), desc="Predicting betas"):
+                # Ensure the estimator uses the new adata
+                # We call init_data on the estimator with the new adata 
+                # to compute spatial features and received ligands
+                estimator.init_data(new_adata)
+                all_betas[gene] = estimator.get_betas()
+                
         return all_betas
     
     def setup_perturbations(self, adata, override_params=None, subsample=None, use_float16=False):

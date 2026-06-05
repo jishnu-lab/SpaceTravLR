@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
-from .losses import spatial_smoothness_loss
 
 log = logging.getLogger(__name__)
 
@@ -37,23 +36,32 @@ class SpatialFunctionalModel(nn.Module):
         rec = self.decoder(z)
         return z, rec
 
-class TripletSpatialLoss(nn.Module):
-    """Encourages spatially near cells to be closer in Z space than distant cells."""
-    def __init__(self, margin=1.0):
-        super().__init__()
-        self.margin = margin
 
-    def forward(self, z, edge_index):
-        # Very simple version: sample some random negatives
-        row, col = edge_index
-        pos_dist = torch.norm(z[row] - z[col], p=2, dim=1)
-        
-        # Random negatives
-        neg_idx = torch.randint(0, z.shape[0], (row.shape[0],), device=z.device)
-        neg_dist = torch.norm(z[row] - z[neg_idx], p=2, dim=1)
-        
-        loss = F.relu(pos_dist - neg_dist + self.margin)
-        return loss.mean()
+def spatial_triplet_loss(z, edge_index, margin=1.0):
+    # Very simple version: sample some random negatives
+    row, col = edge_index
+    pos_dist = torch.norm(z[row] - z[col], p=2, dim=1)
+    
+    # Random negatives
+    neg_idx = torch.randint(0, z.shape[0], (row.shape[0],), device=z.device)
+    neg_dist = torch.norm(z[row] - z[neg_idx], p=2, dim=1)
+    
+    loss = F.relu(pos_dist - neg_dist + margin)
+    return loss.mean()
+
+def spatial_smoothness_loss(z, edge_index, edge_weight=None):
+    """
+    Encourages nearby cells to have similar embeddings.
+    L = sum_{i,j in edges} w_ij ||z_i - z_j||^2
+    """
+    row, col = edge_index
+    if edge_weight is None:
+        diff = z[row] - z[col]
+        return (diff**2).sum(dim=1).mean()
+    else:
+        diff = z[row] - z[col]
+        return (edge_weight.view(-1, 1) * (diff**2)).sum(dim=1).mean()
+
 
 def train_functional(
     beta_X, spat_X, rec_target,
@@ -77,16 +85,14 @@ def train_functional(
     s_X = torch.from_numpy(spat_X).to(device)
     r_T = torch.from_numpy(rec_target).to(device)
     e_I = torch.from_numpy(edge_index).to(device)
-    
-    triplet_loss_fn = TripletSpatialLoss()
-    
+        
     model.train()
     for epoch in tqdm(range(epochs)):
         optimizer.zero_grad()
         z, rec = model(b_X, s_X)
         
         loss_rec = F.mse_loss(rec, r_T)
-        loss_triplet = triplet_loss_fn(z, e_I)
+        loss_triplet = spatial_triplet_loss(z, e_I)
         loss_smooth = spatial_smoothness_loss(z, e_I)
         
         total_loss = w_rec * loss_rec + w_triplet * loss_triplet + w_smooth * loss_smooth

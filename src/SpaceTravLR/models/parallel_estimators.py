@@ -216,22 +216,28 @@ def init_received_ligands(adata, radius, cell_threshes=None, contact_distance=50
     counts_df = adata.to_df(layer=layer)
     ligands = np.unique(lr.ligand)
 
-    adata.uns['received_ligands_tfl'] = received_ligands(
-        xy=adata.obsm['spatial'], 
-        ligands_df=get_filtered_df(counts_df, None, genes=ligands), # Only Commot LRs should be filtered
-        lr_info=lr,
-        scale_factor=scale_factor
-    )
-
-    if cell_threshes is not None:
-        adata.uns['received_ligands'] = received_ligands(
+    if 'received_ligands_tfl' not in adata.uns.keys():
+        print('Computing received_ligands_tfl')
+        
+        adata.uns['received_ligands_tfl'] = received_ligands(
             xy=adata.obsm['spatial'], 
-            ligands_df=get_filtered_df(counts_df, cell_thresholds=cell_threshes, genes=ligands),
+            ligands_df=get_filtered_df(counts_df, None, genes=ligands), # Only Commot LRs should be filtered
             lr_info=lr,
             scale_factor=scale_factor
         )
-    else:
-        adata.uns['received_ligands'] = adata.uns['received_ligands_tfl']
+
+    if 'received_ligands' not in adata.uns.keys():
+        print('Computing received_ligands')
+
+        if cell_threshes is not None:
+            adata.uns['received_ligands'] = received_ligands(
+                xy=adata.obsm['spatial'], 
+                ligands_df=get_filtered_df(counts_df, cell_thresholds=cell_threshes, genes=ligands),
+                lr_info=lr,
+                scale_factor=scale_factor
+            )
+        else:
+            adata.uns['received_ligands'] = adata.uns['received_ligands_tfl']
 
     return adata
 
@@ -721,6 +727,7 @@ class SpatialCellularProgramsEstimator:
 
         lr_info = self.check_LR_properties(adata, self.layer)
         counts_df, cell_thresholds = lr_info
+
 
         if not (('received_ligands' in adata.uns.keys()) | ('received_ligands_tfl' in self.adata.uns.keys())):
             adata = init_received_ligands(

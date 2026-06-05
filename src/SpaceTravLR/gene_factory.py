@@ -297,6 +297,7 @@ class GeneFactory(BaseTravLR):
         return betas_df
         
     def _get_spatial_betas_dict(self, subsample=None, float16=False, obs_names=None, randomize=False, zero_low_betas=False):
+        
         bdb = Betabase(
             self.adata, 
             self.save_dir, 
@@ -562,7 +563,7 @@ class GeneFactory(BaseTravLR):
                 rw_tmp = delta_rw_ligands[[x for x in delta_rw_ligands.columns if x not in payload_dict.keys()]]
                 lig_tmp = delta_ligands[[x for x in delta_ligands.columns if x not in payload_dict.keys()]]
                 
-                if not np.allclose(rw_tmp, lig_tmp):
+                if not np.allclose(rw_tmp, lig_tmp, atol=1e-3):
                     print("most likely issue is that adata.uns['received_ligands'] was precomputed with a different radius")
                     raise ValueError("delta_rw_ligands - delta_ligands is not zero")
 

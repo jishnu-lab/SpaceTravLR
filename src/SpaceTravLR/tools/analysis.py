@@ -400,6 +400,7 @@ def find_neighbors(adata_perturb, cell_indices, n_neighbors, cell_target = None,
             'cell_type': cell_types,
             # 'batch': adata_perturb.obs['batch'].iloc[neighbor_indices]
         })
+        df['rank'] = range(1, len(df) + 1)
 
         if cell_target is not None:
             df = df.query(f'cell_type == "{cell_target}"')
@@ -499,10 +500,9 @@ def plot_gene_comparison_advanced(df1, df2,
                                   label2="SpaceTravLR", 
                                   highlight_genes=None, 
                                   top_n_labels=100,
-                                  figsize=(10, 10),
+                                  figsize=(8, 8),
                                   target_ko='',
-                                  alpha=0.9,
-                                  savepath=None):
+                                  alpha=0.9):
 
     merged = pd.merge(df1[['gene', 'log2fc']], 
                       df2[['gene', 'log2fc']], 
@@ -603,9 +603,7 @@ def plot_gene_comparison_advanced(df1, df2,
     
     sns.despine(offset=10, trim=False)
     plt.tight_layout()
-    if savepath:
-        plt.savefig(savepath, dpi=300)
-    plt.show()
+    return fig
 
 def plot_transition_slope(
     obs_val, 

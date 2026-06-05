@@ -17,29 +17,10 @@ import pyarrow.feather as feather
 import seaborn as sns
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
-# Try to import functional_niches components
-try:
-    try:
-        # Try local import first
-        from .functional_niches.dataset import build_spatial_graph, build_spatial_features
-        from .functional_niches.functional_model import (
-            SpatialFunctionalModel, TripletSpatialLoss,
-            train_functional,
-        )
-        from .functional_niches.cluster import cluster_embeddings
-    except (ImportError, ValueError):
-        # Fallback to absolute import
-        from functional_niches.dataset import build_spatial_graph, build_spatial_features
-        from functional_niches.functional_model import (
-            SpatialFunctionalModel, TripletSpatialLoss,
-            train_functional,
-        )
-        from functional_niches.cluster import cluster_embeddings
-except ImportError:
-    warnings.warn(
-        "Could not import 'functional_niches'. Make sure the package is in your PYTHONPATH. "
-        "Functions relying on it will fail."
-    )
+from .functional_niches.dataset import build_spatial_graph, build_spatial_features
+from .functional_niches.functional_model import train_functional
+from .functional_niches.cluster import cluster_embeddings
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -195,6 +176,7 @@ def identify_microniches(
     feather_files = list(Path(feather_dir).glob("*_betadata.[fF][eE][aA][tT][hH][eE][rR]"))
     parquet_files = list(Path(feather_dir).glob("*_betadata.[pP][aA][rR][qQ][uU][eE][tT]"))
     all_files = sorted(feather_files + parquet_files)
+
     
     data_paths = [p for p in all_files
                   if p.stem.replace("_betadata","") in target_genes]
