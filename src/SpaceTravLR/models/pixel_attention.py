@@ -108,6 +108,10 @@ class ConditionalConv2D(_ConvNd):
         
         return torch.cat(res, dim=0)
     
+class SigmoidX2(nn.Module):
+    def forward(self, x):
+        return torch.sigmoid(x) * 2
+    
 class NicheAttentionNetwork(nn.Module):
      
     def __init__(self, n_regulators, in_channels, spatial_dim):
@@ -244,6 +248,11 @@ class CellularNicheNetwork(nn.Module):
             self.output_activation = nn.GELU()
         elif activation == 'softplus':
             self.output_activation = nn.Softplus()
+        elif activation == 'sigmoidx2':
+            self.output_activation = SigmoidX2()
+        else:
+            print('Unknown activation. Using default sigmoidx2')
+            self.output_activation = SigmoidX2()
         # self.output_activation = nn.GELU()
         # self.output_activation = nn.Identity()
         # self.output_activation = nn.Softplus()
@@ -368,6 +377,103 @@ class CellularViT(nn.Module):
             ).squeeze(1).squeeze(1) + \
                 betas[:, 0]
                 
+    
+    def forward(self, spatial_maps, inputs_x, spatial_features):
+        betas = self.get_betas(spatial_maps, spatial_features)
+        y_pred = self.predict_y(inputs_x, betas)
+        
+        return y_pred
+
+
+class CellularNicheNetwork3D(nn.Module):
+
+    @staticmethod
+    def make_vision_model(input_channels=1, out_dim=64, kernel_size=3):
+        return nn.Sequential(
+            weight_norm(nn.Conv3d(input_channels, 16, kernel_size=kernel_size, padding='same')),
+            nn.BatchNorm3d(16),
+            nn.PReLU(init=0.1),
+            nn.MaxPool3d(kernel_size=2, stride=2),
+            
+            weight_norm(nn.Conv3d(16, 32, kernel_size=kernel_size, padding='same')),
+            nn.BatchNorm3d(32),
+            nn.PReLU(init=0.1),
+            nn.MaxPool3d(kernel_size=2, stride=2),
+
+            weight_norm(nn.Conv3d(32, out_dim, kernel_size=kernel_size, padding='same')),
+            nn.BatchNorm3d(out_dim),
+            nn.PReLU(init=0.1),
+            nn.MaxPool3d(kernel_size=2, stride=2),
+            
+            nn.AdaptiveAvgPool3d(1),
+            nn.Flatten()
+        )
+    
+    @classmethod
+    def from_pretrained(cls, trained_model, n_modulators, anchors=None, spatial_dim=64, n_clusters=7):
+        cnn = cls.make_vision_model()
+        cnn.load_state_dict(trained_model.conv_layers.state_dict())
+        model = cls(n_modulators, anchors, spatial_dim, n_clusters)
+        model.conv_layers = cnn
+        return model
+
+     
+    def __init__(self, n_modulators, anchors=None, spatial_dim=64, n_clusters=7, activation='identity'):
+        super().__init__()
+        self.in_channels = 1
+        self.out_channels = 1
+        self.spatial_dim = spatial_dim
+        self.dim = n_modulators+1
+        if anchors is None:
+            anchors = np.ones(self.dim)
+
+        self.register_buffer('anchors', torch.from_numpy(anchors).float())
+
+        self.conv_layers = self.make_vision_model(input_channels=self.in_channels)
+
+        self.spatial_features_mlp = nn.Sequential(
+            nn.Linear(n_clusters, 16),
+            nn.PReLU(init=0.1),
+            nn.Linear(16, 32),
+            nn.PReLU(init=0.1),
+            nn.Linear(32, 64)
+        )
+
+        self.mlp = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.PReLU(init=0.1),
+            nn.Linear(64, self.dim)
+        )
+
+        if activation == 'identity':
+            self.output_activation = nn.Identity()
+        elif activation == 'tanh':
+            self.output_activation = nn.Tanh()
+        elif activation == 'sigmoid':
+            self.output_activation = nn.Sigmoid()
+        elif activation == 'gelu':
+            self.output_activation = nn.GELU()
+        elif activation == 'softplus':
+            self.output_activation = nn.Softplus()
+
+
+    def get_betas(self, spatial_maps, spatial_features):
+        out = self.conv_layers(spatial_maps)
+        sp_out = self.spatial_features_mlp(spatial_features)
+        out = out+sp_out
+        betas = self.mlp(out)
+
+        betas = self.output_activation(betas)
+
+        return betas*self.anchors
+    
+    @staticmethod
+    def predict_y(inputs_x, betas):
+        return torch.matmul(
+                inputs_x.unsqueeze(1), 
+                betas[:, 1:].unsqueeze(2)
+            ).squeeze(1).squeeze(1) + \
+                betas[:, 0]
     
     def forward(self, spatial_maps, inputs_x, spatial_features):
         betas = self.get_betas(spatial_maps, spatial_features)

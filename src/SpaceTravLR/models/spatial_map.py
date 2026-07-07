@@ -167,3 +167,86 @@ def xyc2spatial_fast(xyc, m, n, clusters):
 
     # channel_wise_maps = 1.0/channel_wise_maps
     return channel_wise_maps_norm
+
+
+@jit
+def generate_grid_centers_3d(d, m, n, xmin, xmax, ymin, ymax, zmin, zmax):
+    centers = []
+    cell_width = (xmax - xmin) / n
+    cell_height = (ymax - ymin) / m
+    cell_depth = (zmax - zmin) / d
+    
+    for k in range(d):
+        for i in range(m):
+            for j in range(n):
+                x = xmin + (j + 0.5) * cell_width
+                y = ymax - (i + 0.5) * cell_height
+                z = zmax - (k + 0.5) * cell_depth
+                centers.append((x, y, z))    
+    return centers
+
+@jit
+def distance_3d(point1, point2):
+    x1, y1, z1 = point1
+    x2, y2, z2 = point2
+    return np.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
+
+
+@jit(nopython=True, parallel=True)
+def xyzc2spatial_fast(xyzc, d, m, n, clusters):
+    """
+    Converts spatial coordinates (x, y, z) and cluster labels (c) to a 3D spatial \
+        distance map with grid sizes d x m x n. 
+    Each channels encodes the distance map for a unique cluster.
+
+    Return (n_samples, n_clusters, d, m, n)
+    """
+
+    x, y, z, c = xyzc[:, 0], xyzc[:, 1], xyzc[:, 2], xyzc[:, 3]
+    xmin, xmax, ymin, ymax, zmin, zmax = np.min(x), np.max(x), np.min(y), np.max(y), np.min(z), np.max(z)
+    
+    centers = generate_grid_centers_3d(d, m, n, xmin, xmax, ymin, ymax, zmin, zmax)
+    num_clusters = len(clusters)
+    
+    spatial_maps = np.zeros((len(xyzc), num_clusters, d, m, n), dtype=np.float32)
+    mask = np.ones((num_clusters, d, m, n), dtype=np.float32)
+
+    for s in prange(len(xyzc)):
+        x_, y_, z_, cluster = xyzc[s]
+        dist_map = np.array([distance_3d((x_, y_, z_), c_pt) for c_pt in centers]).reshape(d, m, n)
+        
+        nearest_center_idx = np.argmin(dist_map)
+        w = nearest_center_idx // (m * n)
+        rem = nearest_center_idx % (m * n)
+        u, v = rem // n, rem % n
+        mask[int(cluster), w, u, v] = 1
+        
+        for i in range(num_clusters):
+            spatial_maps[s, i] = dist_map
+            
+    channel_wise_maps = np.zeros_like(spatial_maps)
+    
+    for s in prange(len(xyzc)):
+        for i in range(num_clusters):
+            for k in range(d):
+                for j in range(m):
+                    for l in range(n):
+                        channel_wise_maps[s, i, k, j, l] = spatial_maps[s, i, k, j, l] * mask[i, k, j, l]
+
+    min_vals = np.zeros((len(xyzc), num_clusters, 1, 1, 1), dtype=np.float32)
+    max_vals = np.zeros((len(xyzc), num_clusters, 1, 1, 1), dtype=np.float32)
+    for s in prange(len(xyzc)):
+        for i in range(num_clusters):
+            min_vals[s, i, 0, 0, 0] = np.min(channel_wise_maps[s, i])
+            max_vals[s, i, 0, 0, 0] = np.max(channel_wise_maps[s, i])
+    
+    denominator = np.maximum(max_vals - min_vals, 1e-15)
+    channel_wise_maps_norm = np.zeros_like(channel_wise_maps)
+    for s in prange(len(xyzc)):
+        for i in range(num_clusters):
+            for k in range(d):
+                for j in range(m):
+                    for l in range(n):
+                        channel_wise_maps_norm[s, i, k, j, l] = (channel_wise_maps[s, i, k, j, l] - min_vals[s, i, 0, 0, 0]) / denominator[s, i, 0, 0, 0]
+
+    return channel_wise_maps_norm

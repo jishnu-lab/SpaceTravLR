@@ -612,7 +612,7 @@ class SpaceShip:
         contact_distance: int = 50,
         extra_modulators: list[str] = None,
         extra_lr: list[tuple[str, str]] = None,
-        activation: str = 'identity',
+        activation: str = 'sigmoidx2',
         scale_factor: int = 100,
         save_models: bool = False
     ):
