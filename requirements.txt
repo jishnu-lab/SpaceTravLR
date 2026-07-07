@@ -45,6 +45,6 @@ jscatter
 simple_slurm
 group_lasso
 easydict
-cellrank
+# cellrank
 plotly
 adjustText
