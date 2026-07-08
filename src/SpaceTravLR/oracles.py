@@ -24,7 +24,7 @@ from sklearn.neighbors import NearestNeighbors
 from .tools.network import DayThreeRegulatoryNetwork
 from .tools.knn_smooth import knn_smoothing
 from .tools.utils import deprecated
-from .models.spatial_map import xyc2spatial, xyc2spatial_fast
+from .models.spatial_map import xyc2spatial, xyc2spatial_fast, xyc2spatial_3d
 from .models.parallel_estimators import SpatialCellularProgramsEstimator
 
 from .tools.utils import (
@@ -561,16 +561,34 @@ class SpaceTravLR(BaseTravLR):
     def imbue_adata_with_space(adata, annot='cell_type_int', 
             spatial_dim=64, in_place=False, method='fast'):
         """
-        Generate and cache 2D spatial maps for each cell location
+        Generate and cache 2D or 3D spatial maps for each cell location.
+
+        Automatically detects whether `adata.obsm['spatial']` holds 2D (x, y)
+        or 3D (x, y, z) coordinates based on its number of columns, and
+        dispatches to the appropriate spatial map generator.
         """
         clusters = np.array(adata.obs[annot])
         xy = np.array(adata.obsm['spatial'])
 
-        if method == 'fast':
+        n_spatial_dims = xy.shape[1]
+        assert n_spatial_dims in (2, 3), \
+            f"adata.obsm['spatial'] must have 2 or 3 columns, got {n_spatial_dims}"
+
+        if n_spatial_dims == 3:
+            sp_maps = xyc2spatial_3d(
+                xyzc=np.column_stack([xy, clusters]),
+                m=spatial_dim,
+                n=spatial_dim,
+                o=spatial_dim,
+                clusters=np.unique(clusters).astype(int),
+            ).astype(np.float32)
+
+        elif method == 'fast':
             sp_maps = xyc2spatial_fast(
                 xyc = np.column_stack([xy, clusters]),
                 m=spatial_dim,
                 n=spatial_dim,
+                clusters=np.unique(clusters).astype(int),
             ).astype(np.float32)
 
         else:

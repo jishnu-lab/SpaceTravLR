@@ -10,7 +10,7 @@ from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, Dataset
 from sklearn.linear_model import ARDRegression, BayesianRidge
 from group_lasso import GroupLasso
-from SpaceTravLR.models.spatial_map import xyc2spatial_fast, xyzc2spatial_fast
+from SpaceTravLR.models.spatial_map import xyc2spatial_fast, xyc2spatial_3d
 from SpaceTravLR.tools.network import RegulatoryFactory, expand_paired_interactions
 from .pixel_attention import CellularNicheNetwork, CellularViT, CellularNicheNetwork3D
 from ..tools.utils import gaussian_kernel_2d, is_mouse_data, set_seed
@@ -616,10 +616,12 @@ class SpatialCellularProgramsEstimator:
 
         self.adata = adata
 
+        n_spatial_dims = adata.obsm['spatial'].shape[1]
+        spatial_cols = ['x', 'y', 'z'][:n_spatial_dims]
         self.xy = pd.DataFrame(
             adata.obsm['spatial'], 
             index=adata.obs.index, 
-            columns=['x', 'y']
+            columns=spatial_cols
         )
 
         sp_maps, X, y, cluster_labels = self.init_data(adata)
@@ -829,7 +831,6 @@ class SpatialCellularProgramsEstimator:
                 clusters=self.celltypes_order
             )
 
-            # create empty layer where there are no celltypes
             
             adata.obsm['spatial_maps'] = self.spatial_maps
         
@@ -965,7 +966,12 @@ class SpatialCellularProgramsEstimator:
 
         assert estimator in ['lasso', 'bayesian', 'ard']
         assert vision_model in ['cnn', 'transformer']
-        
+
+        if vision_model == 'transformer' and isinstance(self, SpatialCellularProgramsEstimator3D):
+            raise NotImplementedError(
+                "vision_model='transformer' (CellularViT) does not yet support "
+                "3D (m x n x o) spatial grids. Use vision_model='cnn' for 3D estimators."
+            )
 
         self.estimator = estimator
         self.vision_model = vision_model
@@ -1185,10 +1191,12 @@ class SpatialCellularProgramsEstimator:
         self.device = device
         if 'models' in state:
             reconstructed_models = {}
+            is_3d = isinstance(self, SpatialCellularProgramsEstimator3D)
             for cluster, model_state in state['models'].items():
                 if model_state is not None:
                     if getattr(self, 'vision_model', 'cnn') == 'cnn':
-                        model = CellularNicheNetwork(
+                        model_cls = CellularNicheNetwork3D if is_3d else CellularNicheNetwork
+                        model = model_cls(
                             n_modulators=len(self.modulators),
                             anchors=None, 
                             spatial_dim=self.spatial_dim,
@@ -1260,11 +1268,11 @@ class SpatialCellularProgramsEstimator3D(SpatialCellularProgramsEstimator):
         self.xy_df = pd.DataFrame(self.xy, columns=['x', 'y', 'z'], index=adata.obs.index)
 
         if not 'spatial_maps' in adata.obsm.keys():
-            self.spatial_maps = xyzc2spatial_fast(
+            self.spatial_maps = xyc2spatial_3d(
                 xyzc = np.column_stack([self.xy, cluster_labels]),
-                d=self.spatial_dim,
                 m=self.spatial_dim,
                 n=self.spatial_dim,
+                o=self.spatial_dim,
                 clusters=self.celltypes_order
             )
             adata.obsm['spatial_maps'] = self.spatial_maps

@@ -8,7 +8,7 @@
 networkx==3.2.1
 # numba==0.60.0
 # numpy==1.26.4
-# pandas==2.2.2
+pandas==2.2.2
 # plotly==5.23.0
 # pybedtools==0.10.0
 pysal==24.1
