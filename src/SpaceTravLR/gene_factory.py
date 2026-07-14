@@ -127,7 +127,6 @@ class GeneFactory(BaseTravLR):
             self.radius, self.contact_distance
         )
         
-        
     @classmethod
     def from_json(cls, adata, json_path, override_params=None, 
                   beta_scale_factor=1, beta_cap=None, co_grn=None):
@@ -178,7 +177,7 @@ class GeneFactory(BaseTravLR):
     def compute_betas(self, **kwargs):
         self.load_betas(**kwargs)
 
-    def load_betas(self, subsample=None, float16=False, obs_names=None):
+    def load_betas(self, subsample=None, float16=False, obs_names=None, zero_low_betas=False):
         """
         Loads the spatial gene regulatory coefficients (betas) from disk.
         
@@ -204,7 +203,8 @@ class GeneFactory(BaseTravLR):
         self.beta_dict = self._get_spatial_betas_dict(
             subsample=subsample, 
             float16=float16, 
-            obs_names=obs_names
+            obs_names=obs_names,
+            zero_low_betas=zero_low_betas
         )
         
         self.obs_names = obs_names
@@ -296,14 +296,16 @@ class GeneFactory(BaseTravLR):
         
         return betas_df
         
-    def _get_spatial_betas_dict(self, subsample=None, float16=False, obs_names=None, randomize=False):
+    def _get_spatial_betas_dict(self, subsample=None, float16=False, obs_names=None, randomize=False, zero_low_betas=False):
+        
         bdb = Betabase(
             self.adata, 
             self.save_dir, 
             subsample=subsample, 
             float16=float16, 
             obs_names=obs_names,
-            randomize=randomize
+            randomize=randomize,
+            zero_low_betas=zero_low_betas
         )
         self.ligands = list(bdb.ligands_set)
         self.tfl_ligands = list(bdb.tfl_ligands_set)
@@ -383,6 +385,8 @@ class GeneFactory(BaseTravLR):
         cells=None, 
         save_layer=False,
         delta_dir=None,
+        track_gradients=False,
+        clip_gex=True
         ):
         """
         Simulates perturbation of a target gene and propagates the effect.
@@ -410,6 +414,7 @@ class GeneFactory(BaseTravLR):
         
         payload_dict = {}
         output_name = None
+        gradients = {}
         
         if isinstance(target, str):
             assert isinstance(gene_expr, (int, float))
@@ -499,7 +504,10 @@ class GeneFactory(BaseTravLR):
         self.max_iter = n_propagation
         # min_ = gene_mtx.min(axis=0)
         min_ = 0.0
-        max_ = gene_mtx.max(axis=0)
+        if clip_gex:
+            max_ = gene_mtx.max(axis=0)
+        else:
+            max_ = np.inf
         
         ## refer: src/celloracle/trajectory/oracle_GRN.py
 
@@ -530,7 +538,7 @@ class GeneFactory(BaseTravLR):
                 columns=self.adata.var_names
             )
 
-            delta_rw_ligands = rw_ligands_1.values - rw_ligands_0.values
+            delta_rw_ligands = rw_ligands_1 - rw_ligands_0
 
             # get the change in ligand expression within the gene_df that should be replaced with rw_ligand
             gene_df_1 = pd.DataFrame(
@@ -545,12 +553,29 @@ class GeneFactory(BaseTravLR):
                 fill_value=0
             )
 
-            delta_ligands = ligands_1.values - ligands_0.values
+            delta_ligands = ligands_1 - ligands_0
             
             # the model sees delta wL, not delta L
             # delta_simulated contains delta L, so remove and replace with wL
-            delta_simulated = delta_simulated + delta_rw_ligands - delta_ligands
-            _simulated = self._perturb_all_cells(delta_simulated, splashed_beta_dict)
+            delta_simulated = (delta_simulated + delta_rw_ligands - delta_ligands).values
+
+            if n == 0:
+                rw_tmp = delta_rw_ligands[[x for x in delta_rw_ligands.columns if x not in payload_dict.keys()]]
+                lig_tmp = delta_ligands[[x for x in delta_ligands.columns if x not in payload_dict.keys()]]
+                
+                if not np.allclose(rw_tmp, lig_tmp, atol=1e-3):
+                    print("most likely issue is that adata.uns['received_ligands'] was precomputed with a different radius")
+                    raise ValueError("delta_rw_ligands - delta_ligands is not zero")
+
+            if track_gradients:
+                _simulated, gradients_hop = self._perturb_all_cells_track(delta_simulated, splashed_beta_dict)
+                if n > 1:
+                    gradients[n] = {k: v - gradients[n-1][k] for k, v in gradients_hop.items()}
+                else:
+                    gradients[n] = gradients_hop
+            else:
+                _simulated = self._perturb_all_cells(delta_simulated, splashed_beta_dict)
+            
             delta_simulated = np.array(_simulated)
             
             # ensure values in delta_simulated match our desired KO / input
@@ -593,6 +618,9 @@ class GeneFactory(BaseTravLR):
         gex_out = pd.DataFrame(gem_simulated, index=obs, columns=self.adata.var_names)
         gex_out.index.name = output_name
             
+        if track_gradients:
+            return gex_out, gradients
+        
         return gex_out
     
     @staticmethod
@@ -777,4 +805,28 @@ class GeneFactory(BaseTravLR):
             file_name = f'{target}_{n_propagation}n_{suffix}'
             gex_out.to_parquet(
                 f'{save_to}/{file_name}.parquet')
+
+    def _perturb_all_cells_track(self, gex_delta, betas_dict):
+        n_obs, n_genes = gex_delta.shape
+        result = np.zeros((n_obs, n_genes))
+        n_vars = len(self.adata.var_names)
+
+        gradients = {}
+
+        for i, gene in enumerate(self.adata.var_names):
+            self.update_status(
+                f'[{self.iter}/{self.max_iter}] | Perturbing 🧬️🐝️ {i+1}/{n_vars} ', 
+                color='black_on_cyan'
+            )
+            
+            _beta_out = betas_dict.get(gene, None)
+
+            if _beta_out is not None:
+                mod_idx = self.beta_dict.data[gene].modulator_gene_indices
+                grad = _beta_out * gex_delta[:, mod_idx]
+                gradients[gene] = grad
+                result[:, i] = np.sum(grad.values, axis=1)
+                
+        assert not np.isnan(result).any(), "NaN values found in delta_simulated"
+        return result, gradients
                 

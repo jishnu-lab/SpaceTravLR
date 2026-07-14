@@ -81,6 +81,7 @@ class VirtualTissue:
         self.spf = create_spatial_features(
             x=adata.obsm['spatial'][:, 0], 
             y=adata.obsm['spatial'][:, 1], 
+            celltypes_order=adata.obs[self.annot].unique(),
             celltypes=adata.obs[self.annot], 
             obs_index=adata.obs_names,
             radius = self.spf_radius
@@ -140,7 +141,7 @@ class VirtualTissue:
 
         return model.predict(data_new)
 
-    def signature2gradient(self, grid_points, vector_field, n_knn=30, genes=None, precomputed=None):
+    def signature2gradient(self, grid_points, n_knn=30, genes=None, precomputed=None):
         embedding = self.chart.adata.obsm['X_umap']
         x, y = embedding[:, 0], embedding[:, 1]
         x_new, y_new = grid_points[:, 0], grid_points[:, 1]
@@ -158,9 +159,6 @@ class VirtualTissue:
         l2_norm = np.linalg.norm(gradient, ord=2, axis=1)
         scale_factor = 1 / l2_norm.mean()
         ref_flow = gradient * 2
-
-        zero_mask = (vector_field[:,0] == 0) & (vector_field[:,1] == 0)
-        ref_flow[zero_mask] = 0
 
         return ref_flow
     
@@ -785,6 +783,7 @@ class VirtualTissue:
         """
 
         adata = self.chart.adata
+        k = min(k, len(adata)-1)
         
         if use_rep not in adata.obsm.keys():
             raise ValueError(f"Embedding '{use_rep}' not found in adata.obsm.")
@@ -877,7 +876,7 @@ class VirtualTissue:
             'alignment': cell_cosine_sim,
             'cell_type': cell_types
         })
-        
+
         alignment_per_ctype = df.groupby('cell_type')['alignment'].agg(agg_func)
         
         return alignment_per_ctype.sort_values(ascending=False), df
@@ -909,58 +908,76 @@ class VirtualTissue:
         vector_field_b, 
         annot='cell_type_2',
         obs_key='pseudotime', 
-        k=300):
+        k=300,
+        smooth=True,
+        multiple_celltypes=True,
+        ref_flow=None
+        ):
 
-        assert obs_key in self.chart.adata.obs
-
-        self.chart.adata = self.smooth_over_manifold(k=k, obs_key=obs_key)
-
-        ref_flow = self.signature2gradient(
-            grid_points=grid_points,
-            vector_field=vector_field_a,
-            n_knn=100,
-            precomputed=obs_key+'_smoothed'
-        )
-
-        ref_flow_rand = self.signature2gradient(
-            grid_points=grid_points,
-            vector_field=vector_field_b,
-            n_knn=100,
-            precomputed=obs_key+'_smoothed'
-        )
-
+        if ref_flow is None:
+            assert obs_key in self.chart.adata.obs
+            k = min(k, len(self.chart.adata)-1)
+            if smooth:
+                self.chart.adata = self.smooth_over_manifold(k=k, obs_key=obs_key)
+            else:
+                self.chart.adata.obs[obs_key+'_smoothed'] = self.chart.adata.obs[obs_key]
+            ref_flow = self.signature2gradient(
+                grid_points=grid_points,
+                n_knn=k,
+                precomputed=obs_key+'_smoothed'
+            )
+        
         eps = 1e-8
 
+        ref_flow = ref_flow.astype(float)
+        vector_field_a = vector_field_a.astype(float)
+        vector_field_b = vector_field_b.astype(float)
+
+        # if multiple_celltypes:
+            
+        # vector_field_a = vector_field_a
+        # vector_field_b = vector_field_b
+        # ref_flow_a = ref_flow
+        # ref_flow_b = ref_flow
+        
+        # else:
+
+        #     # since we will be computing vector to vector (rather than cell)
+        #     # we need to make sure that we're not including areas without any cells
+        #     mask_a = vector_field_a.sum(axis=1) != 0
+        #     mask_b = vector_field_b.sum(axis=1) != 0
+
+        #     vector_field_a = vector_field_a[mask_a]
+        #     vector_field_b = vector_field_b[mask_b]
+        #     ref_flow_a = ref_flow[mask_a]
+        #     ref_flow_b = ref_flow[mask_b]
+        
         inner_prod = np.sum(vector_field_a * ref_flow, axis=1)
         norm_v = np.linalg.norm(vector_field_a, axis=1)
         norm_r = np.linalg.norm(ref_flow, axis=1)
         cosine_sim = inner_prod / ((norm_v * norm_r) + eps)
 
-        inner_prod_rand = np.sum(vector_field_b * ref_flow_rand, axis=1)
+        inner_prod_rand = np.sum(vector_field_b * ref_flow, axis=1)
         norm_v_rand = np.linalg.norm(vector_field_b, axis=1)
-        norm_r_rand = np.linalg.norm(ref_flow_rand, axis=1)
+        norm_r_rand = np.linalg.norm(ref_flow, axis=1)
         cosine_sim_rand = inner_prod_rand / ((norm_v_rand * norm_r_rand) + eps)
 
-        cell_coords = self.chart.adata.obsm['X_umap']
+        cell_coords = self.chart.adata.obsm['X_umap'][:, :2]
         cell_types = self.chart.adata.obs[annot].values
 
-        alignment_df, df = self.calculate_cell_type_alignment(
-            cell_coords=cell_coords,
-            grid_points=grid_points,
-            grid_cosine_sim=cosine_sim,
-            # grid_cosine_sim=inner_prod,
-            cell_types=cell_types
-        )
-
-        alignment_df_rand, df_rand = self.calculate_cell_type_alignment(
-            cell_coords=cell_coords,
-            grid_points=grid_points,
-            grid_cosine_sim=cosine_sim_rand,
-            # grid_cosine_sim=inner_prod,
-            cell_types=cell_types
-        )
+        alignment_df = cosine_sim.mean()
+        alignment_df_rand = cosine_sim_rand.mean()
+        df = pd.DataFrame({
+            'alignment': cosine_sim,
+        })
+        df_rand = pd.DataFrame({
+            'alignment': cosine_sim_rand,
+        })
 
         return alignment_df, df, alignment_df_rand, df_rand
+        
+
+
 
 
 

@@ -11,15 +11,17 @@ import anndata as ad
 from scipy.spatial import cKDTree, KDTree
 from scipy.stats import combine_pvalues
 from statsmodels.stats.multitest import multipletests
+from statsmodels.stats.proportion import proportions_ztest
 from tqdm import tqdm
 from collections import defaultdict
 
-def randomize_delta_X(delta_X, method='permute_rows'):
+def randomize_delta_X(delta_X, method='permute_all'):
     """
     Randomize delta_X for permutation null.
     
     method: 'permute_rows' - shuffle which cell gets which perturbation (breaks cell-perturbation link)
             'permute_genes' - shuffle genes within each cell (breaks gene-level structure)
+            'permute_all' - shuffle all values in delta_X (breaks all structure)
     """
     if method == 'permute_rows':
         perm_idx = np.random.permutation(len(delta_X))
@@ -28,6 +30,10 @@ def randomize_delta_X(delta_X, method='permute_rows'):
         vals = delta_X.values.copy()
         for row in vals:
             np.random.shuffle(row)
+        return pd.DataFrame(vals, index=delta_X.index, columns=delta_X.columns)
+    elif method == 'permute_all':
+        vals = delta_X.values.copy()
+        np.random.shuffle(vals.flatten())
         return pd.DataFrame(vals, index=delta_X.index, columns=delta_X.columns)
     else:
         raise ValueError(f"method must be 'permute_rows' or 'permute_genes', got {method}")
@@ -39,7 +45,7 @@ def permutation_test_probabilities(
     n_permutations=100,
     n_neighbors=240,
     annot='banksy_cluster',
-    randomize_method='permute_rows',
+    randomize_method='permute_all',
 ):
     """
     Permutation test: randomize delta_X, recompute probabilities, compare to observed.
@@ -57,7 +63,7 @@ def permutation_test_probabilities(
 
     # 1. Observed: compute probabilities from real delta_X
     P_obs = chart.compute_transition_probabilities(
-        delta_X, embedding, n_neighbors=n_neighbors, remove_null=False
+        delta_X, embedding, n_neighbors=n_neighbors, remove_null=True
     )
 
     P_obs_real = average_probabilities(P_obs, zone_idxs)
@@ -67,7 +73,7 @@ def permutation_test_probabilities(
     for i in tqdm(range(n_permutations), desc="Permuting"):
         delta_X_perm = randomize_delta_X(delta_X, method=randomize_method)
         P_perm = chart.compute_transition_probabilities(
-            delta_X_perm, embedding, n_neighbors=n_neighbors, remove_null=False
+            delta_X_perm, embedding, n_neighbors=n_neighbors, remove_null=True
         )
         P_perm_avg = average_probabilities(P_perm, zone_idxs)
         perm_results_list.append(P_perm_avg)
@@ -100,7 +106,7 @@ def permutation_test_probabilities(
     z_df = pd.DataFrame(z_scores, index=unique_zones, columns=unique_zones)
     p_df = pd.DataFrame(p_values, index=unique_zones, columns=unique_zones)
     
-    return z_df, p_df
+    return z_df, p_df, obs_val
 
 def permutation_test_transitions(
     chart,
@@ -194,7 +200,7 @@ def permutation_test_transitions(
     z_df = pd.DataFrame(z_scores, index=observed.index, columns=observed.columns)
     p_df = pd.DataFrame(p_values, index=observed.index, columns=observed.columns)
     
-    return z_df, p_df
+    return z_df, p_df, obs_val
 
 
 def get_spatial_perturbation_degs(
@@ -394,6 +400,7 @@ def find_neighbors(adata_perturb, cell_indices, n_neighbors, cell_target = None,
             'cell_type': cell_types,
             # 'batch': adata_perturb.obs['batch'].iloc[neighbor_indices]
         })
+        df['rank'] = range(1, len(df) + 1)
 
         if cell_target is not None:
             df = df.query(f'cell_type == "{cell_target}"')
@@ -493,10 +500,9 @@ def plot_gene_comparison_advanced(df1, df2,
                                   label2="SpaceTravLR", 
                                   highlight_genes=None, 
                                   top_n_labels=100,
-                                  figsize=(10, 10),
+                                  figsize=(8, 8),
                                   target_ko='',
-                                  alpha=0.9,
-                                  savepath=None):
+                                  alpha=0.9):
 
     merged = pd.merge(df1[['gene', 'log2fc']], 
                       df2[['gene', 'log2fc']], 
@@ -597,6 +603,94 @@ def plot_gene_comparison_advanced(df1, df2,
     
     sns.despine(offset=10, trim=False)
     plt.tight_layout()
-    if savepath:
-        plt.savefig(savepath, dpi=300)
-    plt.show()
+    return fig
+
+def plot_transition_slope(
+    obs_val, 
+    color_dict, 
+    ax=None, 
+    title=None, 
+    xlab_before='Unperturbed', 
+    xlab_after='After KO',
+    ylabel="Proportion of cells",
+    yrange=(0, 1)
+):
+    """
+    Plot a slope plot showing the change in zone occupancy before and after perturbation.
+    
+    Parameters:
+    -----------
+    obs_val : pd.DataFrame
+        Matrix of transition counts (index=Original, columns=Predicted).
+    color_dict : dict
+        Mapping from zone names to colors.
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot on.
+    title : str, optional
+        Title of the plot.
+    xlab_before : str
+        Label for the left point.
+    xlab_after : str
+        Label for the right point.
+    ylabel : str
+        Label for the y-axis.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 9))
+    
+    total_cells = obs_val.values.sum()
+    before_counts = obs_val.sum(axis=1) 
+    after_counts = obs_val.sum(axis=0)  
+
+    before_prop = before_counts / total_cells
+    after_prop = after_counts / total_cells
+
+    def get_stars(p):
+        if p < 0.001: return '***'
+        elif p < 0.01: return '**'
+        elif p < 0.05: return '*'
+        return ''
+
+    # Sort zones by frequency for cleaner plotting order
+    zones = before_prop.sort_values(ascending=False).index
+    
+    for zone in zones:
+        color = color_dict.get(zone, 'grey')
+        y0, y1 = before_prop[zone], after_prop[zone]
+        
+        # Calculate significance for the net shift of this zone
+        # Null: proportions are the same
+        cnt = [int(after_counts[zone]), int(before_counts[zone])]
+        nobs = [int(total_cells), int(total_cells)]
+        _, pval = proportions_ztest(cnt, nobs)
+        stars = get_stars(pval)
+        
+        # Plot connectors and markers
+        ax.plot([0, 1], [y0, y1], color=color, lw=4.5, solid_capstyle='round', zorder=2, alpha=0.9)
+        ax.scatter([0, 1], [y0, y1], color=color, s=300, edgecolor='black', linewidth=1.5, zorder=3)
+        
+        # Text labels (numbers)
+        ax.text(0, y0 + 0.015, f"{y0:.2f}", ha='center', va='bottom', fontsize=11, color=color)
+        ax.text(1.0, y1 + 0.015, f"{y1:.2f}", ha='center', va='bottom', fontsize=11, color=color)
+        
+        # Zone name on the left
+        ax.text(-0.1, y0, zone, ha='right', va='center', fontsize=12, color=color)
+        
+        # Stars on the right
+        if stars:
+            ax.text(1.1, y1, stars, ha='left', va='center', fontsize=16, color=color)
+
+    if title:
+        ax.set_title(title, fontsize=10, pad=15)
+    
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels([xlab_before, xlab_after], fontsize=14)
+    ax.set_ylabel(ylabel, fontsize=14)
+    
+    ax.set_ylim(yrange)
+    ax.set_xlim(-0.6, 1.4)
+    ax.grid(axis='y', linestyle='--', alpha=0.3, zorder=0)
+    
+    sns.despine(ax=ax, trim=False, offset=10)
+    
+    return ax

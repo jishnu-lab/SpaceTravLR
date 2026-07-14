@@ -57,7 +57,7 @@ def compute_all_derivatives(tf_vals, lr_betas, lr_ligs, lr_recs, tfl_betas, tfl_
 class BetaFrame(pd.DataFrame):
 
     @classmethod
-    def from_path(cls, path, obs_names=None, float16=False, randomize=False):
+    def from_path(cls, path, obs_names=None, float16=False, randomize=False, zero_low_betas=False):
         if randomize:
             columns = pq.read_schema(path).names
             columns = [c for c in columns if c.startswith('beta')]
@@ -72,9 +72,9 @@ class BetaFrame(pd.DataFrame):
         
         if obs_names is not None:
             df = df.loc[obs_names]
-
-
-            
+        
+        if zero_low_betas:
+            df = df.mask(df.abs() < 1e-3, 0)
         return cls(df)
 
     def reindex(self, *args, **kwargs):
@@ -193,11 +193,21 @@ class BetaFrame(pd.DataFrame):
             columns=self.ligands
         ).astype(float) * scale_factor
 
-        lig_tfl_derivatives = pd.DataFrame(
-            tfl_betas.values * gex_df[self.tfl_regulators].values, 
-            index=self.index, 
-            columns=self.tfl_ligands
-        ).astype(float) * scale_factor
+        if len(self.tfl_regulators) > 0 :
+            lig_tfl_derivatives = pd.DataFrame(
+                tfl_betas.values * gex_df[self.tfl_regulators].values, 
+                index=self.index, 
+                columns=self.tfl_ligands
+            ).astype(float) * scale_factor
+
+            tf_tfl_derivatives = pd.DataFrame(
+                tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
+                index=self.index,
+                columns=self.tfl_regulators
+            ).astype(float) * scale_factor
+        else:
+            lig_tfl_derivatives = pd.DataFrame(0, index=self.index, columns=self.tfl_ligands)
+            tf_tfl_derivatives = pd.DataFrame(0, index=self.index, columns=self.tfl_regulators)
 
         tf_derivatives = pd.DataFrame(
             self[self.tf_columns].values,
@@ -210,11 +220,7 @@ class BetaFrame(pd.DataFrame):
             grn_tfs = [f'beta_{t}' for t in grn_tfs]
             tf_derivatives.loc[:, ~tf_derivatives.columns.isin(grn_tfs)] = 0
 
-        tf_tfl_derivatives = pd.DataFrame(
-            tfl_betas.values * rw_ligands_tfl[self.tfl_ligands].values,
-            index=self.index,
-            columns=self.tfl_regulators
-        ).astype(float) * scale_factor
+       
 
         _df = pd.concat(
             [
@@ -224,7 +230,6 @@ class BetaFrame(pd.DataFrame):
                 tf_derivatives,
                 tf_tfl_derivatives
             ], axis=1).groupby(level=0, axis=1).sum()
-            # ], axis=1).groupby(level=0).sum()
                 
         
         if beta_cap is not None:
@@ -260,7 +265,9 @@ class Betabase:
         obs_names=None,
         genes=None,
         randomize=False,
-        auto_load=True):
+        auto_load=True,
+        zero_low_betas=False,
+        ):
         
         assert os.path.exists(folder), f'Folder {folder} does not exist'
         # self.adata = adata
@@ -275,7 +282,7 @@ class Betabase:
         )
         self.gene_subset = gene_subset
         self.obs = adata.obs.copy()
-        self.beta_paths = glob.glob(f'{self.folder}/*_betadata.parquet')
+        self.beta_paths = glob.glob(f'{self.folder}/*_betadata.*')
         
         if genes is not None:
             self.beta_paths = [path for path in self.beta_paths if any(gene in path for gene in genes)]
@@ -290,7 +297,8 @@ class Betabase:
         self.tfs_set = set()
         self.float16 = float16
         self.randomize = randomize
-        
+        self.zero_low_betas = zero_low_betas
+
         if auto_load:
             self.load_betas_from_disk(obs_names=obs_names)
 
@@ -299,7 +307,6 @@ class Betabase:
     
     def __getitem__(self, gene_name):
         return self.data.get(gene_name, None)
-    
     
     def collect_interactions(self, cell_type, annot='cell_type', aggregate='mean'):
         assert cell_type in self.obs[annot].unique()
@@ -319,8 +326,12 @@ class Betabase:
         )   
         
         for j, f in enumerate(self.beta_paths):
-            gene_name = f.split('/')[-1].replace('_betadata.parquet', '')
-            beta = pd.read_parquet(f)
+            if f.endswith('.parquet'):
+                gene_name = f.split('/')[-1].replace('_betadata.parquet', '')
+                beta = pd.read_parquet(f)
+            elif f.endswith('.feather'):
+                gene_name = f.split('/')[-1].replace('_betadata.feather', '')
+                beta = pd.read_feather(f)
             beta = beta.join(self.obs[annot]).query(f'{annot}==@cell_type').drop(columns=[annot])
 
             if aggregate == 'mean':
@@ -372,7 +383,12 @@ class Betabase:
         
 
     def load_betadata(self, gene_name):
-        return BetaFrame.from_path(f'{self.folder}/{gene_name}_betadata.parquet')
+        if os.path.exists(f'{self.folder}/{gene_name}_betadata.parquet'):
+            return BetaFrame.from_path(f'{self.folder}/{gene_name}_betadata.parquet')
+        elif os.path.exists(f'{self.folder}/{gene_name}_betadata.feather'):
+            return BetaFrame.from_path(f'{self.folder}/{gene_name}_betadata.feather')
+        else:
+            raise FileNotFoundError(f'No betadata found for gene {gene_name}')
 
     def load_betas_from_disk(self, obs_names=None):
         "obs_names are the str cell index from adata.obs_names"
@@ -392,7 +408,7 @@ class Betabase:
                 continue
 
             self.data[gene_name] = BetaFrame.from_path(
-                path, obs_names=obs_names, randomize=self.randomize)
+                path, obs_names=obs_names, randomize=self.randomize, zero_low_betas=self.zero_low_betas)
             
             self.ligands_set.update(self.data[gene_name]._ligands)
             self.tfl_ligands_set.update(self.data[gene_name]._tfl_ligands)

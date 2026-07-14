@@ -140,9 +140,14 @@ def velovect(axes, x, y, u, v, linewidth=None, color=None,
     u = np.ma.masked_invalid(u)
     v = np.ma.masked_invalid(v)
     magnitude = np.sqrt(u**2 + v**2)
-    magnitude/=np.max(magnitude)
-	
-    resolution = scale/grains
+    mag_max = float(np.nanmax(np.asarray(np.ma.filled(magnitude, 0.0))))
+    if mag_max > 0:
+        magnitude = magnitude / mag_max
+
+    # grains=1 yields a single seed at a domain corner; streamlines often fail there.
+    grains = max(int(grains), 2)
+
+    resolution = scale / grains
     minlength = 1*resolution
     integrate = get_integrator(u, v, dmap, minlength, resolution, magnitude)
 

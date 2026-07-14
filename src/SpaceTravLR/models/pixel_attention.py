@@ -1,7 +1,7 @@
 import pyro
 import torch.nn.functional as F
 from torch.nn.modules.conv import _ConvNd
-from torch.nn.modules.utils import _pair
+from torch.nn.modules.utils import _pair, _triple
 from torch.nn.parameter import Parameter
 import torch.nn as nn
 import numpy as np
@@ -21,6 +21,21 @@ device = torch.device(
 )
 
 use_conditional_conv = device == 'gpu'
+
+
+def _nd_layers(ndim):
+    """
+    Returns the (Conv, BatchNorm, MaxPool, AdaptiveAvgPool) module classes for
+    the requested number of spatial dimensions.
+
+    ndim=2 -> spatial maps are an m x n grid (Conv2d family)
+    ndim=3 -> spatial maps are an m x n x o grid (Conv3d family)
+    """
+    assert ndim in (2, 3), f'ndim must be 2 or 3, got {ndim}'
+    if ndim == 2:
+        return nn.Conv2d, nn.BatchNorm2d, nn.MaxPool2d, nn.AdaptiveAvgPool2d
+    return nn.Conv3d, nn.BatchNorm3d, nn.MaxPool3d, nn.AdaptiveAvgPool3d
+
 
 class _cluster_routing(nn.Module):
 
@@ -45,20 +60,32 @@ class _cluster_routing(nn.Module):
     #     x = self.dropout(x)
     #     return F.sigmoid(x)
     
-class ConditionalConv2D(_ConvNd):
+class ConditionalConvNd(_ConvNd):
+    """
+    Conditional convolution that picks a kernel from a bank of `num_experts`
+    kernels based on a per-sample routing function. Works for either an
+    m x n grid (ndim=2) or an m x n x o grid (ndim=3).
+    """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros', num_experts=5, dropout_rate=0.1):
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        super(ConditionalConv2D, self).__init__(
-            in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _pair(0), groups, bias, padding_mode)
+                 bias=True, padding_mode='zeros', num_experts=5, dropout_rate=0.1, ndim=2):
+        assert ndim in (2, 3), f'ndim must be 2 or 3, got {ndim}'
+        self.ndim = ndim
+        _tuple = _pair if ndim == 2 else _triple
 
-        self._avg_pooling = functools.partial(F.adaptive_avg_pool2d, output_size=(2, 2))
-        pool_emb = torch.mul(*self._avg_pooling.keywords['output_size']) * in_channels
+        kernel_size = _tuple(kernel_size)
+        stride = _tuple(stride)
+        padding = _tuple(padding)
+        dilation = _tuple(dilation)
+        super(ConditionalConvNd, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            False, _tuple(0), groups, bias, padding_mode)
+
+        pool_output_size = (2,) * ndim
+        self._avg_pooling = functools.partial(
+            F.adaptive_avg_pool3d if ndim == 3 else F.adaptive_avg_pool2d,
+            output_size=pool_output_size)
+        pool_emb = int(np.prod(pool_output_size)) * in_channels
         
         self._routing_fn = _cluster_routing(
             num_clusters=in_channels,
@@ -73,11 +100,13 @@ class ConditionalConv2D(_ConvNd):
         self.reset_parameters()
 
     def _conv_forward(self, input, weight):
+        conv_fn = F.conv3d if self.ndim == 3 else F.conv2d
+        _zero_tuple = _triple(0) if self.ndim == 3 else _pair(0)
         if self.padding_mode != 'zeros':
-            return F.conv2d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
+            return conv_fn(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
                             weight, self.bias, self.stride,
-                            _pair(0), self.dilation, self.groups)
-        return F.conv2d(input, weight, self.bias, self.stride,
+                            _zero_tuple, self.dilation, self.groups)
+        return conv_fn(input, weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
     
 
@@ -97,48 +126,61 @@ class ConditionalConv2D(_ConvNd):
             out = self._conv_forward(inputx.unsqueeze(0), kernel)
             res.append(out)
 
-
-        # for inputx, label in zip(inputs, input_labels):
-        #     inputx = inputx.unsqueeze(0)
-        #     pooled_inputs = self._avg_pooling(inputx)
-        #     routing_weights = self._routing_fn(pooled_inputs, label)
-        #     kernels = torch.sum(routing_weights[:, None, None, None, None] * self.weight, 0)
-        #     out = self._conv_forward(inputx, kernels)
-        #     res.append(out)
-        
         return torch.cat(res, dim=0)
+
+
+class ConditionalConv2D(ConditionalConvNd):
+    """2D (m x n grid) conditional convolution. Kept for backward compatibility."""
+    def __init__(self, *args, **kwargs):
+        kwargs['ndim'] = 2
+        super().__init__(*args, **kwargs)
+
+
+class ConditionalConv3D(ConditionalConvNd):
+    """3D (m x n x o grid) conditional convolution."""
+    def __init__(self, *args, **kwargs):
+        kwargs['ndim'] = 3
+        super().__init__(*args, **kwargs)
+    
+class SigmoidX2(nn.Module):
+    def forward(self, x):
+        return torch.sigmoid(x) * 2
     
 class NicheAttentionNetwork(nn.Module):
      
-    def __init__(self, n_regulators, in_channels, spatial_dim):
+    def __init__(self, n_regulators, in_channels, spatial_dim, ndim=2):
         super().__init__()
+        assert ndim in (2, 3), f'ndim must be 2 or 3, got {ndim}'
         self.in_channels = in_channels
         self.out_channels = in_channels
         self.spatial_dim = spatial_dim
+        self.ndim = ndim
         self.dim = n_regulators+1
+
+        ConvNd, _, MaxPoolNd, AdaptiveAvgPoolNd = _nd_layers(ndim)
         
         # if use_conditional_conv:
-        #     self.conditional_conv = ConditionalConv2D(
-        #         self.in_channels, self.in_channels, 1, num_experts=self.in_channels)
+        #     self.conditional_conv = ConditionalConvNd(
+        #         self.in_channels, self.in_channels, 1, num_experts=self.in_channels, ndim=ndim)
         
-        self.conditional_conv = nn.Conv2d(self.in_channels, self.in_channels, 1)
+        self.conditional_conv = ConvNd(self.in_channels, self.in_channels, 1)
 
         self.sigmoid = nn.Sigmoid()
 
         self.conv_layers = nn.Sequential(
-            weight_norm(nn.Conv2d(in_channels, 32, kernel_size=3, padding='same')),
+            weight_norm(ConvNd(in_channels, 32, kernel_size=3, padding='same')),
             nn.PReLU(init=0.1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            MaxPoolNd(kernel_size=2, stride=2),
             
-            weight_norm(nn.Conv2d(32, 64, kernel_size=3, padding='same')),
+            weight_norm(ConvNd(32, 64, kernel_size=3, padding='same')),
             nn.PReLU(init=0.1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            MaxPoolNd(kernel_size=2, stride=2),
 
-            weight_norm(nn.Conv2d(64, 128, kernel_size=3, padding='same')),
+            weight_norm(ConvNd(64, 128, kernel_size=3, padding='same')),
             nn.PReLU(init=0.1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            MaxPoolNd(kernel_size=2, stride=2),
             
-            nn.AdaptiveAvgPool2d(1),
+            AdaptiveAvgPoolNd(1),
             nn.Flatten()
         )
 
@@ -171,40 +213,46 @@ class NicheAttentionNetwork(nn.Module):
 ##Live Model
 class CellularNicheNetwork(nn.Module):
 
-    @staticmethod
-    def make_vision_model(input_channels=1, out_dim=64, kernel_size=3):
+    # Class-level default grid dimensionality (2 -> m x n, 3 -> m x n x o).
+    # ndim = 2
+
+    @classmethod
+    def make_vision_model(cls, input_channels=1, out_dim=64, kernel_size=3, ndim=2):
+        ConvNd, BatchNormNd, MaxPoolNd, AdaptiveAvgPoolNd = _nd_layers(ndim)
 
         return nn.Sequential(
-            weight_norm(nn.Conv2d(input_channels, 16, kernel_size=kernel_size, padding='same')),
-            nn.BatchNorm2d(16),
+            weight_norm(ConvNd(input_channels, 16, kernel_size=kernel_size, padding='same')),
+            BatchNormNd(16),
             nn.PReLU(init=0.1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            MaxPoolNd(kernel_size=2, stride=2),
             
-            weight_norm(nn.Conv2d(16, 32, kernel_size=kernel_size, padding='same')),
-            nn.BatchNorm2d(32),
+            weight_norm(ConvNd(16, 32, kernel_size=kernel_size, padding='same')),
+            BatchNormNd(32),
             nn.PReLU(init=0.1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            MaxPoolNd(kernel_size=2, stride=2),
 
-            weight_norm(nn.Conv2d(32, out_dim, kernel_size=kernel_size, padding='same')),
-            nn.BatchNorm2d(out_dim),
+            weight_norm(ConvNd(32, out_dim, kernel_size=kernel_size, padding='same')),
+            BatchNormNd(out_dim),
             nn.PReLU(init=0.1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            MaxPoolNd(kernel_size=2, stride=2),
             
-            nn.AdaptiveAvgPool2d(1),
+            AdaptiveAvgPoolNd(1),
             nn.Flatten()
         )
     
     @classmethod
-    def from_pretrained(cls, trained_model, n_modulators, anchors=None, spatial_dim=64, n_clusters=7):
-        cnn = cls.make_vision_model()
+    def from_pretrained(cls, trained_model, n_modulators, anchors=None, spatial_dim=64, n_clusters=7, ndim=2):
+        cnn = cls.make_vision_model(ndim=ndim)
         cnn.load_state_dict(trained_model.conv_layers.state_dict())
-        model = cls(n_modulators, anchors, spatial_dim, n_clusters)
+        model = cls(n_modulators, anchors, spatial_dim, n_clusters, ndim=ndim)
         model.conv_layers = cnn
         return model
 
      
-    def __init__(self, n_modulators, anchors=None, spatial_dim=64, n_clusters=7):
+    def __init__(self, n_modulators, anchors=None, spatial_dim=64, n_clusters=7, activation='identity', ndim=2):
         super().__init__()
+        assert ndim in (2, 3), f'ndim must be 2 or 3, got {ndim}'
+        self.ndim = ndim
         self.in_channels = 1
         self.out_channels = 1
         self.spatial_dim = spatial_dim
@@ -212,13 +260,13 @@ class CellularNicheNetwork(nn.Module):
         if anchors is None:
             anchors = np.ones(self.dim)
 
-        self.anchors = torch.from_numpy(anchors).float().to(device)
+        self.register_buffer('anchors', torch.from_numpy(anchors).float())
 
         # self.anchors = torch.nn.Parameter(self.anchors, requires_grad=True)
         # self.conditional_conv = nn.Conv2d(self.in_channels, self.in_channels, 1)
         # self.sigmoid = nn.Sigmoid()
 
-        self.conv_layers = self.make_vision_model(input_channels=self.in_channels)
+        self.conv_layers = self.make_vision_model(input_channels=self.in_channels, ndim=ndim)
 
         self.spatial_features_mlp = nn.Sequential(
             nn.Linear(n_clusters, 16),
@@ -234,8 +282,21 @@ class CellularNicheNetwork(nn.Module):
             nn.Linear(64, self.dim)
         )
 
-        # self.output_activation = nn.Tanh()
-        self.output_activation = nn.Sigmoid()
+        if activation == 'identity':
+            self.output_activation = nn.Identity()
+        elif activation == 'tanh':
+            self.output_activation = nn.Tanh()
+        elif activation == 'sigmoid':
+            self.output_activation = nn.Sigmoid()
+        elif activation == 'gelu':
+            self.output_activation = nn.GELU()
+        elif activation == 'softplus':
+            self.output_activation = nn.Softplus()
+        elif activation == 'sigmoidx2':
+            self.output_activation = SigmoidX2()
+        else:
+            print('Unknown activation. Using default sigmoidx2')
+            self.output_activation = SigmoidX2()
         # self.output_activation = nn.GELU()
         # self.output_activation = nn.Identity()
         # self.output_activation = nn.Softplus()
@@ -246,6 +307,7 @@ class CellularNicheNetwork(nn.Module):
         sp_out = self.spatial_features_mlp(spatial_features)
         out = out+sp_out
         betas = self.mlp(out)
+
         betas = self.output_activation(betas)
 
         return betas*self.anchors
@@ -284,13 +346,7 @@ class CellularViT(nn.Module):
         if anchors is None:
             anchors = np.ones(self.dim)
 
-        self.anchors = torch.from_numpy(anchors).float().to(device)
-        
-        self.dim = n_modulators+1
-        if anchors is None:
-            anchors = np.ones(self.dim)
-
-        self.anchors = torch.from_numpy(anchors).float().to(device)
+        self.register_buffer('anchors', torch.from_numpy(anchors).float())
         
         self.in_channels = in_channels
         self.spatial_dim = spatial_dim

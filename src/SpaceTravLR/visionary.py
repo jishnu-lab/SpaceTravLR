@@ -58,12 +58,19 @@ class Visionary(GeneFactory):
 
     def reformat(self):
         # Create cell_thresholds for test adata
-        cell_thresholds = self.ref_adata.uns['cell_thresholds'].loc[
-            self.matching['reference_cell']
-        ]
-        self.adata.uns['cell_thresholds'] = cell_thresholds.set_index(
-            pd.Index(self.adata.obs.index)
-        )
+        if 'cell_thresholds' in self.ref_adata.uns.keys():
+            
+            cell_thresholds = self.ref_adata.uns['cell_thresholds'].loc[
+                self.matching['reference_cell']
+            ]
+            self.adata.uns['cell_thresholds'] = cell_thresholds.set_index(
+                pd.Index(self.adata.obs.index)
+            )
+        else:
+            self.adata.uns['cell_thresholds'] = pd.DataFrame(
+                index=self.adata.obs_names, 
+                columns=self.adata.var_names
+            ).fillna(1)
     
     def compute_betas(self, subsample=None, float16=True):
 
@@ -74,6 +81,7 @@ class Visionary(GeneFactory):
                         .set_index(pd.Index(self.adata.obs.index))
             for k, v in self.beta_dict.data.items()
         }
+        self.obs_names = self.adata.obs_names
 
     @staticmethod
     def load_betadata(gene, save_dir, matching):
@@ -127,12 +135,15 @@ class CyberBoss(Visionary):
         with open(ref_json_path, 'r') as f:
             params = json.load(f)
 
-        GeneFactory.__init__(self, adata=test_adata, 
-                         models_dir=params['save_dir'], 
-                         annot=params['annot'], 
-                         radius=params['radius'], 
-                         contact_distance=params['contact_distance'])
-    
+        GeneFactory.__init__(
+            self, adata=test_adata, 
+            models_dir=params['save_dir'], 
+            annot=params['annot'], 
+            radius=params['radius'], 
+            contact_distance=params['contact_distance']
+        )
+
+        self.adata = test_adata
         self.ref_adata = ref_adata
         self.matching = prematching.reindex(self.adata.obs.index, axis=0)
         self.adata.obs['reference_centroid'] = self.matching['nn_0']
@@ -142,10 +153,11 @@ class CyberBoss(Visionary):
 
     def compute_betas(self, subsample=None, float16=False):
         GeneFactory.compute_betas(
-            self,
+            self, 
             subsample=subsample, 
-            float16=float16, 
-            obs_names=self.ref_adata.obs_names)
+            float16=float16,
+            obs_names=self.ref_adata.obs_names
+        )
 
         # Take the median of all reference cell betas for each spot in test adata
         manager = enlighten.get_manager()
@@ -160,8 +172,6 @@ class CyberBoss(Visionary):
         test_beta_dict_data = {}
 
         for target_gene, betadata in self.beta_dict.data.items():
-            betadata = self.beta_dict.data[target_gene]
-
             # df = self.matching.apply(lambda row: betadata.loc[row].median(axis=0), axis=1)
             df = self.matching.apply(lambda row: betadata.loc[row].mean(axis=0), axis=1)
 
@@ -177,21 +187,27 @@ class CyberBoss(Visionary):
             pbar.update()
 
         self.beta_dict.data = test_beta_dict_data
+        self.obs_names = self.adata.obs_names
 
     
     def reformat(self):
         # Create cell_thresholds for test adata
         test_thresholds = []
-        ref_thresholds = self.ref_adata.uns['cell_thresholds']
 
-        # for test_cell, row in self.matching.iterrows():
-        #     test_thresholds.append(
-        #         ref_thresholds.loc[self.matching.loc[test_cell]].sum(axis=0) 
-        #     )
-        test_thresholds = ref_thresholds.loc[self.matching.values.flatten()].groupby(level=0).sum()
-        
+        if 'cell_thresholds' in self.ref_adata.uns.keys():
+            ref_thresholds = self.ref_adata.uns['cell_thresholds']
 
-        test_thresholds = pd.DataFrame(test_thresholds, index=self.matching.index)
-        test_thresholds.columns = ref_thresholds.columns
-        test_thresholds.index.name = 'test_cell'
-        self.adata.uns['cell_thresholds'] = test_thresholds
+
+            # for test_cell, row in self.matching.iterrows():
+            #     test_thresholds.append(
+            #         ref_thresholds.loc[self.matching.loc[test_cell]].sum(axis=0) 
+            #     )
+            test_thresholds = ref_thresholds.loc[self.matching.values.flatten()].groupby(level=0).sum()
+            
+
+            test_thresholds = pd.DataFrame(test_thresholds, index=self.matching.index)
+            test_thresholds.columns = ref_thresholds.columns
+            test_thresholds.index.name = 'test_cell'
+            self.adata.uns['cell_thresholds'] = test_thresholds
+        else:
+            self.adata.uns['cell_thresholds'] = None

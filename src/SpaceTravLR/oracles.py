@@ -10,6 +10,7 @@ from tqdm import tqdm
 import os
 import datetime
 import re
+import gc
 import glob
 import pickle
 import io
@@ -23,7 +24,7 @@ from sklearn.neighbors import NearestNeighbors
 from .tools.network import DayThreeRegulatoryNetwork
 from .tools.knn_smooth import knn_smoothing
 from .tools.utils import deprecated
-from .models.spatial_map import xyc2spatial, xyc2spatial_fast
+from .models.spatial_map import xyc2spatial, xyc2spatial_fast, xyc2spatial_3d
 from .models.parallel_estimators import SpatialCellularProgramsEstimator
 
 from .tools.utils import (
@@ -42,13 +43,14 @@ warnings.filterwarnings("ignore")
 class CPU_Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
         if module == 'torch.storage' and name == '_load_from_bytes':
-            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+            from .models.parallel_estimators import device as best_device
+            return lambda b: torch.load(io.BytesIO(b), map_location=best_device)
         else:
             return super().find_class(module, name)
 
 class BaseTravLR(ABC):
     
-    def __init__(self, adata, fields_to_keep=['cell_type', 'cell_type_int', 'cell_thresholds']):
+    def __init__(self, adata, fields_to_keep=['cell_type', 'cell_type_int', 'cell_thresholds', 'received_ligands', 'received_ligands_tfl']):
         assert 'normalized_count' in adata.layers
         
         self.settings = EasyDict()
@@ -86,7 +88,7 @@ class BaseTravLR(ABC):
         import warnings
         import enlighten
         warnings.filterwarnings("ignore")
-        
+
         X = _adata_to_matrix(adata, layer)
         X = X.T
         X = pd.DataFrame(X, columns=adata.var_names, index=adata.obs_names)
@@ -101,11 +103,20 @@ class BaseTravLR(ABC):
         )
 
         for cell_type in adata.obs[annot].unique():
-            magic_operator = magic.MAGIC(verbose=0)
+            if pd.isna(cell_type):
+                mask = adata.obs[annot].isna()
+            else:
+                mask = adata.obs[annot] == cell_type
             
-            mask = adata.obs[annot] == cell_type
             X_subset = X.loc[mask]
-            X_magic_subset = magic_operator.fit_transform(X_subset, genes='all_genes')
+            
+            try:
+                magic_operator = magic.MAGIC(verbose=0)
+                X_magic_subset = magic_operator.fit_transform(X_subset, genes='all_genes')
+            except Exception as e:
+                print('cell type', cell_type, 'has', X_subset.shape[0], 'cells, skipping imputation')
+                X_magic_subset = X_subset.copy()
+            
             X_magic_list.append(X_magic_subset)
             pbar.update()
             
@@ -367,9 +378,14 @@ class SpaceTravLR(BaseTravLR):
         radius=200, 
         contact_distance=30,
         skip_clusters=None,
-        scale_factor=1):
+        scale_factor=1,
+        activation='identity',
+        extra_modulators=None,
+        extra_lr=None,
+        save_models=False
+        ):
         
-        super().__init__(adata, fields_to_keep=[annot, 'cell_thresholds'])
+        super().__init__(adata, fields_to_keep=[annot, 'cell_thresholds', 'received_ligands', 'received_ligands_tfl'])
         if grn is None:
             self.grn = DayThreeRegulatoryNetwork() # CellOracle GRN
         else: 
@@ -396,6 +412,8 @@ class SpaceTravLR(BaseTravLR):
         self.scale_factor = scale_factor
         self.activation = activation
         self.tflinks = tflinks
+        self.extra_modulators = extra_modulators
+        self.extra_lr = extra_lr
 
         self.estimator_models = {}
         self.ligands = set()
@@ -403,6 +421,12 @@ class SpaceTravLR(BaseTravLR):
         self.genes = list(self.adata.var_names)
         self.trained_genes = []
         self.skip_clusters = skip_clusters
+
+        if save_models:
+            self.model_dir = os.path.join(self.save_dir, 'models')
+            os.makedirs(self.model_dir, exist_ok=True)
+        else:
+            self.model_dir = None
         
         if not os.path.exists(self.save_dir+'/run_params.json'):
             with open(self.save_dir+'/run_params.json', 'w') as f:
@@ -422,6 +446,8 @@ class SpaceTravLR(BaseTravLR):
                     'save_dir': save_dir,
                     'n_genes': len(self.genes),
                     'scale_factor': scale_factor,
+                    'extra_modulators': extra_modulators,
+                    'extra_lr': extra_lr,
                     'activation': activation
                 }, f, indent=4)
 
@@ -466,7 +492,9 @@ class SpaceTravLR(BaseTravLR):
                 scale_factor=self.scale_factor,
                 activation=self.activation,
                 tflinks=self.tflinks,
-                receptor_thresh=self.receptor_thresh
+                receptor_thresh=self.receptor_thresh,
+                extra_modulators=self.extra_modulators,
+                extra_lr=self.extra_lr
             )
             
             estimator.test_mode = False
@@ -491,7 +519,7 @@ class SpaceTravLR(BaseTravLR):
                     learning_rate=self.learning_rate,
                     batch_size=self.batch_size,
                     pbar=train_bar,
-                    skip_clusters=self.skip_clusters
+                    skip_clusters=self.skip_clusters,
                 )
                 
                 ## filter out columns with all zeros
@@ -502,8 +530,18 @@ class SpaceTravLR(BaseTravLR):
                 else:
                     self.queue.add_orphan(gene)
 
+                if self.model_dir:
+                    pickle.dump(estimator, open(f'{self.model_dir}/{gene}.pkl', 'wb'))
+
                 self.trained_genes.append(gene)
                 self.queue.delete_lock(gene)
+
+                del estimator
+                if 'betadata' in locals():
+                    del betadata
+                
+                gc.collect()
+                torch.cuda.empty_cache()
                 
                 if self.queue.last_refresh_age() > self.queue.lock_timeout:
                     self.queue.kill_old_locks()
@@ -523,16 +561,34 @@ class SpaceTravLR(BaseTravLR):
     def imbue_adata_with_space(adata, annot='cell_type_int', 
             spatial_dim=64, in_place=False, method='fast'):
         """
-        Generate and cache 2D spatial maps for each cell location
+        Generate and cache 2D or 3D spatial maps for each cell location.
+
+        Automatically detects whether `adata.obsm['spatial']` holds 2D (x, y)
+        or 3D (x, y, z) coordinates based on its number of columns, and
+        dispatches to the appropriate spatial map generator.
         """
         clusters = np.array(adata.obs[annot])
         xy = np.array(adata.obsm['spatial'])
 
-        if method == 'fast':
+        n_spatial_dims = xy.shape[1]
+        assert n_spatial_dims in (2, 3), \
+            f"adata.obsm['spatial'] must have 2 or 3 columns, got {n_spatial_dims}"
+
+        if n_spatial_dims == 3:
+            sp_maps = xyc2spatial_3d(
+                xyzc=np.column_stack([xy, clusters]),
+                m=spatial_dim,
+                n=spatial_dim,
+                o=spatial_dim,
+                clusters=np.unique(clusters).astype(int),
+            ).astype(np.float32)
+
+        elif method == 'fast':
             sp_maps = xyc2spatial_fast(
                 xyc = np.column_stack([xy, clusters]),
                 m=spatial_dim,
                 n=spatial_dim,
+                clusters=np.unique(clusters).astype(int),
             ).astype(np.float32)
 
         else:
