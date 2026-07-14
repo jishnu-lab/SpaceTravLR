@@ -12,7 +12,7 @@ from sklearn.linear_model import ARDRegression, BayesianRidge
 from group_lasso import GroupLasso
 from SpaceTravLR.models.spatial_map import xyc2spatial_fast, xyc2spatial_3d
 from SpaceTravLR.tools.network import RegulatoryFactory, expand_paired_interactions
-from .pixel_attention import CellularNicheNetwork, CellularViT, CellularNicheNetwork3D
+from .pixel_attention import CellularNicheNetwork, CellularViT
 from ..tools.utils import gaussian_kernel_2d, is_mouse_data, set_seed
 from ..tools.network import get_cellchat_db
 from scipy.spatial.distance import cdist
@@ -185,13 +185,6 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
 def init_received_ligands(adata, radius, cell_threshes=None, contact_distance=50, scale_factor=100, layer='imputed_count', extra_lr=None):
     species = 'mouse' if is_mouse_data(adata) else 'human'
 
-    # df_ligrec = ct.pp.ligand_receptor_database(
-    #     database='CellChat', 
-    #     species=species, 
-    #     signaling_type=None
-    # ) 
-    # df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
-    
     df_ligrec = get_cellchat_db(species)
 
     lr = expand_paired_interactions(df_ligrec)
@@ -367,14 +360,6 @@ def init_ligands_and_receptors(
     
     
     ligand_mixtures = edict()
-    
-    # df_ligrec = ct.pp.ligand_receptor_database(
-    #         database='CellChat', 
-    #         species=species, 
-    #         signaling_type=None
-    #     )
-        
-    # df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
     
     df_ligrec = get_cellchat_db(species)
     
@@ -733,14 +718,10 @@ class SpatialCellularProgramsEstimator:
         counts_df = adata.to_df(layer=layer)
         cell_thresholds = adata.uns.get('cell_thresholds', None)
 
-        # if cell_thresholds is None:
-        #     print('warning: cell_thresholds not found in adata.uns')
-
         return counts_df, cell_thresholds
     
     @torch.no_grad()
     def predict(self, cluster, adata, batch_size=512):
-        # sp_maps, X, y, cluster_labels = self.init_data(adata)
         mask = self.cluster_labels == cluster
         X_cell, y_cell = self.Xn[mask], self.yn[mask]
 
@@ -869,12 +850,6 @@ class SpatialCellularProgramsEstimator:
             index=self.spatial_features.index
         )
         
-        # low_std = self.train_df.join(
-        #     adata.obs['cell_type_int']
-        # ).groupby('cell_type_int').std().max(0) < 1e-8
-        # low_std = low_std.loc[self.train_df.columns]
-        
-        # self.train_df = self.train_df.loc[:, ~low_std]
         self.lr_pairs = self.lr_pairs[self.lr_pairs.isin(self.train_df.columns)]
         self.tfl_pairs = [i for i in self.tfl_pairs if i in self.train_df.columns]
         
@@ -1054,24 +1029,21 @@ class SpatialCellularProgramsEstimator:
                 
             self.scores[cluster] = r2
             
+            if isinstance(self, SpatialCellularProgramsEstimator3D):
+                n_dim = 3 
+            else:
+                n_dim = 2
+            
             if r2 < 0.15:
-                if isinstance(self, SpatialCellularProgramsEstimator3D):
-                    _model = CellularNicheNetwork3D(
-                        n_modulators = len(self.modulators), 
-                        anchors=_betas*0,
-                        spatial_dim=self.spatial_dim,
-                        n_clusters=self.n_clusters,
-                        activation=self.activation
-                    ).to(self.device)
-                else:
-                    _model = CellularNicheNetwork(
-                        n_modulators = len(self.modulators), 
-                        anchors=_betas*0,
-                        spatial_dim=self.spatial_dim,
-                        n_clusters=self.n_clusters,
-                        activation=self.activation
-                    ).to(self.device)
-                
+                _model = CellularNicheNetwork(
+                    n_modulators = len(self.modulators), 
+                    anchors=_betas*0,
+                    spatial_dim=self.spatial_dim,
+                    n_clusters=self.n_clusters,
+                    activation=self.activation,
+                    ndim=n_dim
+                ).to(self.device)
+
                 self.models[cluster] = _model
                 
                 print(f'{cluster}: x.xxx* | {r2:.4f}')
@@ -1095,22 +1067,15 @@ class SpatialCellularProgramsEstimator:
             assert _betas.shape[0] == len(self.modulators)+1
             
             if self.vision_model == 'cnn':
-                if isinstance(self, SpatialCellularProgramsEstimator3D):
-                    model = CellularNicheNetwork3D(
-                            n_modulators = len(self.modulators), 
-                            anchors=_betas,
-                            spatial_dim=self.spatial_dim,
-                            n_clusters=self.n_clusters, 
-                            activation=self.activation
-                        ).to(self.device)
-                else:
-                    model = CellularNicheNetwork(
-                            n_modulators = len(self.modulators), 
-                            anchors=_betas,
-                            spatial_dim=self.spatial_dim,
-                            n_clusters=self.n_clusters, 
-                            activation=self.activation
-                        ).to(self.device)
+            
+                model = CellularNicheNetwork(
+                    n_modulators = len(self.modulators), 
+                    anchors=_betas,
+                    spatial_dim=self.spatial_dim,
+                    n_clusters=self.n_clusters, 
+                    activation=self.activation,
+                    ndim=n_dim
+                ).to(self.device)
                 
             elif self.vision_model == 'transformer':
                 model = CellularViT(
@@ -1195,13 +1160,13 @@ class SpatialCellularProgramsEstimator:
             for cluster, model_state in state['models'].items():
                 if model_state is not None:
                     if getattr(self, 'vision_model', 'cnn') == 'cnn':
-                        model_cls = CellularNicheNetwork3D if is_3d else CellularNicheNetwork
-                        model = model_cls(
+                        model = CellularNicheNetwork(
                             n_modulators=len(self.modulators),
                             anchors=None, 
                             spatial_dim=self.spatial_dim,
                             n_clusters=self.n_clusters,
-                            activation=self.activation
+                            activation=self.activation,
+                            ndim=3 if is_3d else 2
                         ).to(self.device)
                     else:
                         model = CellularViT(

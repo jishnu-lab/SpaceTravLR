@@ -214,13 +214,10 @@ class NicheAttentionNetwork(nn.Module):
 class CellularNicheNetwork(nn.Module):
 
     # Class-level default grid dimensionality (2 -> m x n, 3 -> m x n x o).
-    # Overridden by the CellularNicheNetwork3D subclass below.
-    ndim = 2
+    # ndim = 2
 
     @classmethod
-    def make_vision_model(cls, input_channels=1, out_dim=64, kernel_size=3, ndim=None):
-        if ndim is None:
-            ndim = cls.ndim
+    def make_vision_model(cls, input_channels=1, out_dim=64, kernel_size=3, ndim=2):
         ConvNd, BatchNormNd, MaxPoolNd, AdaptiveAvgPoolNd = _nd_layers(ndim)
 
         return nn.Sequential(
@@ -244,18 +241,16 @@ class CellularNicheNetwork(nn.Module):
         )
     
     @classmethod
-    def from_pretrained(cls, trained_model, n_modulators, anchors=None, spatial_dim=64, n_clusters=7):
-        cnn = cls.make_vision_model()
+    def from_pretrained(cls, trained_model, n_modulators, anchors=None, spatial_dim=64, n_clusters=7, ndim=2):
+        cnn = cls.make_vision_model(ndim=ndim)
         cnn.load_state_dict(trained_model.conv_layers.state_dict())
-        model = cls(n_modulators, anchors, spatial_dim, n_clusters)
+        model = cls(n_modulators, anchors, spatial_dim, n_clusters, ndim=ndim)
         model.conv_layers = cnn
         return model
 
      
-    def __init__(self, n_modulators, anchors=None, spatial_dim=64, n_clusters=7, activation='identity', ndim=None):
+    def __init__(self, n_modulators, anchors=None, spatial_dim=64, n_clusters=7, activation='identity', ndim=2):
         super().__init__()
-        if ndim is None:
-            ndim = self.ndim
         assert ndim in (2, 3), f'ndim must be 2 or 3, got {ndim}'
         self.ndim = ndim
         self.in_channels = 1
@@ -432,14 +427,3 @@ class CellularViT(nn.Module):
         y_pred = self.predict_y(inputs_x, betas)
         
         return y_pred
-
-
-class CellularNicheNetwork3D(CellularNicheNetwork):
-    """
-    3D (m x n x o grid) counterpart of `CellularNicheNetwork`.
-
-    Kept as a separate class name for backward compatibility with existing
-    code/checkpoints; functionally it's identical to
-    `CellularNicheNetwork(..., ndim=3)`.
-    """
-    ndim = 3
