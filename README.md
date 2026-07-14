@@ -27,7 +27,7 @@ SpaceTravLR leverages convolutional neural networks to generate a sparse graph w
 **Note:** We ***highly*** recommend following the Rust tutorial. This section is provided for development purposes only. You can find the tutorial here: https://spacetravlr-rust.readthedocs.io/en/latest/
 
 ```bash
-uv pip install SpaceTravLR==0.1.17
+pip install SpaceTravLR==0.1.19
 ```
 
 
