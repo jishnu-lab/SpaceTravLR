@@ -1,5 +1,7 @@
 [![Tests](https://github.com/Koushul/SpaceOracle/actions/workflows/python-package-conda.yml/badge.svg?branch=main)](https://github.com/Koushul/SpaceOracle/actions/workflows/python-package-conda.yml)
 
+**Note:** We ***highly*** recommend following the Rust tutorial. This repo is provided for development purposes only. You can find the tutorial here: https://spacetravlr-rust.readthedocs.io/en/latest/
+
 # Why SpaceTravLR 🌔️ ?
 
 **SpaceTravLR** (**S**patially perturbing **T**ranscription factors, **L**igands & **R**eceptors)
@@ -24,7 +26,7 @@ SpaceTravLR leverages convolutional neural networks to generate a sparse graph w
 
 ##  Quick start
 
-**Note:** We ***highly*** recommend following the Rust tutorial. This section is provided for development purposes only. You can find the tutorial here: https://spacetravlr-rust.readthedocs.io/en/latest/
+**Note:** Again, we ***highly*** recommend following the Rust tutorial. This repo is provided for development purposes only.
 
 ```bash
 pip install SpaceTravLR==0.1.19
