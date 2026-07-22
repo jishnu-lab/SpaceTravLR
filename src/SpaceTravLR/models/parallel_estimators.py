@@ -992,7 +992,7 @@ class SpatialCellularProgramsEstimator:
         for cluster in np.unique(self.cluster_labels):
             if int(cluster) in skip_clusters:
                 if use_pbar:
-                    pbar.update(num_epochs*len(self.cell_indices[cluster_labels == cluster]))
+                    pbar.update(num_epochs*len(self.cell_indices[self.cluster_labels == cluster]))
                 continue
             
             mask = self.cluster_labels == cluster
