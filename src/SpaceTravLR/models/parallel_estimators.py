@@ -16,6 +16,7 @@ from .pixel_attention import CellularNicheNetwork, CellularViT
 from ..tools.utils import gaussian_kernel_2d, is_mouse_data, set_seed
 from ..tools.network import get_cellchat_db
 from scipy.spatial.distance import cdist
+from scipy.spatial import cKDTree
 import numba
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
@@ -262,12 +263,28 @@ def create_spatial_features(x, y, celltypes, obs_index, celltypes_order, radius=
     else:
         coords = np.column_stack((x, y))
     unique_celltypes = celltypes_order
-    result = np.zeros((len(x), len(unique_celltypes)))
-    distances = cdist(coords, coords)
-    for i, celltype in enumerate(unique_celltypes):
-        mask = celltypes == celltype
-        neighbors = (distances <= radius)[:, mask]
-        result[:, i] = np.sum(neighbors, axis=1)
+    n = len(x)
+
+    # `cdist(coords, coords)` materializes a dense n x n distance matrix, which is
+    # 125GB at n=129,688 (Xenium-scale) even though each cell only has a handful of
+    # true neighbors within `radius` -- it OOM-kills real runs. query_pairs() finds
+    # the same <= radius relationships via a KD-tree without ever materializing the
+    # full pairwise matrix; verified to produce identical output to the cdist version
+    # (including the exact-radius boundary and self-counting) on randomized test cases.
+    celltypes = np.asarray(celltypes)
+    ct_index = {ct: j for j, ct in enumerate(unique_celltypes)}
+    onehot = np.zeros((n, len(unique_celltypes)))
+    for i, ct in enumerate(celltypes):
+        onehot[i, ct_index[ct]] = 1.0
+
+    tree = cKDTree(coords)
+    pairs = tree.query_pairs(r=radius, output_type='ndarray')
+
+    result = onehot.copy()  # distance to self is 0 <= radius, so every cell counts as its own neighbor
+    if len(pairs) > 0:
+        i_idx, j_idx = pairs[:, 0], pairs[:, 1]
+        np.add.at(result, i_idx, onehot[j_idx])
+        np.add.at(result, j_idx, onehot[i_idx])
 
     if result.shape != (len(x), len(unique_celltypes)):
         raise ValueError(f"Expected: {(len(x), len(unique_celltypes))}")
