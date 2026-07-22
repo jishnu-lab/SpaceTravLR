@@ -21,6 +21,7 @@ import sys
 import pickle
 import functools
 import time
+import warnings
 
 import jscatter
 import scanpy as sc
@@ -949,8 +950,20 @@ class SpaceShip:
         assert os.path.isdir(f'{self.outdir}/input_data'), "Input data directory not found"
         assert os.path.isfile(f'{self.outdir}/input_data/celloracle_links.pkl'), "Base links file not found"
         assert os.path.isdir(f'{self.outdir}/logs'), "Logs directory not found"
-        assert os.path.isfile('launch.py'), "Launch script not found"
-        
+        # `launch.py` is only ever read by spawn_worker() (which does
+        # `slurm.sbatch(python_path + ' launch.py')`), and nothing in setup_() generates
+        # it. Workflows that call run_spacetravlr()/the SpaceTravLR oracle directly
+        # in-process (no spawn_worker) never have this file, so a missing launch.py here
+        # doesn't mean setup is broken. Warn instead of asserting so SLURM users still
+        # get a heads-up, without failing non-SLURM workflows.
+        if not os.path.isfile('launch.py'):
+            warnings.warn(
+                "launch.py not found in the working directory. This is only needed if "
+                "you plan to submit training via spawn_worker() (SLURM); it is not "
+                "required for run_spacetravlr() or the SpaceTravLR oracle called directly.",
+                stacklevel=2,
+            )
+
         print("We're going on a trip in our favorite rocket ship 🚀️")
         
         return True
