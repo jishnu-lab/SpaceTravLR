@@ -22,7 +22,7 @@ import pickle
 import functools
 import time
 
-import jscatter
+# import jscatter
 import scanpy as sc
 import numpy as np
 import pandas as pd
@@ -190,6 +190,7 @@ class SpaceShip:
         jscatter.Scatter
             Interactive scatter plot widget.
         """
+        import jscatter
         datadf_with_umap = adata.to_df().join(adata.obs).join(
             pd.DataFrame(adata.obsm['spatial'], columns=['x', 'y'], index=adata.obs_names)
                 )

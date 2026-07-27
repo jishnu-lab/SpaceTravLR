@@ -4,7 +4,7 @@ import os
 
 setup(
     name="SpaceTravLR",
-    version="0.1.20",
+    version="0.1.21",
     description="Spatially perturbing Transcription factors, Ligands & Receptors",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
@@ -42,7 +42,6 @@ setup(
         "sphinx_tippy",
         "sphinx_autodoc_typehints",
         "numpy==1.26",
-        "jscatter"
     ],
     classifiers=[
         "Development Status :: 3 - Alpha",
