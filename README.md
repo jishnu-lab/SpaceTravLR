@@ -37,7 +37,7 @@ pip install SpaceTravLR==0.1.19
 ```bash
 uv venv
 source .venv/bin/activate
-uv sync
+uv pip install -e .
 ```
 
 

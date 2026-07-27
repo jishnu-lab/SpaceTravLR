@@ -13,7 +13,7 @@ pandas==2.2.2
 # pybedtools==0.10.0
 pysal==24.1
 # python_igraph==0.11.6
-# scanpy==1.10.2
+scanpy==1.10.2
 # scikit_learn==1.5.1
 # scipy==1.14.0
 # scipy>=1.11.0
@@ -24,7 +24,7 @@ torchvision
 pyarrow
 enlighten
 pyro-ppl
-# commot
+commot
 group-lasso
 pqdm
 magic-impute
@@ -36,7 +36,7 @@ easydict
 # scanpy>=1.10.0
 # pandas>=2.0.0
 # numpy==1.24.0
-anndata==0.12.10
+anndata
 # matplotlib>=3.7.0
 sphinx
 sphinx-rtd-theme

@@ -4,8 +4,10 @@ import os
 
 setup(
     name="SpaceTravLR",
-    version="0.1.16",  
+    version="0.1.20",
     description="Spatially perturbing Transcription factors, Ligands & Receptors",
+    long_description=open("README.md", encoding="utf-8").read(),
+    long_description_content_type="text/markdown",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     python_requires=">=3.8",
