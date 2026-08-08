@@ -4,7 +4,7 @@ import os
 
 setup(
     name="SpaceTravLR",
-    version="0.1.16",  
+    version="0.1.19",  
     description="Spatially perturbing Transcription factors, Ligands & Receptors",
     packages=find_packages(where="src"),
     package_dir={"": "src"},

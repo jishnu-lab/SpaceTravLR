@@ -24,7 +24,7 @@ torchvision
 pyarrow
 enlighten
 pyro-ppl
-# commot
+commot
 group-lasso
 pqdm
 magic-impute
@@ -36,12 +36,12 @@ easydict
 # scanpy>=1.10.0
 # pandas>=2.0.0
 # numpy==1.24.0
-anndata==0.12.10
+anndata
 # matplotlib>=3.7.0
 sphinx
 sphinx-rtd-theme
 nbsphinx
-jscatter
+# jscatter
 simple_slurm
 group_lasso
 easydict

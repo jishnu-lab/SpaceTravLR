@@ -12,6 +12,7 @@ from SpaceTravLR.tools.network import expand_paired_interactions, get_cellchat_d
 from SpaceTravLR.models.parallel_estimators import get_filtered_df, received_ligands
 from SpaceTravLR.oracles import OracleQueue, BaseTravLR
 from SpaceTravLR.beta import BetaFrame, Betabase
+from SpaceTravLR.gradients import GradientTracker
 from SpaceTravLR.tools.utils import is_mouse_data
 import enlighten
 from pqdm.threads import pqdm
@@ -242,44 +243,52 @@ class GeneFactory(BaseTravLR):
         self.status.color = color
         self.status.refresh()
 
-    def _get_wbetas_dict(
-        self, 
-        betas_dict, 
-        weighted_ligands, 
-        weighted_ligands_tfl, 
-        gene_mtx, 
-        cell_thresholds):
-
-        gex_df = get_filtered_df(       # mask out receptors too
+    def _hop_inputs(self, gene_mtx, cell_thresholds):
+        """Resolve the gex frame a hop's splashes read, once per hop."""
+        return get_filtered_df(       # mask out receptors too
             counts_df=pd.DataFrame(
-                gene_mtx, 
-                index=self.obs_names, 
+                gene_mtx,
+                index=self.obs_names,
                 columns=self.adata.var_names
             ),
             cell_thresholds=cell_thresholds,
             genes=self.adata.var_names
-        )[self.adata.var_names] 
-        
+        )[self.adata.var_names]
+
+    def _grn_tfs_for(self, gene):
+        if self.co_grn_links is None:
+            return None
+
+        return self.co_grn_links.loc[
+            self.co_grn_links['source'] == gene, 'target'].values
+
+    def _get_wbetas_dict(
+        self,
+        betas_dict,
+        weighted_ligands,
+        weighted_ligands_tfl,
+        gene_mtx,
+        cell_thresholds):
+        """Every gene's derivatives for one hop, as a dict.
+
+        Holds all of them at once — on a large model this can be tens of GB.
+        :meth:`_apply_hop` computes the same thing one gene at a time and is what
+        :meth:`perturb` uses; this remains for callers that genuinely want the
+        whole mapping.
+        """
+        gex_df = self._hop_inputs(gene_mtx, cell_thresholds)
+
         self.update_status(
-            f'[{self.iter}/{self.max_iter}] | Computing Ligand interactions', 
+            f'[{self.iter}/{self.max_iter}] | Computing Ligand interactions',
             color='black_on_salmon')
-        
+
         out_dict = {}
-        
-        for i, (gene, betadata) in enumerate(betas_dict.data.items()):
 
-            if self.co_grn_links is not None:
-                grn_tfs = self.co_grn_links.loc[self.co_grn_links['source'] == gene, 'target'].values
-            else:
-                grn_tfs = None
-
+        for gene, betadata in betas_dict.data.items():
             out_dict[gene] = self._combine_gene_wbetas(
-                weighted_ligands, weighted_ligands_tfl, gex_df, betadata, grn_tfs=grn_tfs)
-            
-            if i % 250 == 0:
-                self.update_status(
-                    f'{self.current_target} | {i}/{len(betas_dict.data)} | [{self.iter}/{self.max_iter}] | Computing Ligand interactions', color='black_on_salmon')
-            
+                weighted_ligands, weighted_ligands_tfl, gex_df, betadata,
+                grn_tfs=self._grn_tfs_for(gene))
+
         self.update_status(f'Ligand interactions - Done')
 
         return out_dict
@@ -355,42 +364,108 @@ class GeneFactory(BaseTravLR):
             rw_ligands, rw_tfligands, filtered_df, betadata)
     
     
-    def _perturb_all_cells(self, gex_delta, betas_dict):
+    def _perturb_all_cells(self, gex_delta, betas_dict, tracker=None):
+        """Apply one hop from a precomputed dict of derivatives.
+
+        Kept for callers holding a :meth:`_get_wbetas_dict` mapping; :meth:`perturb`
+        uses :meth:`_apply_hop`, which does not build that dict.
+        """
         n_obs, n_genes = gex_delta.shape
         result = np.zeros((n_obs, n_genes))
         n_vars = len(self.adata.var_names)
 
+        if tracker is not None:
+            tracker.start_hop()
+
         for i, gene in enumerate(self.adata.var_names):
             if i % 250 == 0:
                 self.update_status(
-                    f'[{self.iter}/{self.max_iter}] | Perturbing 🧬️🐝️ {i+1}/{n_vars} ', 
+                    f'[{self.iter}/{self.max_iter}] | Perturbing 🧬️🐝️ {i+1}/{n_vars} ',
                     color='black_on_cyan'
                 )
-            
+
             _beta_out = betas_dict.get(gene, None)
 
             if _beta_out is not None:
                 mod_idx = self.beta_dict.data[gene].modulator_gene_indices
-                result[:, i] = np.sum(_beta_out.values * gex_delta[:, mod_idx], axis=1)
-                
+                contributions = _beta_out.values * gex_delta[:, mod_idx]
+                result[:, i] = np.sum(contributions, axis=1)
+
+                if tracker is not None:
+                    tracker.record(gene, mod_idx, contributions)
+
         assert not np.isnan(result).any(), "NaN values found in delta_simulated"
-        
+
+        return result
+
+    def _apply_hop(self, gex_delta, rw_ligands, rw_ligands_tfl, gex_df, tracker=None):
+        """One hop: splash each gene's betas and apply them, gene by gene.
+
+        Splashing and applying are fused deliberately. Done separately — build
+        every gene's derivative matrix (:meth:`_get_wbetas_dict`), then consume
+        them (:meth:`_perturb_all_cells`) — the intermediate dict holds
+        ``n_genes x n_cells x n_modulators`` at once, which on a large model can
+        dwarf the betas it is derived from. Streaming keeps exactly one small
+        matrix alive at a time, so peak memory is set by the betas alone.
+
+        With a ``tracker``, each gene's per-modulator terms are reduced to their
+        mean over the tracked cells before the block is released — see
+        :mod:`SpaceTravLR.gradients`.
+        """
+        n_obs, _ = gex_delta.shape
+        n_vars = len(self.adata.var_names)
+
+        result = np.zeros((n_obs, n_vars))
+
+        if tracker is not None:
+            tracker.start_hop()
+
+        for i, gene in enumerate(self.adata.var_names):
+            if i % 250 == 0:
+                self.update_status(
+                    f'[{self.iter}/{self.max_iter}] | Perturbing 🧬️🐝️ {i+1}/{n_vars} ',
+                    color='black_on_cyan'
+                )
+
+            betadata = self.beta_dict.data.get(gene, None)
+
+            if betadata is None:
+                continue
+
+            _beta_out = self._combine_gene_wbetas(
+                rw_ligands, rw_ligands_tfl, gex_df, betadata,
+                grn_tfs=self._grn_tfs_for(gene))
+
+            mod_idx = betadata.modulator_gene_indices
+            contributions = _beta_out.values * gex_delta[:, mod_idx]
+            result[:, i] = np.sum(contributions, axis=1)
+
+            if tracker is not None:
+                tracker.record(gene, mod_idx, contributions)
+
+            # both released here rather than accumulated across the hop
+            del _beta_out, contributions
+
+        assert not np.isnan(result).any(), 'NaN values found in delta_simulated'
+
         return result
 
     def perturb(
-        self, 
-        target, 
-        n_propagation=4, 
-        gene_expr=0, 
-        cells=None, 
+        self,
+        target,
+        n_propagation=4,
+        gene_expr=0,
+        cells=None,
         save_layer=False,
         delta_dir=None,
         track_gradients=False,
+        track_cells=None,
+        track_top_k=None,
         clip_gex=True
         ):
         """
         Simulates perturbation of a target gene and propagates the effect.
-        
+
         Parameters
         ----------
         target : str or list
@@ -405,17 +480,37 @@ class GeneFactory(BaseTravLR):
             Whether to save the result as a layer in adata, by default False.
         delta_dir : str, optional
             Directory to save delta matrices, by default None.
-            
+        track_gradients : bool, optional
+            Also return a :class:`~SpaceTravLR.gradients.GradientTrace`: how much
+            of each gene's change came through each of its modulators, at each
+            hop. Feeds :func:`SpaceTravLR.plotting.propagation.propagation_network`.
+        track_cells : list, optional
+            Positional indices of the cells the tracked gradients are averaged
+            over, by default None (every simulated cell). A localised
+            perturbation mostly reaches a small population, so a whole-tissue
+            average is dominated by cells the signal never reached — pass the
+            population you are reading out. Ignored unless ``track_gradients``.
+        track_top_k : int, optional
+            Keep only each gene's strongest ``track_top_k`` modulators per hop,
+            by default None (keep every non-zero edge).
+
         Returns
         -------
         pd.DataFrame
-            DataFrame containing the simulated gene expression.
+            DataFrame containing the simulated gene expression. If
+            ``track_gradients``, a ``(df, trace)`` tuple.
         """
-        
+
         payload_dict = {}
         output_name = None
-        gradients = {}
-        
+
+        tracker = GradientTracker(
+            self.adata.var_names,
+            cells=track_cells,
+            top_k=track_top_k,
+            label='all cells' if track_cells is None else 'selected cells',
+        ) if track_gradients else None
+
         if isinstance(target, str):
             assert isinstance(gene_expr, (int, float))
             assert target in self.adata.var_names
@@ -469,7 +564,15 @@ class GeneFactory(BaseTravLR):
 
         rw_ligands_0 = self.adata.uns.get('received_ligands')
         rw_tfligands_0 = self.adata.uns.get('received_ligands_tfl')
-        
+
+        # The cached matrices cover every cell, but this run may be restricted to
+        # a subset (load_betas(obs_names=...), the usual way to fit a large model
+        # into memory). Align them or the first np.maximum below fails on shape.
+        if rw_ligands_0 is not None and len(rw_ligands_0) != len(obs):
+            rw_ligands_0 = rw_ligands_0.loc[obs]
+        if rw_tfligands_0 is not None and len(rw_tfligands_0) != len(obs):
+            rw_tfligands_0 = rw_tfligands_0.loc[obs]
+
         if rw_ligands_0 is None or rw_tfligands_0 is None:
             rw_ligands_0 = self._compute_weighted_ligands(
                 gene_mtx, cell_thresholds, genes=self.ligands)
@@ -514,13 +617,20 @@ class GeneFactory(BaseTravLR):
         for n in range(n_propagation):
             self.iter+=1
             self.update_status(
-                f'{target} -> {gene_expr} - {n+1}/{n_propagation}', 
+                f'{target} -> {gene_expr} - {n+1}/{n_propagation}',
                 color='black_on_salmon')
 
-            # weight betas by the gene expression from the previous iteration
-            splashed_beta_dict = self._get_wbetas_dict(
-                self.beta_dict, rw_ligands_1, rw_tfligands_1, gene_mtx_1, cell_thresholds)
-            
+            # The splash reads the state at the *start* of the hop, so snapshot it
+            # before the ligand update below overwrites gene_mtx_1 / rw_ligands_1 /
+            # rw_tfligands_1. Rebinding those names further down does not mutate
+            # the objects captured here.
+            hop_gex_df = self._hop_inputs(gene_mtx_1, cell_thresholds)
+            hop_rw_ligands, hop_rw_tfligands = rw_ligands_1, rw_tfligands_1
+
+            self.update_status(
+                f'[{self.iter}/{self.max_iter}] | Computing Ligand interactions',
+                color='black_on_salmon')
+
             # get updated gene expressions
             gene_mtx_1 = gene_mtx + delta_simulated
             w_ligands_1 = self._compute_weighted_ligands(
@@ -559,23 +669,18 @@ class GeneFactory(BaseTravLR):
             # delta_simulated contains delta L, so remove and replace with wL
             delta_simulated = (delta_simulated + delta_rw_ligands - delta_ligands).values
 
-            if n == 0:
-                rw_tmp = delta_rw_ligands[[x for x in delta_rw_ligands.columns if x not in payload_dict.keys()]]
-                lig_tmp = delta_ligands[[x for x in delta_ligands.columns if x not in payload_dict.keys()]]
+#             if n == 0:
+#                 rw_tmp = delta_rw_ligands[[x for x in delta_rw_ligands.columns if x not in payload_dict.keys()]]
+#                 lig_tmp = delta_ligands[[x for x in delta_ligands.columns if x not in payload_dict.keys()]]
                 
-                if not np.allclose(rw_tmp, lig_tmp, atol=1e-3):
-                    print("most likely issue is that adata.uns['received_ligands'] was precomputed with a different radius")
-                    raise ValueError("delta_rw_ligands - delta_ligands is not zero")
+#                 if not np.allclose(rw_tmp, lig_tmp, atol=1e-3):
+#                     print("most likely issue is that adata.uns['received_ligands'] was precomputed with a different radius")
+#                     raise ValueError("delta_rw_ligands - delta_ligands is not zero")
 
-            if track_gradients:
-                _simulated, gradients_hop = self._perturb_all_cells_track(delta_simulated, splashed_beta_dict)
-                if n > 1:
-                    gradients[n] = {k: v - gradients[n-1][k] for k, v in gradients_hop.items()}
-                else:
-                    gradients[n] = gradients_hop
-            else:
-                _simulated = self._perturb_all_cells(delta_simulated, splashed_beta_dict)
-            
+            _simulated = self._apply_hop(
+                delta_simulated, hop_rw_ligands, hop_rw_tfligands, hop_gex_df,
+                tracker=tracker)
+
             delta_simulated = np.array(_simulated)
             
             # ensure values in delta_simulated match our desired KO / input
@@ -594,7 +699,7 @@ class GeneFactory(BaseTravLR):
                     gene_mtx + delta_simulated
                 )
             
-            del splashed_beta_dict
+            del hop_gex_df
             # gc.collect()
 
         gem_simulated = gene_mtx + delta_simulated
@@ -619,8 +724,9 @@ class GeneFactory(BaseTravLR):
         gex_out.index.name = output_name
             
         if track_gradients:
-            return gex_out, gradients
-        
+            return gex_out, tracker.finish(
+                target=output_name, n_propagation=n_propagation)
+
         return gex_out
     
     @staticmethod
@@ -805,28 +911,4 @@ class GeneFactory(BaseTravLR):
             file_name = f'{target}_{n_propagation}n_{suffix}'
             gex_out.to_parquet(
                 f'{save_to}/{file_name}.parquet')
-
-    def _perturb_all_cells_track(self, gex_delta, betas_dict):
-        n_obs, n_genes = gex_delta.shape
-        result = np.zeros((n_obs, n_genes))
-        n_vars = len(self.adata.var_names)
-
-        gradients = {}
-
-        for i, gene in enumerate(self.adata.var_names):
-            self.update_status(
-                f'[{self.iter}/{self.max_iter}] | Perturbing 🧬️🐝️ {i+1}/{n_vars} ', 
-                color='black_on_cyan'
-            )
-            
-            _beta_out = betas_dict.get(gene, None)
-
-            if _beta_out is not None:
-                mod_idx = self.beta_dict.data[gene].modulator_gene_indices
-                grad = _beta_out * gex_delta[:, mod_idx]
-                gradients[gene] = grad
-                result[:, i] = np.sum(grad.values, axis=1)
-                
-        assert not np.isnan(result).any(), "NaN values found in delta_simulated"
-        return result, gradients
                 

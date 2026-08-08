@@ -10,7 +10,7 @@ from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, Dataset
 from sklearn.linear_model import ARDRegression, BayesianRidge
 from group_lasso import GroupLasso
-from SpaceTravLR.models.spatial_map import xyc2spatial_fast, xyc2spatial_3d
+from SpaceTravLR.models.spatial_map import xyc2spatial_fast, xyzc2spatial_fast
 from SpaceTravLR.tools.network import RegulatoryFactory, expand_paired_interactions
 from .pixel_attention import CellularNicheNetwork, CellularViT
 from ..tools.utils import gaussian_kernel_2d, is_mouse_data, set_seed
@@ -185,6 +185,13 @@ def get_filtered_df(counts_df, cell_thresholds=None, genes=None, min_expression=
 def init_received_ligands(adata, radius, cell_threshes=None, contact_distance=50, scale_factor=100, layer='imputed_count', extra_lr=None):
     species = 'mouse' if is_mouse_data(adata) else 'human'
 
+    # df_ligrec = ct.pp.ligand_receptor_database(
+    #     database='CellChat', 
+    #     species=species, 
+    #     signaling_type=None
+    # ) 
+    # df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
+    
     df_ligrec = get_cellchat_db(species)
 
     lr = expand_paired_interactions(df_ligrec)
@@ -360,6 +367,14 @@ def init_ligands_and_receptors(
     
     
     ligand_mixtures = edict()
+    
+    # df_ligrec = ct.pp.ligand_receptor_database(
+    #         database='CellChat', 
+    #         species=species, 
+    #         signaling_type=None
+    #     )
+        
+    # df_ligrec.columns = ['ligand', 'receptor', 'pathway', 'signaling']  
     
     df_ligrec = get_cellchat_db(species)
     
@@ -600,13 +615,15 @@ class SpatialCellularProgramsEstimator:
     def load_adata_info(self, adata):
 
         self.adata = adata
+        if adata.obsm['spatial'].shape[1] == 3:
+            columns = ['x', 'y', 'c']
+        else:
+            columns = ['x', 'y']
 
-        n_spatial_dims = adata.obsm['spatial'].shape[1]
-        spatial_cols = ['x', 'y', 'z'][:n_spatial_dims]
         self.xy = pd.DataFrame(
             adata.obsm['spatial'], 
             index=adata.obs.index, 
-            columns=spatial_cols
+            columns=columns
         )
 
         sp_maps, X, y, cluster_labels = self.init_data(adata)
@@ -718,10 +735,14 @@ class SpatialCellularProgramsEstimator:
         counts_df = adata.to_df(layer=layer)
         cell_thresholds = adata.uns.get('cell_thresholds', None)
 
+        # if cell_thresholds is None:
+        #     print('warning: cell_thresholds not found in adata.uns')
+
         return counts_df, cell_thresholds
     
     @torch.no_grad()
     def predict(self, cluster, adata, batch_size=512):
+        # sp_maps, X, y, cluster_labels = self.init_data(adata)
         mask = self.cluster_labels == cluster
         X_cell, y_cell = self.Xn[mask], self.yn[mask]
 
@@ -812,6 +833,7 @@ class SpatialCellularProgramsEstimator:
                 clusters=self.celltypes_order
             )
 
+            # create empty layer where there are no celltypes
             
             adata.obsm['spatial_maps'] = self.spatial_maps
         
@@ -850,6 +872,12 @@ class SpatialCellularProgramsEstimator:
             index=self.spatial_features.index
         )
         
+        # low_std = self.train_df.join(
+        #     adata.obs['cell_type_int']
+        # ).groupby('cell_type_int').std().max(0) < 1e-8
+        # low_std = low_std.loc[self.train_df.columns]
+        
+        # self.train_df = self.train_df.loc[:, ~low_std]
         self.lr_pairs = self.lr_pairs[self.lr_pairs.isin(self.train_df.columns)]
         self.tfl_pairs = [i for i in self.tfl_pairs if i in self.train_df.columns]
         
@@ -941,12 +969,7 @@ class SpatialCellularProgramsEstimator:
 
         assert estimator in ['lasso', 'bayesian', 'ard']
         assert vision_model in ['cnn', 'transformer']
-
-        if vision_model == 'transformer' and isinstance(self, SpatialCellularProgramsEstimator3D):
-            raise NotImplementedError(
-                "vision_model='transformer' (CellularViT) does not yet support "
-                "3D (m x n x o) spatial grids. Use vision_model='cnn' for 3D estimators."
-            )
+        
 
         self.estimator = estimator
         self.vision_model = vision_model
@@ -1029,21 +1052,20 @@ class SpatialCellularProgramsEstimator:
                 
             self.scores[cluster] = r2
             
-            if isinstance(self, SpatialCellularProgramsEstimator3D):
-                n_dim = 3 
-            else:
-                n_dim = 2
-            
             if r2 < 0.15:
+                if isinstance(self, SpatialCellularProgramsEstimator3D):
+                    n_dim=3
+                else: n_dim=2
+                
                 _model = CellularNicheNetwork(
-                    n_modulators = len(self.modulators), 
-                    anchors=_betas*0,
-                    spatial_dim=self.spatial_dim,
-                    n_clusters=self.n_clusters,
-                    activation=self.activation,
-                    ndim=n_dim
-                ).to(self.device)
-
+                        n_modulators = len(self.modulators), 
+                        anchors=_betas,
+                        ndim=n_dim,
+                        spatial_dim=self.spatial_dim,
+                        n_clusters=self.n_clusters, 
+                        activation=self.activation
+                    ).to(self.device)
+                
                 self.models[cluster] = _model
                 
                 print(f'{cluster}: x.xxx* | {r2:.4f}')
@@ -1065,17 +1087,21 @@ class SpatialCellularProgramsEstimator:
             )
 
             assert _betas.shape[0] == len(self.modulators)+1
-            
+        
             if self.vision_model == 'cnn':
-            
+                
+                if isinstance(self, SpatialCellularProgramsEstimator3D):
+                    n_dim=3
+                else: n_dim=2
+                
                 model = CellularNicheNetwork(
-                    n_modulators = len(self.modulators), 
-                    anchors=_betas,
-                    spatial_dim=self.spatial_dim,
-                    n_clusters=self.n_clusters, 
-                    activation=self.activation,
-                    ndim=n_dim
-                ).to(self.device)
+                        n_modulators = len(self.modulators), 
+                        anchors=_betas,
+                        ndim=n_dim,
+                        spatial_dim=self.spatial_dim,
+                        n_clusters=self.n_clusters, 
+                        activation=self.activation
+                    ).to(self.device)
                 
             elif self.vision_model == 'transformer':
                 model = CellularViT(
@@ -1156,17 +1182,16 @@ class SpatialCellularProgramsEstimator:
         self.device = device
         if 'models' in state:
             reconstructed_models = {}
-            is_3d = isinstance(self, SpatialCellularProgramsEstimator3D)
             for cluster, model_state in state['models'].items():
                 if model_state is not None:
                     if getattr(self, 'vision_model', 'cnn') == 'cnn':
                         model = CellularNicheNetwork(
                             n_modulators=len(self.modulators),
                             anchors=None, 
+                            ndim=self.adata.shape[1],
                             spatial_dim=self.spatial_dim,
                             n_clusters=self.n_clusters,
-                            activation=self.activation,
-                            ndim=3 if is_3d else 2
+                            activation=self.activation
                         ).to(self.device)
                     else:
                         model = CellularViT(
@@ -1233,11 +1258,11 @@ class SpatialCellularProgramsEstimator3D(SpatialCellularProgramsEstimator):
         self.xy_df = pd.DataFrame(self.xy, columns=['x', 'y', 'z'], index=adata.obs.index)
 
         if not 'spatial_maps' in adata.obsm.keys():
-            self.spatial_maps = xyc2spatial_3d(
+            self.spatial_maps = xyzc2spatial_fast(
                 xyzc = np.column_stack([self.xy, cluster_labels]),
+                d=self.spatial_dim,
                 m=self.spatial_dim,
                 n=self.spatial_dim,
-                o=self.spatial_dim,
                 clusters=self.celltypes_order
             )
             adata.obsm['spatial_maps'] = self.spatial_maps

@@ -51,7 +51,7 @@ class CPU_Unpickler(pickle.Unpickler):
 class BaseTravLR(ABC):
     
     def __init__(self, adata, fields_to_keep=['cell_type', 'cell_type_int', 'cell_thresholds', 'received_ligands', 'received_ligands_tfl']):
-        assert 'normalized_count' in adata.layers
+        assert 'normalized_count' in adata.layers or 'imputed_count' in adata.layers
         
         self.settings = EasyDict()
         
